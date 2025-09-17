@@ -42,10 +42,10 @@ export class KeyhiveServerAdapter extends NetworkAdapter {
       throw new Error("peerID must be defined!")
     }
     if ("data" in message && message.data !== undefined) {
-      const seq_number = this.pending.register()
+      const seqNumber = this.pending.register()
       void signData(this.signer, this.peerId, message.data).then(
         (signedData: Uint8Array) => {
-          this.pending.fire(seq_number, () => {
+          this.pending.fire(seqNumber, () => {
             message.data = signedData
             this.networkAdapter.send(message)
           })
