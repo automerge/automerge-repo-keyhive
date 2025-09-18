@@ -1,20 +1,22 @@
 import {
-  type PeerMetadata,
-  type PeerId,
+  Message,
   NetworkAdapter,
-  type Message,
+  PeerId,
+  PeerMetadata,
 } from "@automerge/automerge-repo/slim"
-import { FromServerMessage } from "@automerge/automerge-repo-network-websocket"
-import { signData, verifyData } from "./messages.js"
-import { Pending } from "./pending.js"
 import { Signer } from "@keyhive/wasm"
 
-export class KeyhiveServerAdapter extends NetworkAdapter {
+import { signData, verifyData } from "./messages.js"
+import { Pending } from "./pending.js"
+
+export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending()
 
   constructor(
     private networkAdapter: NetworkAdapter,
     private signer: Signer,
+    // TODO: Replace with dynamic configuration
+    private hardcodedRemoteId: PeerId | null = null,
   ) {
     super()
 
@@ -37,9 +39,21 @@ export class KeyhiveServerAdapter extends NetworkAdapter {
     this.networkAdapter.connect(peerId, peerMetadata)
   }
 
-  send(message: FromServerMessage): void {
+  isReady(): boolean {
+    return this.networkAdapter.isReady()
+  }
+
+  whenReady(): Promise<void> {
+    return this.networkAdapter.whenReady()
+  }
+
+  disconnect(): void {
+    this.networkAdapter.disconnect()
+  }
+
+  send(message: Message): void {
     if (this.peerId === undefined) {
-      throw new Error("peerID must be defined!")
+      throw new Error("peerId must be defined!")
     }
     if ("data" in message && message.data !== undefined) {
       const seqNumber = this.pending.register()
@@ -56,20 +70,12 @@ export class KeyhiveServerAdapter extends NetworkAdapter {
     }
   }
 
-  isReady(): boolean {
-    return this.networkAdapter.isReady()
-  }
-
-  whenReady(): Promise<void> {
-    return this.networkAdapter.whenReady()
-  }
-
-  disconnect(): void {
-    this.networkAdapter.disconnect()
-  }
-
   receiveMessage(message: Message): void {
     try {
+      if (this.hardcodedRemoteId && message.senderId !== this.hardcodedRemoteId) {
+        console.log("Unknown remote peer. Ignoring message!")
+        return
+      }
       if ("data" in message && message.data !== undefined) {
         const maybeSigned = verifyData(message.senderId, message.data)
         if (maybeSigned) {
