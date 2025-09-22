@@ -4,7 +4,7 @@ import {
   PeerId,
   PeerMetadata,
 } from "@automerge/automerge-repo/slim"
-import { Signer } from "@keyhive/wasm"
+import { Signer } from "@keyhive/keyhive"
 
 import { signData, verifyData } from "./messages.js"
 import { Pending } from "./pending.js"

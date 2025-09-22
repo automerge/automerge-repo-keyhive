@@ -1,4 +1,4 @@
-import { Signer } from "@keyhive/wasm"
+import { Signer } from "@keyhive/keyhive"
 import { peerIdFromVerifyingKey } from "./messages.js"
 import { PeerId } from "@automerge/automerge-repo/slim"
 
