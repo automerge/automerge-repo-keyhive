@@ -1,6 +1,6 @@
 import { type PeerId } from "@automerge/automerge-repo/slim";
 
-import { Signer, Signed } from "@keyhive/keyhive";
+import { Signer, Signed } from "@keyhive/keyhive"
 
 export async function signData(
   signer: Signer,
