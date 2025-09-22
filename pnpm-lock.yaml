@@ -14,9 +14,9 @@ importers:
       '@automerge/automerge-repo-network-websocket':
         specifier: ^2.2.0
         version: 2.2.0
-      '@keyhive/wasm':
-        specifier: link:../keyhive/keyhive_wasm/pkg
-        version: link:../keyhive/keyhive_wasm/pkg
+      '@keyhive/keyhive':
+        specifier: 0.0.0-alpha.0
+        version: 0.0.0-alpha.0
     devDependencies:
       '@eslint/eslintrc':
         specifier: ^3.1.0
@@ -288,6 +288,9 @@ packages:
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
+
+  '@keyhive/keyhive@0.0.0-alpha.0':
+    resolution: {integrity: sha512-vTs7TXg4sKyDg3AhOtZkENRvfXzPAHSN6M0izyvkjtUoztuEfOWgZJpg44OkYB/S52rIqipQO7akraW+N6+M2g==}
 
   '@noble/ed25519@3.0.0':
     resolution: {integrity: sha512-QyteqMNm0GLqfa5SoYbSC3+Pvykwpn95Zgth4MFVSMKBB75ELl9tX1LAVsN4c3HXOrakHsF2gL4zWDAYCcsnzg==}
@@ -1352,6 +1355,8 @@ snapshots:
       '@sinclair/typebox': 0.27.8
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
+
+  '@keyhive/keyhive@0.0.0-alpha.0': {}
 
   '@noble/ed25519@3.0.0': {}
 

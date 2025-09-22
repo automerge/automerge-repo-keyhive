@@ -20,7 +20,7 @@
   "dependencies": {
     "@automerge/automerge-repo": "^2.2.0",
     "@automerge/automerge-repo-network-websocket": "^2.2.0",
-    "@keyhive/wasm": "link:../keyhive/keyhive_wasm/pkg"
+    "@keyhive/keyhive": "0.0.0-alpha.0"
   },
   "devDependencies": {
     "@noble/ed25519": "^3.0.0",
