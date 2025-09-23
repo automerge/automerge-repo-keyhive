@@ -115,9 +115,6 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           if (message.type === "keyhive") {
             // TODO: Extend supported events and remove `(this as any)`
             (this as any).emit("keyhive", message)
-          } else if (message.type === "request-keyhive") {
-            // TODO: Extend supported events and remove `(this as any)`
-            (this as any).emit("request-keyhive", message)
           } else {
             this.emit("message", message)
           }
@@ -125,7 +122,12 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           console.log("Signed message could not be verified!")
         }
       } else {
-        this.emit("message", message)
+        if (message.type === "request-keyhive") {
+          // TODO: Extend supported events and remove `(this as any)`
+          (this as any).emit("request-keyhive", message)
+        } else {
+          this.emit("message", message)
+        }
       }
     } catch (e) {
       console.error("Could not decode signed message:", e)
