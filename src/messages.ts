@@ -1,10 +1,10 @@
 import { type PeerId } from "@automerge/automerge-repo/slim"
 
 import { Signer, Signed } from "@keyhive/keyhive"
+import { verifyingKeyPeerIdWithoutSuffix } from "./utilities.js"
 
 export async function signData(
   signer: Signer,
-  _peerId: PeerId,
   data: Uint8Array,
 ): Promise<Uint8Array> {
   try {
@@ -22,7 +22,8 @@ export function verifyData(
   data: Uint8Array,
 ): Signed | undefined {
   const signed = Signed.fromBytes(data)
-  if (peerIdFromSigned(signed) !== peerId) {
+  const verifyingKeyPeerId = verifyingKeyPeerIdWithoutSuffix(peerId)
+  if (peerIdFromSigned(signed) !== verifyingKeyPeerId) {
     console.log("Peer id on Signed does not match provided peer id")
     console.log("Expected: " + peerId)
     console.log("Found: " + peerIdFromSigned(signed))
@@ -36,10 +37,14 @@ export function verifyData(
   }
 }
 
-function peerIdFromSigned(signed: Signed): PeerId {
-  return peerIdFromVerifyingKey(signed.verifyingKey)
+function peerIdFromSigned(signed: Signed, suffix: string = ""): PeerId {
+  return peerIdFromVerifyingKey(signed.verifyingKey, suffix)
 }
 
-export function peerIdFromVerifyingKey(verifyingKey: Uint8Array): PeerId {
-  return btoa(String.fromCharCode(...verifyingKey)) as PeerId
+export function peerIdFromVerifyingKey(verifyingKey: Uint8Array, suffix: string = ""): PeerId {
+  let peerId = btoa(String.fromCharCode(...verifyingKey))
+  if (suffix !== "") {
+    peerId = peerId + "-" + suffix
+  }
+  return peerId as PeerId
 }
