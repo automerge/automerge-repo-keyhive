@@ -89,7 +89,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       throw new Error("Data is expected for message to sign")
     }
     const seqNumber = this.pending.register()
-    void signData(this.signer, this.peerId, message.data).then(
+    void signData(this.signer, message.data).then(
       (signedData: Uint8Array) => {
         this.pending.fire(seqNumber, () => {
           message.data = signedData
