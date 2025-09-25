@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { Signer } from "@keyhive/keyhive";
+import { Signer } from "@keyhive/keyhive/slim";
 import { PeerId } from "@automerge/automerge-repo/slim";
-import { peerIdFromSigner, verifyingKeyPeerIdWithoutSuffix } from "../src/utilities.js";
+import {
+  peerIdFromSigner,
+  verifyingKeyPeerIdWithoutSuffix,
+} from "../src/utilities.js";
 import { peerIdFromVerifyingKey } from "../src/messages.js";
 
 describe("Suffix support for peerIds", () => {
@@ -45,7 +48,8 @@ describe("Suffix support for peerIds", () => {
 
   describe("verifyingKeyPeerIdWithoutSuffix", () => {
     it("should extract base peerId without suffix", () => {
-      const peerId = "8ytQQ094vxrS7a3N7Z1tA+ZRQP5yrruvK5A5fC49FMQ=-test-suffix_123" as PeerId;
+      const peerId =
+        "8ytQQ094vxrS7a3N7Z1tA+ZRQP5yrruvK5A5fC49FMQ=-test-suffix_123" as PeerId;
       const baseId = verifyingKeyPeerIdWithoutSuffix(peerId);
       expect(baseId).toBe("8ytQQ094vxrS7a3N7Z1tA+ZRQP5yrruvK5A5fC49FMQ=");
     });
