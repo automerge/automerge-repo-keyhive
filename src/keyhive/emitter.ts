@@ -7,6 +7,6 @@ export class KeyhiveEventEmitter extends EventEmitter {
   }
 
   handleKeyhiveEvent = (event: Event) => {
-    this.emit("update", { event });
+    this.emit("update", event);
   };
 }
