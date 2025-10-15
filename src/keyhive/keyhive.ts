@@ -154,7 +154,8 @@ export async function loadOrCreateKeyhive(
         }
         return kh;
       } catch (error: unknown) {
-        const jsError = (error as { toError: () => Error }).toError();
+        // @ts-ignore
+        const jsError = (error && typeof error == "object" && "toError" in error) ? error.toError() : error
         console.error("[Adapter] Failed to load Keyhive archive:", jsError);
       }
     }
