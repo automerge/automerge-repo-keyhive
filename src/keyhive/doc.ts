@@ -1,6 +1,6 @@
 import {
   Access,
-  ChangeRef,
+  ChangeId,
   ContactCard,
   Document as KeyhiveDocument,
   DocumentId as KeyhiveDocumentId,
@@ -13,13 +13,13 @@ import { AutomergeUrl, Heads } from "@automerge/automerge-repo/slim";
 import { KeyhiveNetworkAdapter } from "../network-adapter/network-adapter.js";
 
 export async function generateDoc(kh: Keyhive): Promise<KeyhiveDocument> {
-  // For now, randomly generate a ChangeRef
-  const changeRefArray = Uint8Array.from({ length: 10 }, () =>
+  // For now, randomly generate a ChangeId
+  const changeIdArray = Uint8Array.from({ length: 10 }, () =>
     Math.floor(Math.random() * 256)
   );
-  const changeRef = new ChangeRef(changeRefArray);
+  const changeId = new ChangeId(changeIdArray);
   const g = await kh.generateGroup([]);
-  const doc = await kh.generateDocument([g.toPeer()], changeRef, []);
+  const doc = await kh.generateDocument([g.toPeer()], changeId, []);
   console.debug(
     `[Adapter] Generated Keyhive document with id ${doc.doc_id.toBytes()}`
   );
