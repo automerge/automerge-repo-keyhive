@@ -25,7 +25,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     super();
 
     // Polling for keyhive updates
-    setInterval(this.requestKeyhive.bind(this), 5000);
+    setInterval(this.requestKeyhive.bind(this), 15000);
 
     networkAdapter.on("message", (msg) => {
       this.receiveMessage(msg);
@@ -45,7 +45,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       await saveKeyhiveWithHash(keyhive, storage);
       this.syncKeyhive(keyhive);
       console.debug("[Adapter] interval fired: saved and synced!");
-    }, 5000);
+    }, 10000);
   }
 
   connect(peerId: PeerId, peerMetadata?: PeerMetadata): void {
