@@ -41,11 +41,12 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       this.peers.delete(payload.peerId);
     });
 
-    setInterval(async () => {
-      await saveKeyhiveWithHash(keyhive, storage);
-      this.syncKeyhive(keyhive);
-      console.debug("[Adapter] interval fired: saved and synced!");
-    }, 10000);
+    // FIXME: Remove
+    // setInterval(async () => {
+    //   await saveKeyhiveWithHash(keyhive, storage);
+    //   this.syncKeyhive(keyhive);
+    //   console.debug("[Adapter] interval fired: saved and synced!");
+    // }, 10000);
   }
 
   connect(peerId: PeerId, peerMetadata?: PeerMetadata): void {

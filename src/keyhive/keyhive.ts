@@ -84,12 +84,17 @@ export async function initializeKeyhive(options: {
         const archive = new Archive(msg.data);
         await keyhive.ingestArchive(archive);
         // FIXME: Move to keyhive if missing there
-        emitter.emit("update");
+        emitter.emit("ingest");
         console.debug(`[Adapter] Successfully ingested archive from ${msg.senderId}`);
-        // keyhiveNetworkAdapter.send(msg)
       } catch (error) {
         console.error(`Failed to ingest archive from ${msg.senderId}:`, error)
       }
+    })
+
+    emitter.on("update", async (msg: any) => {
+      console.debug("[Adapter] Keyhive updated. Saving and syncing.");
+      await saveKeyhiveWithHash(keyhive, options.storage);
+      keyhiveNetworkAdapter.syncKeyhive(keyhive);
     })
   }
 
