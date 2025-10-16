@@ -122,9 +122,11 @@ export async function saveKeyhiveWithHash(
   const khBytes = (await kh.toArchive()).toBytes();
   // const hash = await crypto.subtle.digest("SHA-256", new Uint8Array(khBytes));
   // const hash = await crypto.subtle.digest("SHA-256", uniqueId);
+  const hash = uint8ArrayToHex(uniqueId);
+  console.debug(`[Adapter] Saving keyhive archive. Hash: ${hash}`);
   await db.save(
     // [KEYHIVE_DB_KEY, KEYHIVE_ARCHIVES_KEY, uint8ArrayToHex(new Uint8Array(hash))],
-    [KEYHIVE_DB_KEY, KEYHIVE_ARCHIVES_KEY, uint8ArrayToHex(uniqueId)],
+    [KEYHIVE_DB_KEY, KEYHIVE_ARCHIVES_KEY, hash],
     khBytes
   );
 }
@@ -167,12 +169,12 @@ export async function loadOrCreateKeyhive(
         console.log("[Adapter] Attempting to load Keyhive archive");
         let store = CiphertextStore.newInMemory();
         const chunk_count = keyhiveArchiveChunks.length;
-        console.log(`[Adapter] Ingesting archive from storage (1 of ${chunk_count}`);
+        console.log(`[Adapter] Ingesting archive from storage (1 of ${chunk_count})`);
         const kh = await firstArchive.tryToKeyhive(store, signer, event_handler);
         for (let idx = 1; idx < keyhiveArchiveChunks.length; idx++) {
           const chunk = keyhiveArchiveChunks[idx];
           if (chunk.data) {
-            console.log(`[Adapter] Ingesting archive from storage (${idx + 1} of ${chunk_count}`);
+            console.log(`[Adapter] Ingesting archive from storage (${idx + 1} of ${chunk_count}). Hash: ${chunk.key[2]}`);
             await kh.ingestArchive(new Archive(chunk.data));
           }
         }
@@ -211,6 +213,7 @@ export async function loadOrCreateKeyhive(
 
   const store = CiphertextStore.newInMemory();
   const kh = await Keyhive.init(signer, store, event_handler);
+
   await saveKeyhiveWithHash(kh, db, uniqueIdHash);
   return kh;
 }
