@@ -169,7 +169,7 @@ export async function loadOrCreateKeyhive(
         console.log("[Adapter] Attempting to load Keyhive archive");
         let store = CiphertextStore.newInMemory();
         const chunk_count = keyhiveArchiveChunks.length;
-        console.log(`[Adapter] Ingesting archive from storage (1 of ${chunk_count})`);
+        console.log(`[Adapter] Ingesting archive from storage (1 of ${chunk_count}). Hash: ${firstChunk.key[2]}`);
         const kh = await firstArchive.tryToKeyhive(store, signer, event_handler);
         for (let idx = 1; idx < keyhiveArchiveChunks.length; idx++) {
           const chunk = keyhiveArchiveChunks[idx];
