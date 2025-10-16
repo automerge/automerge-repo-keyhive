@@ -188,6 +188,7 @@ export async function loadOrCreateKeyhive(
         const eventsBytes: Array<Uint8Array> = keyhiveEventsChunks
           .map(chunk => chunk.data)
           .filter((data): data is Uint8Array => data !== undefined);
+        console.log(`[Adapter] Ingesting ${eventsBytes.length} keyhive events from storage.`)
         const pendingKeys = (await kh.ingestEventsBytes(eventsBytes))
           .map((bytes: Uint8Array) => data_to_key.get(bytes))
           .filter((key): key is StorageKey => key !== undefined);
