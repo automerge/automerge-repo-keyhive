@@ -16,13 +16,7 @@ import { KeyhiveEventEmitter } from "./emitter.js";
 
 export const KEYHIVE_DB_KEY = "keyhive-db";
 
-
-export async function initializeKeyhive(options: {
-  storage: StorageAdapterInterface;
-  peerIdSuffix: string;
-  networkAdapter: NetworkAdapter;
-  automaticArchiveIngestion: boolean;
-}): Promise<{
+export type AutomergeRepoKeyhive = {
   active: Active;
   keyhive: Keyhive;
   peerId: PeerId;
@@ -30,7 +24,14 @@ export async function initializeKeyhive(options: {
   networkAdapter: KeyhiveNetworkAdapter;
   emitter: KeyhiveEventEmitter;
   idFactory: (heads: Heads) => Promise<Uint8Array>;
-}> {
+}
+
+export async function initializeKeyhive(options: {
+  storage: StorageAdapterInterface;
+  peerIdSuffix: string;
+  networkAdapter: NetworkAdapter;
+  automaticArchiveIngestion: boolean;
+}): Promise<AutomergeRepoKeyhive> {
   const { keyPair, signer } = await loadOrCreateSigner(options.storage);
   const emitter = new KeyhiveEventEmitter();
   const keyhive = await loadOrCreateKeyhive(
