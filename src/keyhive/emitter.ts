@@ -7,8 +7,6 @@ export class KeyhiveEventEmitter extends EventEmitter {
   }
 
   handleKeyhiveEvent = (event: Event) => {
-    const variant = event.variant;
-    this.emit("update", { type: variant.toLowerCase(), event });
-    // this.emit(variant.toLowerCase(), event);
+    this.emit("update", { event });
   };
 }

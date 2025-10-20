@@ -15,6 +15,8 @@ import { keyhiveIdFactory } from "./doc.js";
 import { KeyhiveEventEmitter } from "./emitter.js";
 
 export const KEYHIVE_DB_KEY = "keyhive-db";
+export const KEYHIVE_ARCHIVES_KEY = "/archives/";
+export const KEYHIVE_EVENTS_KEY = "/ops/";
 
 export type AutomergeRepoKeyhive = {
   active: Active;
@@ -34,9 +36,11 @@ export async function initializeKeyhive(options: {
 }): Promise<AutomergeRepoKeyhive> {
   const { keyPair, signer } = await loadOrCreateSigner(options.storage);
   const emitter = new KeyhiveEventEmitter();
+  const uniqueIdHash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(options.peerIdSuffix)));
   const keyhive = await loadOrCreateKeyhive(
     options.storage,
     signer,
+    uniqueIdHash,
     emitter.handleKeyhiveEvent,
   );
   const active = await createActive(keyPair, signer, keyhive);
@@ -85,6 +89,7 @@ export async function initializeKeyhive(options: {
         await keyhive.ingestArchive(archive);
         // FIXME: Move to keyhive if missing there
         emitter.emit("ingest");
+        await saveKeyhiveWithHash(keyhive, options.storage, uniqueIdHash);
         console.debug(`[Adapter] Successfully ingested archive from ${msg.senderId}`);
       } catch (error) {
         console.error(`Failed to ingest archive from ${msg.senderId}:`, error)
@@ -93,7 +98,7 @@ export async function initializeKeyhive(options: {
 
     emitter.on("update", async (msg: any) => {
       console.debug("[Adapter] Keyhive updated. Saving and syncing.");
-      await saveKeyhiveWithHash(keyhive, options.storage);
+      await saveKeyhiveWithHash(keyhive, options.storage, uniqueIdHash);
       keyhiveNetworkAdapter.syncKeyhive(keyhive);
     })
   }
@@ -111,15 +116,31 @@ export async function initializeKeyhive(options: {
 
 export async function saveKeyhiveWithHash(
   kh: Keyhive,
-  db: StorageAdapterInterface
+  db: StorageAdapterInterface,
+  uniqueId: Uint8Array,
 ) {
   const khBytes = (await kh.toArchive()).toBytes();
-  const hash = await crypto.subtle.digest("SHA-256", new Uint8Array(khBytes));
+  // const hash = await crypto.subtle.digest("SHA-256", new Uint8Array(khBytes));
+  // const hash = await crypto.subtle.digest("SHA-256", uniqueId);
   await db.save(
-    [KEYHIVE_DB_KEY, uint8ArrayToHex(new Uint8Array(hash))],
+    // [KEYHIVE_DB_KEY, KEYHIVE_ARCHIVES_KEY, uint8ArrayToHex(new Uint8Array(hash))],
+    [KEYHIVE_DB_KEY, KEYHIVE_ARCHIVES_KEY, uint8ArrayToHex(uniqueId)],
     khBytes
   );
 }
+
+// FIXME: Restore
+// export async function saveEventWithHash(
+//   event: Event,
+//   db: StorageAdapterInterface
+// ) {
+//   const eventBytes = event.toBytes();
+//   const hash = await crypto.subtle.digest("SHA-256", new Uint8Array(eventBytes));
+//   await db.save(
+//     [KEYHIVE_DB_KEY, KEYHIVE_EVENTS_KEY, hash],
+//     eventBytes
+//   );
+// }
 
 export type KeyhiveArchiveBytes = Uint8Array;
 
@@ -131,9 +152,12 @@ export function docIdFromAutomergeUrl(url: AutomergeUrl): KeyhiveDocumentId {
 export async function loadOrCreateKeyhive(
   db: StorageAdapterInterface,
   signer: Signer,
+  uniqueIdHash: Uint8Array,
   event_handler: (event: KeyhiveEvent) => void
 ): Promise<Keyhive> {
-  const keyhiveArchiveChunks = await db.loadRange([KEYHIVE_DB_KEY]);
+  const keyhiveArchiveChunks = await db.loadRange([KEYHIVE_DB_KEY, KEYHIVE_ARCHIVES_KEY]);
+  // FIXME: Restore
+  // const keyhiveEventsChunks = await db.loadRange([KEYHIVE_DB_KEY, KEYHIVE_EVENTS_KEY]);
   if (keyhiveArchiveChunks.length > 0) {
     const firstChunk = keyhiveArchiveChunks[0];
     // TODO: Something went wrong if data is missing.
@@ -152,11 +176,30 @@ export async function loadOrCreateKeyhive(
             await kh.ingestArchive(new Archive(chunk.data));
           }
         }
+
+        // FIXME: Restore
+        // const data_to_key: Map<Uint8Array, string[]> = new Map();
+        // for (const chunk of keyhiveEventsChunks) {
+        //   if (chunk.data) {
+        //     data_to_key.set(chunk.data, chunk.key);
+        //   }
+        // }
+        // const eventsBytes: Array<Uint8Array> = keyhiveEventsChunks
+        //   .map(chunk => chunk.data)
+        //   .filter((data): data is Uint8Array => data !== undefined);
+        // const pendingKeys = await kh.ingestEventsBytes(eventsBytes).map((bytes: Uint8Array) => data_to_key.get(bytes));
+
         console.log("[Adapter] Successfully loaded Keyhive from archive");
-        await saveKeyhiveWithHash(kh, db);
+        await saveKeyhiveWithHash(kh, db, uniqueIdHash);
         for (const chunk of keyhiveArchiveChunks) {
           await db.remove(chunk.key);
         }
+        // FIXME: Restore
+        // for (const chunk of keyhiveEventsChunks) {
+        //   if (!pendingKeys.contains(chunk.key)) {
+        //     await db.remove(chunk.key);
+        //   }
+        // }
         return kh;
       } catch (error: unknown) {
         // @ts-ignore
@@ -168,6 +211,6 @@ export async function loadOrCreateKeyhive(
 
   const store = CiphertextStore.newInMemory();
   const kh = await Keyhive.init(signer, store, event_handler);
-  await saveKeyhiveWithHash(kh, db);
+  await saveKeyhiveWithHash(kh, db, uniqueIdHash);
   return kh;
 }
