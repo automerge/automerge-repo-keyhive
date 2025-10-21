@@ -16,7 +16,7 @@ importers:
         version: 2.4.0-alpha.2
       '@keyhive/keyhive':
         specifier: ^0.0.0-alpha.38
-        version: 0.0.0-alpha.39
+        version: 0.0.0-alpha.40
       eventemitter3:
         specifier: ^5.0.1
         version: 5.0.1
@@ -292,8 +292,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@keyhive/keyhive@0.0.0-alpha.39':
-    resolution: {integrity: sha512-nkCfmeFp4ChHfvH3aKoutp9m41TtPqmqxQ458TohrUYbvdXcFNGXH8YczNRRczrzY/TJ+pQR8tgUgGELxUNLQg==}
+  '@keyhive/keyhive@0.0.0-alpha.40':
+    resolution: {integrity: sha512-FlvtX6ZK2q47OqqJZ/8G+SAevKJxjSdldhwJPlhUT9QTIv0LNmJO17pkEtLJ0VVrmPryP0tKQDIaQtmcE1f7Tg==}
 
   '@noble/ed25519@3.0.0':
     resolution: {integrity: sha512-QyteqMNm0GLqfa5SoYbSC3+Pvykwpn95Zgth4MFVSMKBB75ELl9tX1LAVsN4c3HXOrakHsF2gL4zWDAYCcsnzg==}
@@ -1359,7 +1359,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@keyhive/keyhive@0.0.0-alpha.39': {}
+  '@keyhive/keyhive@0.0.0-alpha.40': {}
 
   '@noble/ed25519@3.0.0': {}
 
