@@ -21,7 +21,7 @@
     "@automerge/automerge-repo": "2.4.0-alpha.2",
     "@automerge/automerge-repo-network-websocket": "2.4.0-alpha.2",
     "eventemitter3": "^5.0.1",
-    "@keyhive/keyhive": "^0.0.0-alpha.38"
+    "@keyhive/keyhive": "^0.0.0-alpha.39"
   },
   "devDependencies": {
     "@noble/ed25519": "^3.0.0",

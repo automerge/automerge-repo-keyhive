@@ -15,7 +15,7 @@ importers:
         specifier: 2.4.0-alpha.2
         version: 2.4.0-alpha.2
       '@keyhive/keyhive':
-        specifier: ^0.0.0-alpha.38
+        specifier: ^0.0.0-alpha.39
         version: 0.0.0-alpha.40
       eventemitter3:
         specifier: ^5.0.1
