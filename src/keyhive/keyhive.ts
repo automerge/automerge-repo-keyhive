@@ -160,6 +160,18 @@ export async function loadOrCreateKeyhive(
 ): Promise<Keyhive> {
   const keyhiveArchiveChunks = await db.loadRange([KEYHIVE_DB_KEY, KEYHIVE_ARCHIVES_KEY]);
   const keyhiveEventsChunks = await db.loadRange([KEYHIVE_DB_KEY, KEYHIVE_EVENTS_KEY]);
+
+  // Collect any individual events first
+  const data_to_key: Map<Uint8Array, string[]> = new Map();
+  for (const chunk of keyhiveEventsChunks) {
+    if (chunk.data) {
+      data_to_key.set(chunk.data, chunk.key);
+    }
+  }
+  const eventsBytes: Array<Uint8Array> = keyhiveEventsChunks
+    .map(chunk => chunk.data)
+    .filter((data): data is Uint8Array => data !== undefined);
+
   if (keyhiveArchiveChunks.length > 0) {
     const firstChunk = keyhiveArchiveChunks[0];
     // TODO: Something went wrong if data is missing.
@@ -170,7 +182,10 @@ export async function loadOrCreateKeyhive(
         let store = CiphertextStore.newInMemory();
         const chunk_count = keyhiveArchiveChunks.length;
         console.log(`[Adapter] Ingesting archive from storage (1 of ${chunk_count}). Hash: ${firstChunk.key[2]}`);
+
         const kh = await firstArchive.tryToKeyhive(store, signer, event_handler);
+
+        // Ingest additional archives
         for (let idx = 1; idx < keyhiveArchiveChunks.length; idx++) {
           const chunk = keyhiveArchiveChunks[idx];
           if (chunk.data) {
@@ -179,19 +194,14 @@ export async function loadOrCreateKeyhive(
           }
         }
 
-        const data_to_key: Map<Uint8Array, string[]> = new Map();
-        for (const chunk of keyhiveEventsChunks) {
-          if (chunk.data) {
-            data_to_key.set(chunk.data, chunk.key);
-          }
-        }
-        const eventsBytes: Array<Uint8Array> = keyhiveEventsChunks
-          .map(chunk => chunk.data)
-          .filter((data): data is Uint8Array => data !== undefined);
+        // Ingest individual events
         console.log(`[Adapter] Ingesting ${eventsBytes.length} keyhive events from storage.`)
-        const pendingKeys = (await kh.ingestEventsBytes(eventsBytes))
-          .map((bytes: Uint8Array) => data_to_key.get(bytes))
-          .filter((key): key is StorageKey => key !== undefined);
+        let pendingKeys: StorageKey[] = [];
+        if (eventsBytes.length > 0) {
+          pendingKeys = (await kh.ingestEventsBytes(eventsBytes))
+            .map((bytes: Uint8Array) => data_to_key.get(bytes))
+            .filter((key): key is StorageKey => key !== undefined);
+        }
 
         console.log("[Adapter] Successfully loaded Keyhive from archive");
         await saveKeyhiveWithHash(kh, db, uniqueIdHash);
@@ -217,8 +227,36 @@ export async function loadOrCreateKeyhive(
     }
   }
 
+  // No archives in storage. Create new keyhive
   const store = CiphertextStore.newInMemory();
+  console.log(`[Adapter] Initializing new Keyhive`);
   const kh = await Keyhive.init(signer, store, event_handler);
+
+  if (eventsBytes.length > 0) {
+    console.log(`[Adapter] Ingesting ${eventsBytes.length} keyhive events from storage.`)
+    try {
+      const pendingKeys = (await kh.ingestEventsBytes(eventsBytes))
+        .map((bytes: Uint8Array) => data_to_key.get(bytes))
+        .filter((key): key is StorageKey => key !== undefined);
+
+      await saveKeyhiveWithHash(kh, db, uniqueIdHash);
+      for (const chunk of keyhiveEventsChunks) {
+        const isPendingKey = pendingKeys.some(pendingKey =>
+          pendingKey.length === chunk.key.length &&
+          pendingKey.every((val, index) => val === chunk.key[index])
+        );
+
+        if (!isPendingKey) {
+          await db.remove(chunk.key);
+        }
+      }
+      return kh;
+    } catch (e: unknown) {
+      // @ts-ignore
+      const jsError = (e && typeof e == "object" && "toError" in e) ? e.toError() : e
+      console.error(`[Adapter] Failed to ingest keyhive events from storage: ${jsError}`)
+    }
+  }
 
   await saveKeyhiveWithHash(kh, db, uniqueIdHash);
   return kh;
