@@ -22,9 +22,7 @@ export function verifyData(
   data: Uint8Array
 ): Signed | undefined {
   try {
-    console.log(`verifying bytes: ${JSON.stringify(data)}`)
     const signed = Signed.fromBytes(data);
-    console.log(`got signed: ${signed}`);
     const verifyingKeyPeerId = verifyingKeyPeerIdWithoutSuffix(peerId);
     if (peerIdFromSigned(signed) !== verifyingKeyPeerId) {
       console.log("[Adapter] Peer id on Signed does not match provided peer id");
