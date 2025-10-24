@@ -9,7 +9,6 @@ import { Keyhive } from "@keyhive/keyhive/slim";
 
 import { signData, verifyData } from "./messages.js";
 import { Pending } from "./pending.js";
-import { saveKeyhiveWithHash } from "../keyhive/keyhive.js";
 
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
@@ -40,13 +39,6 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       this.emit("peer-disconnected", payload);
       this.peers.delete(payload.peerId);
     });
-
-    // FIXME: Remove
-    // setInterval(async () => {
-    //   await saveKeyhiveWithHash(keyhive, storage);
-    //   this.syncKeyhive(keyhive);
-    //   console.debug("[Adapter] interval fired: saved and synced!");
-    // }, 10000);
   }
 
   connect(peerId: PeerId, peerMetadata?: PeerMetadata): void {

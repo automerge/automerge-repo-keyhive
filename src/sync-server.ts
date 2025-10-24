@@ -3,7 +3,6 @@ import {
   ContactCard,
   Individual,
   Keyhive,
-  Identifier,
 } from "@keyhive/keyhive/slim";
 
 export type SyncServer = {
