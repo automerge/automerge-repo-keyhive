@@ -63,7 +63,7 @@ export async function loadOrCreateSigner(db: StorageAdapterInterface): Promise<{
       signer = await Signer.webCryptoSigner(keyPair);
       await storeActiveKeyPair(keyPair, db);
     } catch (error) {
-      console.error("[Adapter] Error creating signer: ", error);
+      console.error("[AmRepoKeyhive] Error creating signer: ", error);
       throw error;
     }
   }
@@ -91,7 +91,7 @@ export async function createActive(
   };
 }
 
-export async function storeActiveKeyPair(
+async function storeActiveKeyPair(
   keyPair: CryptoKeyPair,
   db: StorageAdapterInterface
 ): Promise<void> {

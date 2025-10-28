@@ -21,7 +21,7 @@ export async function generateDoc(kh: Keyhive): Promise<KeyhiveDocument> {
   const g = await kh.generateGroup([]);
   const doc = await kh.generateDocument([g.toPeer()], changeId, []);
   console.debug(
-    `[Adapter] Generated Keyhive document with id ${doc.doc_id.toBytes()}`
+    `[AmRepoKeyhive] Generated Keyhive document with id ${doc.doc_id.toBytes()}`
   );
   return doc;
 }
@@ -41,13 +41,13 @@ export async function addMemberToDoc(
 ) {
   const agent = contactCard.toAgent();
   if (!access || !agent) {
-    console.error("[Adapter] Failed to add member: invalid access or agent!");
+    console.error("[AmRepoKeyhive] Failed to add member: invalid access or agent!");
     return;
   }
 
   const docId: KeyhiveDocumentId = docIdFromAutomergeUrl(docUrl);
   console.debug(
-    `[Adapter] addMemberToDoc: From url ${docUrl} derived Doc Id ${docId.toBytes()}`
+    `[AmRepoKeyhive] addMemberToDoc: From url ${docUrl} derived Doc Id ${docId.toBytes()}`
   );
   if (!docId) {
     console.error(`Failed to parse docId from AutomergeUrl`);
@@ -70,7 +70,7 @@ export async function revokeMemberFromDoc(
   const agent = await kh.getAgent(identifier);
 
   if (!agent) {
-    console.error("[Adapter] Agent to revoke not found");
+    console.error("[AmRepoKeyhive] Agent to revoke not found");
     return;
   }
 

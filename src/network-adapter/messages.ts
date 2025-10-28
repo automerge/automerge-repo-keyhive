@@ -11,7 +11,7 @@ export async function signData(
     const signed = await keyhive.trySign(data);
     return signed.toBytes();
   } catch (error) {
-    console.error("[Adapter] Error during signing:", error);
+    console.error("[AmRepoKeyhive] Error during signing:", error);
     throw error;
   }
 }
@@ -25,9 +25,9 @@ export function verifyData(
     const signed = Signed.fromBytes(data);
     const verifyingKeyPeerId = verifyingKeyPeerIdWithoutSuffix(peerId);
     if (peerIdFromSigned(signed) !== verifyingKeyPeerId) {
-      console.log("[Adapter] Peer id on Signed does not match provided peer id");
-      console.debug("[Adapter] Expected: " + peerId);
-      console.debug("[Adapter] Found: " + peerIdFromSigned(signed));
+      console.log("[AmRepoKeyhive] Peer id on Signed does not match provided peer id");
+      console.debug("[AmRepoKeyhive] Expected: " + peerId);
+      console.debug("[AmRepoKeyhive] Found: " + peerIdFromSigned(signed));
       return undefined;
     }
 
@@ -37,7 +37,7 @@ export function verifyData(
       return undefined;
     }
   } catch (error) {
-    console.error("[Adapter] Failed to verify signed data:", error);
+    console.error("[AmRepoKeyhive] Failed to verify signed data:", error);
     return undefined;
   }
 }
