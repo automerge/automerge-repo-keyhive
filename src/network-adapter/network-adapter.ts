@@ -42,7 +42,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   }
 
   connect(peerId: PeerId, peerMetadata?: PeerMetadata): void {
-    console.log(`[AmRepoKeyhive] this.peerId: ${peerId}`);
+    console.log(`[AMRepoKeyhive] this.peerId: ${peerId}`);
     this.peerId = peerId;
     this.peerMetadata = peerMetadata;
     this.networkAdapter.connect(peerId, peerMetadata);
@@ -74,11 +74,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
               continue;
             }
             message.targetId = targetId;
-            console.debug(`[AmRepoKeyhive] Sending keyhive message to ${targetId}`);
+            console.debug(`[AMRepoKeyhive] Sending keyhive message to ${targetId}`);
             this.signAndSend(message);
           }
         } else {
-          console.debug(`[AmRepoKeyhive] Sending keyhive message to ${message.targetId}`);
+          console.debug(`[AMRepoKeyhive] Sending keyhive message to ${message.targetId}`);
           this.signAndSend(message);
         }
       } else {
@@ -128,7 +128,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             this.emit("message", message);
           }
         } else {
-          console.error("[AmRepoKeyhive] Signed message could not be verified!");
+          console.error("[AMRepoKeyhive] Signed message could not be verified!");
         }
       } else {
         if (message.type === "request-keyhive") {
@@ -138,7 +138,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         }
       }
     } catch (e) {
-      console.error("[AmRepoKeyhive] Could not decode signed message:", e);
+      console.error("[AMRepoKeyhive] Could not decode signed message:", e);
       return;
     }
   }
@@ -155,11 +155,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     try {
       archiveBytes = (await keyhive.toArchive()).toBytes();
       if (!archiveBytes || archiveBytes.length === 0) {
-        console.error("[AmRepoKeyhive] Archive serialization produced empty bytes, skipping sync");
+        console.error("[AMRepoKeyhive] Archive serialization produced empty bytes, skipping sync");
         return;
       }
     } catch (error) {
-      console.error("[AmRepoKeyhive] Failed to serialize keyhive archive:", error);
+      console.error("[AMRepoKeyhive] Failed to serialize keyhive archive:", error);
       return;
     }
     let senderId: PeerId;
