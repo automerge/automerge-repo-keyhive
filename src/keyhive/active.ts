@@ -63,7 +63,7 @@ export async function loadOrCreateSigner(db: StorageAdapterInterface): Promise<{
       signer = await Signer.webCryptoSigner(keyPair);
       await storeActiveKeyPair(keyPair, db);
     } catch (error) {
-      console.error("[Adapter] Error creating signer: ", error);
+      console.error("[AMRepoKeyhive] Error creating signer: ", error);
       throw error;
     }
   }
@@ -79,7 +79,7 @@ export async function createActive(
   keyhive: Keyhive
 ): Promise<Active> {
   const contactCard = await keyhive.contactCard();
-  // FIXME: We can now just get this off of Keyhive. Do we need it here anymore?
+  // TODO: We can now just get this off of Keyhive. We probably don't need it here anymore
   const individual: Individual = await keyhive.individual;
   const peerId = peerIdFromSigner(signer);
   return {
@@ -91,7 +91,7 @@ export async function createActive(
   };
 }
 
-export async function storeActiveKeyPair(
+async function storeActiveKeyPair(
   keyPair: CryptoKeyPair,
   db: StorageAdapterInterface
 ): Promise<void> {

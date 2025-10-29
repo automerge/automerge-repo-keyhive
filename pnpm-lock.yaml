@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       '@automerge/automerge-repo':
-        specifier: 2.4.0-alpha.2
-        version: 2.4.0-alpha.2
+        specifier: 2.5.0-alpha.2
+        version: 2.5.0-alpha.2
       '@automerge/automerge-repo-network-websocket':
-        specifier: 2.4.0-alpha.2
-        version: 2.4.0-alpha.2
+        specifier: 2.5.0-alpha.2
+        version: 2.5.0-alpha.2
       '@keyhive/keyhive':
-        specifier: ^0.0.0-alpha.35
-        version: 0.0.0-alpha.35
+        specifier: ^0.0.0-alpha.40
+        version: 0.0.0-alpha.40
       eventemitter3:
         specifier: ^5.0.1
         version: 5.0.1
@@ -54,11 +54,11 @@ importers:
 
 packages:
 
-  '@automerge/automerge-repo-network-websocket@2.4.0-alpha.2':
-    resolution: {integrity: sha512-HrC99iKdrp3ooA1xSs2nkSVbqvORrsmMSuYwkgibaHOsA6S6fUmJDVdDnsz+DX0wOrUcAfQu+IFmAfb13Ja7qQ==}
+  '@automerge/automerge-repo-network-websocket@2.5.0-alpha.2':
+    resolution: {integrity: sha512-EtdsSA9PhuiWWbvT36DGylBeGCL7Aop8nSe4FrBYchBCWpqqZOBLdbxD0crwbCUwTBTJy76pXhSHjObQi0y4zQ==}
 
-  '@automerge/automerge-repo@2.4.0-alpha.2':
-    resolution: {integrity: sha512-mXqM8865ZOF2QzidD22z9wwgg3eUF5El7iguYj6m2TXeXMYthditN3D/N93J/jumaM80DmC/u6QS6ScasxvIpw==}
+  '@automerge/automerge-repo@2.5.0-alpha.2':
+    resolution: {integrity: sha512-Sjl1CaD4IpmboNIG9/EL9Run+AKrL8/1h3Om1NZp9syBnJN8OWjeG4ttpQce6k8HdPyl8sllAHYy8/Q4Ukh39w==}
 
   '@automerge/automerge@2.2.9':
     resolution: {integrity: sha512-6HM52Ops79hAQBWMg/t0MNfGOdEiXyenQjO9F1hKZq0RWDsMLpPa1SzRy/C4/4UyX67sTHuA5CwBpH34SpfZlA==}
@@ -292,8 +292,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@keyhive/keyhive@0.0.0-alpha.35':
-    resolution: {integrity: sha512-kBmOP8DmTCJDm8yn0f7Kb+s3FtNGGH+dTjcd0jEmfRwsZJMVHiX02ltzQO+AM5+KD2VNCg7aP77E9HDtJzemiw==}
+  '@keyhive/keyhive@0.0.0-alpha.40':
+    resolution: {integrity: sha512-FlvtX6ZK2q47OqqJZ/8G+SAevKJxjSdldhwJPlhUT9QTIv0LNmJO17pkEtLJ0VVrmPryP0tKQDIaQtmcE1f7Tg==}
 
   '@noble/ed25519@3.0.0':
     resolution: {integrity: sha512-QyteqMNm0GLqfa5SoYbSC3+Pvykwpn95Zgth4MFVSMKBB75ELl9tX1LAVsN4c3HXOrakHsF2gL4zWDAYCcsnzg==}
@@ -1181,9 +1181,9 @@ packages:
 
 snapshots:
 
-  '@automerge/automerge-repo-network-websocket@2.4.0-alpha.2':
+  '@automerge/automerge-repo-network-websocket@2.5.0-alpha.2':
     dependencies:
-      '@automerge/automerge-repo': 2.4.0-alpha.2
+      '@automerge/automerge-repo': 2.5.0-alpha.2
       cbor-x: 1.6.0
       debug: 4.4.0
       eventemitter3: 5.0.1
@@ -1194,7 +1194,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@automerge/automerge-repo@2.4.0-alpha.2':
+  '@automerge/automerge-repo@2.5.0-alpha.2':
     dependencies:
       '@automerge/automerge': 2.2.9
       bs58check: 3.0.1
@@ -1359,7 +1359,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@keyhive/keyhive@0.0.0-alpha.35': {}
+  '@keyhive/keyhive@0.0.0-alpha.40': {}
 
   '@noble/ed25519@3.0.0': {}
 

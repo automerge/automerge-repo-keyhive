@@ -1,6 +1,6 @@
 import {
   Access,
-  ChangeRef,
+  ChangeId,
   ContactCard,
   Document as KeyhiveDocument,
   DocumentId as KeyhiveDocumentId,
@@ -13,15 +13,15 @@ import { AutomergeUrl, Heads } from "@automerge/automerge-repo/slim";
 import { KeyhiveNetworkAdapter } from "../network-adapter/network-adapter.js";
 
 export async function generateDoc(kh: Keyhive): Promise<KeyhiveDocument> {
-  // For now, randomly generate a ChangeRef
-  const changeRefArray = Uint8Array.from({ length: 10 }, () =>
+  // For now, randomly generate a ChangeId
+  const changeIdArray = Uint8Array.from({ length: 10 }, () =>
     Math.floor(Math.random() * 256)
   );
-  const changeRef = new ChangeRef(changeRefArray);
+  const changeId = new ChangeId(changeIdArray);
   const g = await kh.generateGroup([]);
-  const doc = await kh.generateDocument([g.toPeer()], changeRef, []);
+  const doc = await kh.generateDocument([g.toPeer()], changeId, []);
   console.debug(
-    `[Adapter] Generated Keyhive document with id ${doc.doc_id.toBytes()}`
+    `[AMRepoKeyhive] Generated Keyhive document with id ${doc.doc_id.toBytes()}`
   );
   return doc;
 }
@@ -41,13 +41,13 @@ export async function addMemberToDoc(
 ) {
   const agent = contactCard.toAgent();
   if (!access || !agent) {
-    console.error("[Adapter] Failed to add member: invalid access or agent!");
+    console.error("[AMRepoKeyhive] Failed to add member: invalid access or agent!");
     return;
   }
 
   const docId: KeyhiveDocumentId = docIdFromAutomergeUrl(docUrl);
   console.debug(
-    `[Adapter] addMemberToDoc: From url ${docUrl} derived Doc Id ${docId.toBytes()}`
+    `[AMRepoKeyhive] addMemberToDoc: From url ${docUrl} derived Doc Id ${docId.toBytes()}`
   );
   if (!docId) {
     console.error(`Failed to parse docId from AutomergeUrl`);
@@ -70,7 +70,7 @@ export async function revokeMemberFromDoc(
   const agent = await kh.getAgent(identifier);
 
   if (!agent) {
-    console.error("[Adapter] Agent to revoke not found");
+    console.error("[AMRepoKeyhive] Agent to revoke not found");
     return;
   }
 

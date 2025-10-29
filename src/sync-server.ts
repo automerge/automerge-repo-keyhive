@@ -3,7 +3,6 @@ import {
   ContactCard,
   Individual,
   Keyhive,
-  Identifier,
 } from "@keyhive/keyhive/slim";
 
 export type SyncServer = {
@@ -28,16 +27,4 @@ export async function syncServerFromContactCard(
     contactCard: contactCardJson,
     peerId: serverPeerId,
   };
-}
-
-export async function getSyncServerIndividual(
-  syncServer: SyncServer,
-  keyhive: Keyhive
-): Promise<Individual | null> {
-  const contactCard = ContactCard.fromJson(syncServer.contactCard);
-  console.debug("[Adapter] BEFORE Getting individual for server");
-  // Try to get the Individual from keyhive
-  const individual = await keyhive.receiveContactCard(contactCard);
-  console.debug("[Adapter] AFTER Got individual for server");
-  return individual;
 }

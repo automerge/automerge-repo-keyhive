@@ -9,7 +9,6 @@ import { Keyhive } from "@keyhive/keyhive/slim";
 
 import { signData, verifyData } from "./messages.js";
 import { Pending } from "./pending.js";
-import { saveKeyhiveWithHash } from "../keyhive/keyhive.js";
 
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
@@ -25,7 +24,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     super();
 
     // Polling for keyhive updates
-    setInterval(this.requestKeyhive.bind(this), 5000);
+    setInterval(this.requestKeyhive.bind(this), 15000);
 
     networkAdapter.on("message", (msg) => {
       this.receiveMessage(msg);
@@ -40,16 +39,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       this.emit("peer-disconnected", payload);
       this.peers.delete(payload.peerId);
     });
-
-    setInterval(async () => {
-      await saveKeyhiveWithHash(keyhive, storage);
-      this.syncKeyhive(keyhive);
-      console.debug("[Adapter] interval fired: saved and synced!");
-    }, 5000);
   }
 
   connect(peerId: PeerId, peerMetadata?: PeerMetadata): void {
-    console.log(`[Adapter] this.peerId: ${peerId}`);
+    console.log(`[AMRepoKeyhive] this.peerId: ${peerId}`);
     this.peerId = peerId;
     this.peerMetadata = peerMetadata;
     this.networkAdapter.connect(peerId, peerMetadata);
@@ -81,11 +74,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
               continue;
             }
             message.targetId = targetId;
-            console.debug(`[Adapter] Sending keyhive message to ${targetId}`);
+            console.debug(`[AMRepoKeyhive] Sending keyhive message to ${targetId}`);
             this.signAndSend(message);
           }
         } else {
-          console.debug(`[Adapter] Sending keyhive message to ${message.targetId}`);
+          console.debug(`[AMRepoKeyhive] Sending keyhive message to ${message.targetId}`);
           this.signAndSend(message);
         }
       } else {
@@ -135,7 +128,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             this.emit("message", message);
           }
         } else {
-          console.error("[Adapter] Signed message could not be verified!");
+          console.error("[AMRepoKeyhive] Signed message could not be verified!");
         }
       } else {
         if (message.type === "request-keyhive") {
@@ -145,7 +138,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         }
       }
     } catch (e) {
-      console.error("[Adapter] Could not decode signed message:", e);
+      console.error("[AMRepoKeyhive] Could not decode signed message:", e);
       return;
     }
   }
@@ -162,11 +155,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     try {
       archiveBytes = (await keyhive.toArchive()).toBytes();
       if (!archiveBytes || archiveBytes.length === 0) {
-        console.error("[Adapter] Archive serialization produced empty bytes, skipping sync");
+        console.error("[AMRepoKeyhive] Archive serialization produced empty bytes, skipping sync");
         return;
       }
     } catch (error) {
-      console.error("[Adapter] Failed to serialize keyhive archive:", error);
+      console.error("[AMRepoKeyhive] Failed to serialize keyhive archive:", error);
       return;
     }
     let senderId: PeerId;
