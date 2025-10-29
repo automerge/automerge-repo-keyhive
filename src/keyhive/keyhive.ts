@@ -92,7 +92,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
       try {
         const archive = new Archive(msg.data);
         await keyhive.ingestArchive(archive);
-        // FIXME: Move to keyhive if missing there
+        // TODO: Move to keyhive if missing there?
         emitter.emit("ingest");
         await saveKeyhiveWithHash(keyhive, options.storage, uniqueIdHash);
         console.debug(`[AMRepoKeyhive] Successfully ingested archive from ${msg.senderId}`);
@@ -104,8 +104,6 @@ export async function initializeAutomergeRepoKeyhive(options: {
     emitter.on("update", async (event: KeyhiveEvent) => {
       console.debug("[AMRepoKeyhive] Keyhive updated. Saving and syncing.");
       await saveEventWithHash(event, options.storage);
-      // FIXME: Remove
-      // await saveKeyhiveWithHash(keyhive, options.storage, uniqueIdHash);
       keyhiveNetworkAdapter.syncKeyhive(keyhive);
     })
   }
@@ -127,12 +125,9 @@ export async function saveKeyhiveWithHash(
   peerIdSuffix: Uint8Array,
 ) {
   const khBytes = (await kh.toArchive()).toBytes();
-  // const hash = await crypto.subtle.digest("SHA-256", new Uint8Array(khBytes));
-  // const hash = await crypto.subtle.digest("SHA-256", uniqueId);
   const hash = uint8ArrayToHex(peerIdSuffix);
   console.debug(`[AMRepoKeyhive] Saving keyhive archive. Hash: ${hash}`);
   await db.save(
-    // [KEYHIVE_DB_KEY, KEYHIVE_ARCHIVES_KEY, uint8ArrayToHex(new Uint8Array(hash))],
     [KEYHIVE_DB_KEY, KEYHIVE_ARCHIVES_KEY, hash],
     khBytes
   );

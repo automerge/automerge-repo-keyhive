@@ -79,7 +79,7 @@ export async function createActive(
   keyhive: Keyhive
 ): Promise<Active> {
   const contactCard = await keyhive.contactCard();
-  // FIXME: We can now just get this off of Keyhive. Do we need it here anymore?
+  // TODO: We can now just get this off of Keyhive. We probably don't need it here anymore
   const individual: Individual = await keyhive.individual;
   const peerId = peerIdFromSigner(signer);
   return {

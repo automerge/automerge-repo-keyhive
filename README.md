@@ -4,7 +4,7 @@ Utilities for working with [keyhive](https://github.com/inkandswitch/keyhive) wi
 
 ## Initializing Keyhive
 
-You can call `initializeKeyhive` to create an `AutomergeRepoKeyhive`, which provides you with a `Keyhive`, a `KeyhiveNetworkAdapter`, and a `KeyhiveEventEmitter`, among other fields.
+You can call `initializeAutomergeRepoKeyhive` to create an `AutomergeRepoKeyhive`, which provides you with a `Keyhive`, a `KeyhiveNetworkAdapter`, and a `KeyhiveEventEmitter`, among other fields.
 
 ## Keyhive Network Adapter
 
