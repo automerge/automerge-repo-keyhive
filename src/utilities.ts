@@ -1,9 +1,20 @@
 import { Signer } from "@keyhive/keyhive/slim";
 import { peerIdFromVerifyingKey } from "./network-adapter/messages.js";
 import { PeerId } from "@automerge/automerge-repo/slim";
+import { Identifier, Keyhive } from "@keyhive/keyhive/slim";
 
 export function peerIdFromSigner(signer: Signer, suffix: string = ""): PeerId {
   return peerIdFromVerifyingKey(signer.verifyingKey, suffix);
+}
+
+export function keyhiveIdentifierFromPeerId(peerId: PeerId): Identifier {
+  const peerIdPrefix = verifyingKeyPeerIdWithoutSuffix(peerId);
+  try {
+    const verifyingKeyBytes = Uint8Array.from(atob(peerIdPrefix), c => c.charCodeAt(0));
+    return new Identifier(verifyingKeyBytes);
+  } catch (error) {
+    throw new Error(`Failed to decode peer ID: ${peerId}`, { cause: error });
+  }
 }
 
 export function verifyingKeyPeerIdWithoutSuffix(peerId: PeerId): PeerId {
@@ -22,4 +33,15 @@ export function hexToUint8Array(hex: string): Uint8Array {
     bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
   }
   return bytes;
+}
+
+export async function getMembershipOpsForPeer(keyhive: Keyhive, peerId: PeerId): Promise < Map<Uint8Array, any> | null > {
+  const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
+  const agent = await keyhive.getAgent(keyhiveId);
+  if(!agent) {
+    // FIXME: Remove this warning?
+    console.warn(`[AMRepoKeyhive] No agent found for peer ${peerId}`);
+    return null;
+  }
+  return await keyhive.membershipOpsForAgent(agent);
 }

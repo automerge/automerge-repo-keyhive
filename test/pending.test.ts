@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Pending } from "../src/pending";
+import { Pending } from "../src/network-adapter/pending";
 
 describe("Pending", () => {
   it("should process operations in order", () => {

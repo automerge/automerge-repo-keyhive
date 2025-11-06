@@ -66,7 +66,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
     options.networkAdapter,
     keyhive,
     options.storage,
-    peerId
+    serverPeerId
   );
 
   if (options.automaticArchiveIngestion) {

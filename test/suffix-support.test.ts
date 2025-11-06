@@ -1,17 +1,24 @@
 import { describe, it, expect, beforeAll } from "vitest";
+import * as keyhive from "@keyhive/keyhive/slim";
 import { Signer } from "@keyhive/keyhive/slim";
 import { PeerId } from "@automerge/automerge-repo/slim";
 import {
   peerIdFromSigner,
   verifyingKeyPeerIdWithoutSuffix,
 } from "../src/utilities.js";
-import { peerIdFromVerifyingKey } from "../src/messages.js";
+import { peerIdFromVerifyingKey } from "../src/network-adapter/messages.js";
 
 describe("Suffix support for peerIds", () => {
   let signer: Signer;
   let verifyingKey: Uint8Array;
 
   beforeAll(async () => {
+    // Initialize WASM before using keyhive
+    const { wasmBase64 } = await import(
+      "@keyhive/keyhive/keyhive_wasm.base64.js"
+    );
+    keyhive.initFromBase64Wasm(wasmBase64);
+
     signer = Signer.generateMemory();
     verifyingKey = signer.verifyingKey;
   });
