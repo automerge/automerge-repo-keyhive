@@ -9,7 +9,10 @@ import { Keyhive } from "@keyhive/keyhive/slim";
 
 import { signData, verifyData } from "./messages.js";
 import { Pending } from "./pending.js";
-import { getMembershipOpsForPeer, keyhiveIdentifierFromPeerId } from "../utilities.js";
+import {
+  getMembershipOpsForPeer,
+  keyhiveIdentifierFromPeerId,
+} from "../utilities.js";
 
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
@@ -75,11 +78,15 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
               continue;
             }
             message.targetId = targetId;
-            console.debug(`[AMRepoKeyhive] Sending keyhive message to ${targetId}`);
+            console.debug(
+              `[AMRepoKeyhive] Sending keyhive message to ${targetId}`
+            );
             this.signAndSend(message);
           }
         } else {
-          console.debug(`[AMRepoKeyhive] Sending keyhive message to ${message.targetId}`);
+          console.debug(
+            `[AMRepoKeyhive] Sending keyhive message to ${message.targetId}`
+          );
           this.signAndSend(message);
         }
       } else {
@@ -135,7 +142,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             this.emit("message", message);
           }
         } else {
-          console.error("[AMRepoKeyhive] Signed message could not be verified!");
+          console.error(
+            "[AMRepoKeyhive] Signed message could not be verified!"
+          );
         }
       } else {
         if (message.type === "request-keyhive") {
@@ -150,11 +159,17 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
   }
 
-  syncKeyhive(keyhive: Keyhive, maybeSenderId: PeerId | undefined = undefined): void {
+  syncKeyhive(
+    keyhive: Keyhive,
+    maybeSenderId: PeerId | undefined = undefined
+  ): void {
     void this.asyncSyncKeyhive(keyhive, maybeSenderId);
   }
 
-  private async asyncSyncKeyhive(keyhive: Keyhive, maybeSenderId: PeerId | undefined): Promise<void> {
+  private async asyncSyncKeyhive(
+    keyhive: Keyhive,
+    maybeSenderId: PeerId | undefined
+  ): Promise<void> {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
@@ -162,11 +177,16 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     try {
       archiveBytes = (await keyhive.toArchive()).toBytes();
       if (!archiveBytes || archiveBytes.length === 0) {
-        console.error("[AMRepoKeyhive] Archive serialization produced empty bytes, skipping sync");
+        console.error(
+          "[AMRepoKeyhive] Archive serialization produced empty bytes, skipping sync"
+        );
         return;
       }
     } catch (error) {
-      console.error("[AMRepoKeyhive] Failed to serialize keyhive archive:", error);
+      console.error(
+        "[AMRepoKeyhive] Failed to serialize keyhive archive:",
+        error
+      );
       return;
     }
     let senderId: PeerId;
@@ -182,7 +202,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
       const ops = await getMembershipOpsForPeer(this.keyhive, targetId);
       if (ops) {
-        console.log(`!@ asyncSyncKeyhive: Got agent for targetId ${targetId}`)
+        console.log(`!@ asyncSyncKeyhive: Got agent for targetId ${targetId}`);
         const opHashes = Array.from(ops.keys());
         const dataString = JSON.stringify(opHashes);
         const data = new TextEncoder().encode(dataString);
@@ -192,7 +212,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           targetId: targetId,
           data: data,
         };
-        console.debug(`Sending keyhive sync request to ${targetId} from ${senderId}`);
+        console.debug(
+          `Sending keyhive sync request to ${targetId} from ${senderId}`
+        );
         this.send(message);
       }
     }
@@ -208,24 +230,34 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       return;
     }
     if (message.type !== "keyhive-sync-request") {
-      console.error(`[AMRepoKeyhive] Expected keyhive-sync-request, but got ${message.type}`);
+      console.error(
+        `[AMRepoKeyhive] Expected keyhive-sync-request, but got ${message.type}`
+      );
       return;
     }
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
 
-    const peerOpHashes = new Set(JSON.parse(new TextDecoder().decode(message.data as Uint8Array)));
-    console.debug(`[AMRepoKeyhive] Received keyhive sync request with ${peerOpHashes.size} operation hashes`);
+    const peerOpHashes = new Set(
+      JSON.parse(new TextDecoder().decode(message.data as Uint8Array))
+    );
+    console.debug(
+      `[AMRepoKeyhive] Received keyhive sync request with ${peerOpHashes.size} operation hashes`
+    );
 
     const ops = await getMembershipOpsForPeer(this.keyhive, message.senderId);
     if (ops) {
-      console.log(`!@ asyncSendKeyhiveSyncResponse: Got ops for senderId ${message.senderId}`)
+      console.log(
+        `!@ asyncSendKeyhiveSyncResponse: Got ops for senderId ${message.senderId}`
+      );
       const opHashes = new Set(Array.from(ops.keys()));
-      console.debug(`[AMRepoKeyhive] Found ${opHashes.size} operation hashes for peer`);
+      console.debug(
+        `[AMRepoKeyhive] Found ${opHashes.size} operation hashes for peer`
+      );
 
       const hashesToSend = opHashes.difference(peerOpHashes);
-      const foundOps = Array.from(hashesToSend).map(hash => ops.get(hash));
+      const foundOps = Array.from(hashesToSend).map((hash) => ops.get(hash));
 
       const responseData = {
         requested: Array.from(peerOpHashes.difference(opHashes)),
@@ -240,7 +272,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         targetId: message.senderId,
         data,
       };
-      console.debug(`Sending keyhive sync response to ${message.senderId} from ${this.peerId}`);
+      console.debug(
+        `Sending keyhive sync response to ${message.senderId} from ${this.peerId}`
+      );
       this.send(response);
     }
   }
@@ -255,40 +289,54 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       return;
     }
     if (message.type !== "keyhive-sync-response") {
-      console.error(`[AMRepoKeyhive] Expected keyhive-sync-response, but got ${message.type}`);
+      console.error(
+        `[AMRepoKeyhive] Expected keyhive-sync-response, but got ${message.type}`
+      );
       return;
     }
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
 
-    const responseData = JSON.parse(new TextDecoder().decode(message.data as Uint8Array));
+    const responseData = JSON.parse(
+      new TextDecoder().decode(message.data as Uint8Array)
+    );
     const requestedHashes: Uint8Array[] = responseData.requested || [];
     const foundEvents: Uint8Array[] = responseData.found || [];
 
-    console.debug(`[AMRepoKeyhive] Received keyhive sync response: ${foundEvents.length} ops found, ${requestedHashes.length} ops requested`);
+    console.debug(
+      `[AMRepoKeyhive] Received keyhive sync response: ${foundEvents.length} ops found, ${requestedHashes.length} ops requested`
+    );
 
     if (foundEvents.length > 0) {
-      console.debug(`[AMRepoKeyhive] Ingesting ${foundEvents.length} keyhive events from ${message.senderId}`);
+      console.debug(
+        `[AMRepoKeyhive] Ingesting ${foundEvents.length} keyhive events from ${message.senderId}`
+      );
       await this.keyhive.ingestEventsBytes(foundEvents);
     }
 
     if (requestedHashes.length > 0) {
       const ops = await getMembershipOpsForPeer(this.keyhive, message.senderId);
       if (ops) {
-        console.log(`!@ asyncSendKeyhiveSyncOps: Got ops for senderId ${message.senderId}`)
+        console.log(
+          `!@ asyncSendKeyhiveSyncOps: Got ops for senderId ${message.senderId}`
+        );
         const requestedOps = requestedHashes
-          .map(hash => ops.get(hash))
-          .filter(op => op !== undefined);
+          .map((hash) => ops.get(hash))
+          .filter((op) => op !== undefined);
 
         if (requestedOps.length < requestedHashes.length) {
-          console.warn(`[AMRepoKeyhive] ${requestedHashes.length} keyhive events requested, ${requestedOps.length} found`)
+          console.warn(
+            `[AMRepoKeyhive] ${requestedHashes.length} keyhive events requested, ${requestedOps.length} found`
+          );
           if (requestedOps.length === 0) {
             return;
           }
         }
 
-        console.debug(`[AMRepoKeyhive] Sending ${requestedOps.length} requested ops to ${message.senderId}`);
+        console.debug(
+          `[AMRepoKeyhive] Sending ${requestedOps.length} requested ops to ${message.senderId}`
+        );
 
         const data = new TextEncoder().encode(JSON.stringify(requestedOps));
         const response = {
@@ -312,19 +360,27 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       return;
     }
     if (message.type !== "keyhive-sync-ops") {
-      console.error(`[AMRepoKeyhive] Expected keyhive-sync-ops, but got ${message.type}`);
+      console.error(
+        `[AMRepoKeyhive] Expected keyhive-sync-ops, but got ${message.type}`
+      );
       return;
     }
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
 
-    const receivedEvents = JSON.parse(new TextDecoder().decode(message.data as Uint8Array));
+    const receivedEvents = JSON.parse(
+      new TextDecoder().decode(message.data as Uint8Array)
+    );
 
-    console.debug(`[AMRepoKeyhive] Received ${receivedEvents.length} keyhive events`);
+    console.debug(
+      `[AMRepoKeyhive] Received ${receivedEvents.length} keyhive events`
+    );
 
     if (receivedEvents.length > 0) {
-      console.debug(`[AMRepoKeyhive] Ingesting ${receivedEvents.length} keyhive events from ${message.senderId}`);
+      console.debug(
+        `[AMRepoKeyhive] Ingesting ${receivedEvents.length} keyhive events from ${message.senderId}`
+      );
       await this.keyhive.ingestEventsBytes(receivedEvents);
     }
   }

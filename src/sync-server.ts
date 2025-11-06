@@ -1,9 +1,5 @@
 import { PeerId } from "@automerge/automerge-repo/slim";
-import {
-  ContactCard,
-  Individual,
-  Keyhive,
-} from "@keyhive/keyhive/slim";
+import { ContactCard, Individual, Keyhive } from "@keyhive/keyhive/slim";
 
 export type SyncServer = {
   individualId: Uint8Array;

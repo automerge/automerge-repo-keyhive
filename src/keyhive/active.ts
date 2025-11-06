@@ -1,4 +1,7 @@
-import { PeerId, StorageAdapterInterface } from "@automerge/automerge-repo/slim";
+import {
+  PeerId,
+  StorageAdapterInterface,
+} from "@automerge/automerge-repo/slim";
 import { Individual, Keyhive, Signer } from "@keyhive/keyhive/slim";
 import { peerIdFromSigner } from "../utilities.js";
 

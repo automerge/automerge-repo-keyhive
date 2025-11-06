@@ -26,7 +26,10 @@ export async function generateDoc(kh: Keyhive): Promise<KeyhiveDocument> {
   return doc;
 }
 
-export function keyhiveIdFactory(adapter: KeyhiveNetworkAdapter, keyhive: Keyhive): (heads: Heads) => Promise<Uint8Array> {
+export function keyhiveIdFactory(
+  adapter: KeyhiveNetworkAdapter,
+  keyhive: Keyhive
+): (heads: Heads) => Promise<Uint8Array> {
   return async (_heads: Heads) => {
     const doc = await generateDoc(keyhive);
     return doc.doc_id.toBytes();
@@ -41,7 +44,9 @@ export async function addMemberToDoc(
 ) {
   const agent = contactCard.toAgent();
   if (!access || !agent) {
-    console.error("[AMRepoKeyhive] Failed to add member: invalid access or agent!");
+    console.error(
+      "[AMRepoKeyhive] Failed to add member: invalid access or agent!"
+    );
     return;
   }
 

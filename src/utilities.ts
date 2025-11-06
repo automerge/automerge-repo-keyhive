@@ -10,7 +10,9 @@ export function peerIdFromSigner(signer: Signer, suffix: string = ""): PeerId {
 export function keyhiveIdentifierFromPeerId(peerId: PeerId): Identifier {
   const peerIdPrefix = verifyingKeyPeerIdWithoutSuffix(peerId);
   try {
-    const verifyingKeyBytes = Uint8Array.from(atob(peerIdPrefix), c => c.charCodeAt(0));
+    const verifyingKeyBytes = Uint8Array.from(atob(peerIdPrefix), (c) =>
+      c.charCodeAt(0)
+    );
     return new Identifier(verifyingKeyBytes);
   } catch (error) {
     throw new Error(`Failed to decode peer ID: ${peerId}`, { cause: error });
@@ -35,10 +37,13 @@ export function hexToUint8Array(hex: string): Uint8Array {
   return bytes;
 }
 
-export async function getMembershipOpsForPeer(keyhive: Keyhive, peerId: PeerId): Promise < Map<Uint8Array, any> | null > {
+export async function getMembershipOpsForPeer(
+  keyhive: Keyhive,
+  peerId: PeerId
+): Promise<Map<Uint8Array, any> | null> {
   const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
   const agent = await keyhive.getAgent(keyhiveId);
-  if(!agent) {
+  if (!agent) {
     // FIXME: Remove this warning?
     console.warn(`[AMRepoKeyhive] No agent found for peer ${peerId}`);
     return null;

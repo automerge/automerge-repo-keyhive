@@ -25,7 +25,9 @@ export function verifyData(
     const signed = Signed.fromBytes(data);
     const verifyingKeyPeerId = verifyingKeyPeerIdWithoutSuffix(peerId);
     if (peerIdFromSigned(signed) !== verifyingKeyPeerId) {
-      console.log("[AMRepoKeyhive] Peer id on Signed does not match provided peer id");
+      console.log(
+        "[AMRepoKeyhive] Peer id on Signed does not match provided peer id"
+      );
       console.debug("[AMRepoKeyhive] Expected: " + peerId);
       console.debug("[AMRepoKeyhive] Found: " + peerIdFromSigned(signed));
       return undefined;

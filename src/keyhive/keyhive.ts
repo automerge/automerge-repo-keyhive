@@ -1,4 +1,12 @@
-import { AutomergeUrl, Heads, NetworkAdapter, parseAutomergeUrl, PeerId, StorageAdapterInterface, StorageKey } from "@automerge/automerge-repo/slim";
+import {
+  AutomergeUrl,
+  Heads,
+  NetworkAdapter,
+  parseAutomergeUrl,
+  PeerId,
+  StorageAdapterInterface,
+  StorageKey,
+} from "@automerge/automerge-repo/slim";
 import { peerIdFromSigner, uint8ArrayToHex } from "../utilities.js";
 import {
   Archive,
@@ -26,7 +34,7 @@ export type AutomergeRepoKeyhive = {
   networkAdapter: KeyhiveNetworkAdapter;
   emitter: KeyhiveEventEmitter;
   idFactory: (heads: Heads) => Promise<Uint8Array>;
-}
+};
 
 export function docIdFromAutomergeUrl(url: AutomergeUrl): KeyhiveDocumentId {
   const { binaryDocumentId } = parseAutomergeUrl(url);
@@ -41,12 +49,17 @@ export async function initializeAutomergeRepoKeyhive(options: {
 }): Promise<AutomergeRepoKeyhive> {
   const { keyPair, signer } = await loadOrCreateSigner(options.storage);
   const emitter = new KeyhiveEventEmitter();
-  const uniqueIdHash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(options.peerIdSuffix)));
+  const uniqueIdHash = new Uint8Array(
+    await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(options.peerIdSuffix)
+    )
+  );
   const keyhive = await loadOrCreateKeyhive(
     options.storage,
     signer,
     uniqueIdHash,
-    emitter.handleKeyhiveEvent,
+    emitter.handleKeyhiveEvent
   );
   const active = await createActive(keyPair, signer, keyhive);
   const peerId = peerIdFromSigner(active.signer, options.peerIdSuffix);
@@ -73,39 +86,43 @@ export async function initializeAutomergeRepoKeyhive(options: {
     // TODO: This event is currently ad hoc
     (keyhiveNetworkAdapter as any).on("keyhive", async (msg: any) => {
       if (!msg) {
-        console.error("[AMRepoKeyhive] Expected keyhive message not found")
-        return
+        console.error("[AMRepoKeyhive] Expected keyhive message not found");
+        return;
       }
       if (!("type" in msg)) {
-        console.error("[AMRepoKeyhive] Invalid keyhive message")
-        return
+        console.error("[AMRepoKeyhive] Invalid keyhive message");
+        return;
       }
       if (!msg.data) {
-        console.error("[AMRepoKeyhive] Expected keyhive data not found")
-        return
+        console.error("[AMRepoKeyhive] Expected keyhive data not found");
+        return;
       }
       if (msg.data.length === 0) {
-        console.error("[AMRepoKeyhive] Received empty archive data")
-        return
+        console.error("[AMRepoKeyhive] Received empty archive data");
+        return;
       }
-      console.debug(`[AMRepoKeyhive] Received keyhive from ${msg.senderId}. Archive size: ${msg.data.length} bytes. Ingesting archive.`);
+      console.debug(
+        `[AMRepoKeyhive] Received keyhive from ${msg.senderId}. Archive size: ${msg.data.length} bytes. Ingesting archive.`
+      );
       try {
         const archive = new Archive(msg.data);
         await keyhive.ingestArchive(archive);
         // TODO: Move to keyhive if missing there?
         emitter.emit("ingest");
         await saveKeyhiveWithHash(keyhive, options.storage, uniqueIdHash);
-        console.debug(`[AMRepoKeyhive] Successfully ingested archive from ${msg.senderId}`);
+        console.debug(
+          `[AMRepoKeyhive] Successfully ingested archive from ${msg.senderId}`
+        );
       } catch (error) {
-        console.error(`Failed to ingest archive from ${msg.senderId}:`, error)
+        console.error(`Failed to ingest archive from ${msg.senderId}:`, error);
       }
-    })
+    });
 
     emitter.on("update", async (event: KeyhiveEvent) => {
       console.debug("[AMRepoKeyhive] Keyhive updated. Saving and syncing.");
       await saveEventWithHash(event, options.storage);
       keyhiveNetworkAdapter.syncKeyhive(keyhive);
-    })
+    });
   }
 
   return {
@@ -122,15 +139,12 @@ export async function initializeAutomergeRepoKeyhive(options: {
 export async function saveKeyhiveWithHash(
   kh: Keyhive,
   db: StorageAdapterInterface,
-  peerIdSuffix: Uint8Array,
+  peerIdSuffix: Uint8Array
 ) {
   const khBytes = (await kh.toArchive()).toBytes();
   const hash = uint8ArrayToHex(peerIdSuffix);
   console.debug(`[AMRepoKeyhive] Saving keyhive archive. Hash: ${hash}`);
-  await db.save(
-    [KEYHIVE_DB_KEY, KEYHIVE_ARCHIVES_KEY, hash],
-    khBytes
-  );
+  await db.save([KEYHIVE_DB_KEY, KEYHIVE_ARCHIVES_KEY, hash], khBytes);
 }
 
 export async function saveEventWithHash(
@@ -138,7 +152,10 @@ export async function saveEventWithHash(
   db: StorageAdapterInterface
 ) {
   const eventBytes = event.toBytes();
-  const hash = await crypto.subtle.digest("SHA-256", new Uint8Array(eventBytes));
+  const hash = await crypto.subtle.digest(
+    "SHA-256",
+    new Uint8Array(eventBytes)
+  );
   await db.save(
     [KEYHIVE_DB_KEY, KEYHIVE_EVENTS_KEY, uint8ArrayToHex(new Uint8Array(hash))],
     eventBytes
@@ -153,8 +170,14 @@ async function loadOrCreateKeyhive(
   uniqueIdHash: Uint8Array,
   event_handler: (event: KeyhiveEvent) => void
 ): Promise<Keyhive> {
-  const keyhiveArchiveChunks = await db.loadRange([KEYHIVE_DB_KEY, KEYHIVE_ARCHIVES_KEY]);
-  const keyhiveEventsChunks = await db.loadRange([KEYHIVE_DB_KEY, KEYHIVE_EVENTS_KEY]);
+  const keyhiveArchiveChunks = await db.loadRange([
+    KEYHIVE_DB_KEY,
+    KEYHIVE_ARCHIVES_KEY,
+  ]);
+  const keyhiveEventsChunks = await db.loadRange([
+    KEYHIVE_DB_KEY,
+    KEYHIVE_EVENTS_KEY,
+  ]);
 
   // Collect any individual events first
   const data_to_key: Map<Uint8Array, string[]> = new Map();
@@ -164,7 +187,7 @@ async function loadOrCreateKeyhive(
     }
   }
   const eventsBytes: Array<Uint8Array> = keyhiveEventsChunks
-    .map(chunk => chunk.data)
+    .map((chunk) => chunk.data)
     .filter((data): data is Uint8Array => data !== undefined);
 
   if (keyhiveArchiveChunks.length > 0) {
@@ -176,21 +199,31 @@ async function loadOrCreateKeyhive(
         console.log("[AMRepoKeyhive] Attempting to load Keyhive archive");
         let store = CiphertextStore.newInMemory();
         const chunk_count = keyhiveArchiveChunks.length;
-        console.log(`[AMRepoKeyhive] Ingesting archive from storage (1 of ${chunk_count}). Hash: ${firstChunk.key[2]}`);
+        console.log(
+          `[AMRepoKeyhive] Ingesting archive from storage (1 of ${chunk_count}). Hash: ${firstChunk.key[2]}`
+        );
 
-        const kh = await firstArchive.tryToKeyhive(store, signer, event_handler);
+        const kh = await firstArchive.tryToKeyhive(
+          store,
+          signer,
+          event_handler
+        );
 
         // Ingest additional archives
         for (let idx = 1; idx < keyhiveArchiveChunks.length; idx++) {
           const chunk = keyhiveArchiveChunks[idx];
           if (chunk.data) {
-            console.log(`[AMRepoKeyhive] Ingesting archive from storage (${idx + 1} of ${chunk_count}). Hash: ${chunk.key[2]}`);
+            console.log(
+              `[AMRepoKeyhive] Ingesting archive from storage (${idx + 1} of ${chunk_count}). Hash: ${chunk.key[2]}`
+            );
             await kh.ingestArchive(new Archive(chunk.data));
           }
         }
 
         // Ingest individual events
-        console.log(`[AMRepoKeyhive] Ingesting ${eventsBytes.length} keyhive events from storage.`)
+        console.log(
+          `[AMRepoKeyhive] Ingesting ${eventsBytes.length} keyhive events from storage.`
+        );
         let pendingKeys: StorageKey[] = [];
         if (eventsBytes.length > 0) {
           pendingKeys = (await kh.ingestEventsBytes(eventsBytes))
@@ -204,9 +237,10 @@ async function loadOrCreateKeyhive(
           await db.remove(chunk.key);
         }
         for (const chunk of keyhiveEventsChunks) {
-          const isPendingKey = pendingKeys.some(pendingKey =>
-            pendingKey.length === chunk.key.length &&
-            pendingKey.every((val, index) => val === chunk.key[index])
+          const isPendingKey = pendingKeys.some(
+            (pendingKey) =>
+              pendingKey.length === chunk.key.length &&
+              pendingKey.every((val, index) => val === chunk.key[index])
           );
 
           if (!isPendingKey) {
@@ -216,8 +250,14 @@ async function loadOrCreateKeyhive(
         return kh;
       } catch (error: unknown) {
         // @ts-ignore
-        const jsError = (error && typeof error == "object" && "toError" in error) ? error.toError() : error
-        console.error("[AMRepoKeyhive] Failed to load Keyhive archive:", jsError);
+        const jsError =
+          error && typeof error == "object" && "toError" in error
+            ? error.toError()
+            : error;
+        console.error(
+          "[AMRepoKeyhive] Failed to load Keyhive archive:",
+          jsError
+        );
       }
     }
   }
@@ -228,7 +268,9 @@ async function loadOrCreateKeyhive(
   const kh = await Keyhive.init(signer, store, event_handler);
 
   if (eventsBytes.length > 0) {
-    console.log(`[AMRepoKeyhive] Ingesting ${eventsBytes.length} keyhive events from storage.`)
+    console.log(
+      `[AMRepoKeyhive] Ingesting ${eventsBytes.length} keyhive events from storage.`
+    );
     try {
       const pendingKeys = (await kh.ingestEventsBytes(eventsBytes))
         .map((bytes: Uint8Array) => data_to_key.get(bytes))
@@ -236,9 +278,10 @@ async function loadOrCreateKeyhive(
 
       await saveKeyhiveWithHash(kh, db, uniqueIdHash);
       for (const chunk of keyhiveEventsChunks) {
-        const isPendingKey = pendingKeys.some(pendingKey =>
-          pendingKey.length === chunk.key.length &&
-          pendingKey.every((val, index) => val === chunk.key[index])
+        const isPendingKey = pendingKeys.some(
+          (pendingKey) =>
+            pendingKey.length === chunk.key.length &&
+            pendingKey.every((val, index) => val === chunk.key[index])
         );
 
         if (!isPendingKey) {
@@ -248,8 +291,11 @@ async function loadOrCreateKeyhive(
       return kh;
     } catch (e: unknown) {
       // @ts-ignore
-      const jsError = (e && typeof e == "object" && "toError" in e) ? e.toError() : e
-      console.error(`[AMRepoKeyhive] Failed to ingest keyhive events from storage: ${jsError}`)
+      const jsError =
+        e && typeof e == "object" && "toError" in e ? e.toError() : e;
+      console.error(
+        `[AMRepoKeyhive] Failed to ingest keyhive events from storage: ${jsError}`
+      );
     }
   }
 
