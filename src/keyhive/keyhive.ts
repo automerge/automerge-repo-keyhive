@@ -84,7 +84,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
 
   if (options.automaticArchiveIngestion) {
     // TODO: This event is currently ad hoc
-    (keyhiveNetworkAdapter as any).on("keyhive", async (msg: any) => {
+    (keyhiveNetworkAdapter as any).on("keyhive-archive", async (msg: any) => {
       if (!msg) {
         console.error("[AMRepoKeyhive] Expected keyhive message not found");
         return;
@@ -252,8 +252,8 @@ async function loadOrCreateKeyhive(
         // @ts-ignore
         const jsError =
           error && typeof error == "object" && "toError" in error
-            // @ts-ignore
-            ? error.toError()
+            ? // @ts-ignore
+              error.toError()
             : error;
         console.error(
           "[AMRepoKeyhive] Failed to load Keyhive archive:",

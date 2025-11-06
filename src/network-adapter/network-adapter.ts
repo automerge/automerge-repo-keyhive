@@ -9,10 +9,7 @@ import { Keyhive } from "@keyhive/keyhive/slim";
 
 import { signData, verifyData } from "./messages.js";
 import { Pending } from "./pending.js";
-import {
-  getMembershipOpsForPeer,
-  keyhiveIdentifierFromPeerId,
-} from "../utilities.js";
+import { getMembershipOpsForPeer } from "../utilities.js";
 
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
@@ -28,7 +25,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     super();
 
     // Polling for keyhive updates
-    setInterval(this.requestKeyhive.bind(this), 15000);
+    setInterval(this.requestKeyhiveSync.bind(this), 15000);
 
     networkAdapter.on("message", (msg) => {
       this.receiveMessage(msg);
@@ -69,7 +66,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       throw new Error("peerId must be defined!");
     }
     if ("data" in message && message.data !== undefined) {
-      if (message.type === "keyhive") {
+      if (message.type === "keyhive-archive") {
         if (message.targetId == this.peerId) {
           const originalSenderId = message.senderId;
           message.senderId = this.peerId;
@@ -130,8 +127,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         const maybeSigned = verifyData(message.senderId, message.data);
         if (maybeSigned) {
           message.data = maybeSigned.payload;
-          if (message.type === "keyhive") {
-            (this as any).emit("keyhive", message);
+          if (message.type === "keyhive-archive") {
+            (this as any).emit("keyhive-archive", message);
           } else if (message.type === "keyhive-sync-request") {
             this.sendKeyhiveSyncResponse(message);
           } else if (message.type === "keyhive-sync-response") {
@@ -387,7 +384,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
   // private sendKeyhive(senderId: PeerId, targetId: PeerId, archiveBytes: Uint8Array): void {
   //   const message = {
-  //     type: "keyhive",
+  //     type: "keyhive-archive",
   //     senderId: senderId,
   //     targetId: targetId,
   //     data: archiveBytes,
@@ -395,17 +392,19 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   //   this.send(message);
   // }
 
-  private requestKeyhive(): void {
+  // FIXME: syncKeyhive should probably find keyhive and peerId on its own.
+  private requestKeyhiveSync(): void {
     if (this.peerId === undefined) {
       return;
     }
-    for (const targetId of this.peers) {
-      const message = {
-        type: "request-keyhive",
-        senderId: this.peerId,
-        targetId: targetId,
-      };
-      this.send(message);
-    }
+    this.syncKeyhive(this.keyhive, this.peerId);
+    // for (const targetId of this.peers) {
+    //   const message = {
+    //     type: "request-keyhive",
+    //     senderId: this.peerId,
+    //     targetId: targetId,
+    //   };
+    //   this.send(message);
+    // }
   }
 }
