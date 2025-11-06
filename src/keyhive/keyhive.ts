@@ -252,6 +252,7 @@ async function loadOrCreateKeyhive(
         // @ts-ignore
         const jsError =
           error && typeof error == "object" && "toError" in error
+            // @ts-ignore
             ? error.toError()
             : error;
         console.error(
@@ -292,6 +293,7 @@ async function loadOrCreateKeyhive(
     } catch (e: unknown) {
       // @ts-ignore
       const jsError =
+        // @ts-ignore
         e && typeof e == "object" && "toError" in e ? e.toError() : e;
       console.error(
         `[AMRepoKeyhive] Failed to ingest keyhive events from storage: ${jsError}`
