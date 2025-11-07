@@ -271,24 +271,45 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       throw new Error("peerId must be defined!");
     }
 
-    const peerOpHashes = new Set(decode(message.data as Uint8Array));
+    const peerOpHashesArray: Uint8Array[] = decode(message.data as Uint8Array);
     console.debug(
-      `[AMRepoKeyhive] Received keyhive sync request with ${peerOpHashes.size} operation hashes`
+      `[AMRepoKeyhive] Received keyhive sync request with ${peerOpHashesArray.length} operation hashes`
     );
 
     const ops = await getMembershipOpsForPeer(this.keyhive, message.senderId);
     if (ops) {
-      const opHashes = new Set(Array.from(ops.keys()));
+      const opHashesArray = Array.from(ops.keys());
       console.debug(
-        `[AMRepoKeyhive] asyncSendKeyhiveSyncResponse: Found ${opHashes.size} total local operation hashes for ${message.senderId}`
+        `[AMRepoKeyhive] asyncSendKeyhiveSyncResponse: Found ${opHashesArray.length} total local operation hashes for ${message.senderId}`
       );
 
-      const hashesToSend = opHashes.difference(peerOpHashes);
-      const foundOps = Array.from(hashesToSend).map((hash) =>
-        ops.get(hash)?.toBytes()
+      // Convert Uint8Arrays to strings for value-based comparison in Set operations
+      const opHashStrings = new Set(opHashesArray.map((h) => h.toString()));
+      const peerOpHashStrings = new Set(
+        peerOpHashesArray.map((h) => h.toString())
       );
 
-      const requested = Array.from(peerOpHashes.difference(opHashes));
+      // Create maps for converting back from string to Uint8Array
+      const hashStringToBytes = new Map(
+        opHashesArray.map((h) => [h.toString(), h])
+      );
+      const peerHashStringToBytes = new Map(
+        peerOpHashesArray.map((h) => [h.toString(), h])
+      );
+
+      const hashStringsToSend = opHashStrings.difference(peerOpHashStrings);
+      const foundOps = Array.from(hashStringsToSend)
+        .map((str) => {
+          const hash = hashStringToBytes.get(str);
+          return hash ? ops.get(hash)?.toBytes() : undefined;
+        })
+        .filter((op) => op !== undefined);
+
+      const requestedHashStrings = peerOpHashStrings.difference(opHashStrings);
+      const requested = Array.from(requestedHashStrings)
+        .map((str) => peerHashStringToBytes.get(str))
+        .filter((hash) => hash !== undefined);
+
       console.debug(
         `Found ${foundOps.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`
       );
@@ -358,8 +379,14 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         console.log(
           `!@ asyncSendKeyhiveSyncOps: Got ops for senderId ${message.senderId}`
         );
+
+        // Create a map from hash string to operation for value-based lookup
+        const hashStringToOp = new Map(
+          Array.from(ops.entries()).map(([hash, op]) => [hash.toString(), op])
+        );
+
         const requestedOps = requestedHashes
-          .map((hash) => ops.get(hash)?.toBytes())
+          .map((hash) => hashStringToOp.get(hash.toString())?.toBytes())
           .filter((op) => op !== undefined);
 
         if (requestedOps.length < requestedHashes.length) {
