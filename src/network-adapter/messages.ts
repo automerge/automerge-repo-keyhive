@@ -21,19 +21,27 @@ function encodeKeyhiveMessageData(msg: KeyhiveMessageData): Uint8Array {
 
 export function decodeKeyhiveMessageData(
   encoded: Uint8Array
-): KeyhiveMessageData {
-  const decoded = decode(encoded) as {
-    contactCard: string;
-    signed: Uint8Array;
-  };
+): KeyhiveMessageData | undefined {
+  try {
+    const decoded = decode(encoded) as {
+      contactCard: string;
+      signed: Uint8Array;
+    };
 
-  const contactCard = ContactCard.fromJson(decoded.contactCard);
-  const signed = Signed.fromBytes(decoded.signed);
+    const contactCard = ContactCard.fromJson(decoded.contactCard);
+    const signed = Signed.fromBytes(decoded.signed);
 
-  return {
-    contactCard,
-    signed,
-  };
+    return {
+      contactCard,
+      signed,
+    };
+  } catch (error) {
+    console.error(
+      "[AMRepoKeyhive] Failed to decode keyhive message data:",
+      error
+    );
+    return undefined;
+  }
 }
 
 export async function signData(
@@ -54,32 +62,26 @@ export async function signData(
 }
 
 // Verifies the provided data has a valid signature. Returns a `Signed` if so and `undefined` if not.
-export function verifyData(
-  peerId: PeerId,
-  data: Uint8Array
-): KeyhiveMessageData | undefined {
+export function verifyData(peerId: PeerId, data: KeyhiveMessageData): boolean {
   try {
-    const keyhiveMessageData = decodeKeyhiveMessageData(data);
     const verifyingKeyPeerId = verifyingKeyPeerIdWithoutSuffix(peerId);
-    if (peerIdFromSigned(keyhiveMessageData.signed) !== verifyingKeyPeerId) {
+    if (peerIdFromSigned(data.signed) !== verifyingKeyPeerId) {
       console.log(
         "[AMRepoKeyhive] Peer id on Signed does not match provided peer id"
       );
       console.debug("[AMRepoKeyhive] Expected: " + peerId);
-      console.debug(
-        "[AMRepoKeyhive] Found: " + peerIdFromSigned(keyhiveMessageData.signed)
-      );
-      return undefined;
+      console.debug("[AMRepoKeyhive] Found: " + peerIdFromSigned(data.signed));
+      return false;
     }
 
-    if (keyhiveMessageData.signed.verify()) {
-      return keyhiveMessageData;
+    if (data.signed.verify()) {
+      return true;
     } else {
-      return undefined;
+      return false;
     }
   } catch (error) {
     console.error("[AMRepoKeyhive] Failed to verify signed data:", error);
-    return undefined;
+    return false;
   }
 }
 

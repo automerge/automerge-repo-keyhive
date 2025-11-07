@@ -7,7 +7,12 @@ import {
 } from "@automerge/automerge-repo/slim";
 import { Keyhive } from "@keyhive/keyhive/slim";
 
-import { KeyhiveMessageData, signData, verifyData } from "./messages.js";
+import {
+  decodeKeyhiveMessageData,
+  KeyhiveMessageData,
+  signData,
+  verifyData,
+} from "./messages.js";
 import { Pending } from "./pending.js";
 import { getMembershipOpsForPeer } from "../utilities.js";
 
@@ -125,14 +130,13 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         this.emit("message", message);
         return;
       }
-      const maybeKeyhiveMessageData = verifyData(
-        message.senderId,
-        message.data
-      );
+      const maybeKeyhiveMessageData = decodeKeyhiveMessageData(message.data);
       if (maybeKeyhiveMessageData) {
-        void this.handleKeyhiveMessage(message, maybeKeyhiveMessageData);
+        if (verifyData(message.senderId, maybeKeyhiveMessageData)) {
+          void this.handleKeyhiveMessage(message, maybeKeyhiveMessageData);
+        }
       } else {
-        console.error("[AMRepoKeyhive] Signed message could not be verified!");
+        this.emit("message", message);
       }
     } catch (e) {
       console.error("[AMRepoKeyhive] Could not decode signed message:", e);
