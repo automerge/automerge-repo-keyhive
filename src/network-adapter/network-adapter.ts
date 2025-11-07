@@ -152,7 +152,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   ) {
     const maybeAgent = await this.keyhive.getAgent(keyhiveMessageData.contactCard.id);
     if (!maybeAgent) {
+      console.log("!@ No agent found! Receiving Contact Card");
       await this.keyhive.receiveContactCard(keyhiveMessageData.contactCard);
+    } else {
+      console.log("!@ Agent found! Not receiving Contact Card");
     }
     message.data = keyhiveMessageData.signed.payload;
     // FIXME: We should either remove "keyhive-archive" and "keyhive-archive-request"
