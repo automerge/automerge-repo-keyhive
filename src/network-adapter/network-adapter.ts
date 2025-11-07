@@ -19,6 +19,8 @@ import { getMembershipOpsForPeer } from "../utilities.js";
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
   private peers: Set<PeerId> = new Set();
+  // FIXME: Write to this on successful response
+  // private hashesSent: Map<PeerId, Set<Uint8Array>> = new Map();
 
   constructor(
     private networkAdapter: NetworkAdapter,
@@ -252,19 +254,19 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
     const ops = await getMembershipOpsForPeer(this.keyhive, message.senderId);
     if (ops) {
-      console.log(
-        `!@ asyncSendKeyhiveSyncResponse: Got ops for senderId ${message.senderId}`
-      );
       const opHashes = new Set(Array.from(ops.keys()));
       console.debug(
-        `[AMRepoKeyhive] Found ${opHashes.size} operation hashes for peer`
+        `[AMRepoKeyhive] asyncSendKeyhiveSyncResponse: Found ${opHashes.size} total local operation hashes for ${message.senderId}`
       );
 
       const hashesToSend = opHashes.difference(peerOpHashes);
       const foundOps = Array.from(hashesToSend).map((hash) => ops.get(hash));
 
+      const requested = Array.from(peerOpHashes.difference(opHashes));
+      console.debug(`Found ${foundOps.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`);
+
       const responseData = {
-        requested: Array.from(peerOpHashes.difference(opHashes)),
+        requested,
         found: foundOps,
       };
 
