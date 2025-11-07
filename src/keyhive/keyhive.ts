@@ -121,9 +121,6 @@ export async function initializeAutomergeRepoKeyhive(options: {
     emitter.on("update", async (event: KeyhiveEvent) => {
       // FIXME: Right now this creates a feedback loop since we're rotating a pre-key
       // every time we receive a contact card.
-      if (event.variant === "PREKEY_ROTATED") {
-        return;
-      }
       console.debug("[AMRepoKeyhive] Keyhive updated. Saving and syncing.");
       await saveEventWithHash(event, options.storage);
       keyhiveNetworkAdapter.syncKeyhive(keyhive);
