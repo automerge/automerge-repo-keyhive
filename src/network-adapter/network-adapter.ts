@@ -122,7 +122,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       //   return;
       // }
       if (!("data" in message) || message.data === undefined) {
-        console.error("[AMRepoKeyhive] Expected signed message data not found");
+        this.emit("message", message);
         return;
       }
       const maybeKeyhiveMessageData = verifyData(
