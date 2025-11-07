@@ -292,6 +292,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       console.debug(
         `Found ${foundOps.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`
       );
+      console.debug(`[AMRepoKeyhive] Ops types before sending:`, foundOps.map((e: any) => e?.constructor?.name));
+      console.debug(`[AMRepoKeyhive] First op sample:`, foundOps[0] instanceof Uint8Array ? foundOps[0].slice(0, 20) : foundOps[0]);
 
       const responseData = {
         requested,
@@ -349,6 +351,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       console.debug(
         `[AMRepoKeyhive] Ingesting ${foundEvents.length} keyhive events from ${message.senderId}`
       );
+      console.debug(`[AMRepoKeyhive] Event types:`, foundEvents.map((e: any) => e?.constructor?.name));
+      console.debug(`[AMRepoKeyhive] First event sample (first 20 bytes):`, foundEvents[0] instanceof Uint8Array ? foundEvents[0].slice(0, 20) : foundEvents[0]);
       await this.keyhive.ingestEventsBytes(foundEvents);
     }
 
@@ -374,6 +378,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         console.debug(
           `[AMRepoKeyhive] Sending ${requestedOps.length} requested ops to ${message.senderId}`
         );
+        console.debug(`[AMRepoKeyhive] Requested ops types before encoding:`, requestedOps.map((e: any) => e?.constructor?.name));
+        console.debug(`[AMRepoKeyhive] First requested op sample:`, requestedOps[0] instanceof Uint8Array ? requestedOps[0].slice(0, 20) : requestedOps[0]);
 
         const data = encode(requestedOps);
         const response = {
@@ -437,6 +443,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       console.debug(
         `[AMRepoKeyhive] Ingesting ${receivedEvents.length} keyhive events from ${message.senderId}`
       );
+      console.debug(`[AMRepoKeyhive] Event types:`, receivedEvents.map((e: any) => e?.constructor?.name));
+      console.debug(`[AMRepoKeyhive] First event sample (first 20 bytes):`, receivedEvents[0] instanceof Uint8Array ? receivedEvents[0].slice(0, 20) : receivedEvents[0]);
       await this.keyhive.ingestEventsBytes(receivedEvents);
     }
   }
