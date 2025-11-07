@@ -48,5 +48,5 @@ export async function getMembershipOpsForPeer(
     console.warn(`[AMRepoKeyhive] No agent found for peer ${peerId}`);
     return null;
   }
-  return await keyhive.membershipOpsForAgent(agent);
+  return await keyhive.eventsForAgent(agent);
 }
