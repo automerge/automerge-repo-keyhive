@@ -68,7 +68,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     this.networkAdapter.disconnect();
   }
 
-  send(message: Message): void {
+  send(message: Message, includeContactCard: boolean = false): void {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
@@ -95,14 +95,14 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     //     }
     //   }
     // }
-    this.signAndSend(message);
+    this.signAndSend(message, includeContactCard);
   }
 
-  private signAndSend(message: Message): void {
-    void this.asyncSyncAndSend(message);
+  private signAndSend(message: Message, includeContactCard: boolean): void {
+    void this.asyncSignAndSend(message, includeContactCard);
   }
 
-  async asyncSyncAndSend(message: Message): Promise<void> {
+  async asyncSignAndSend(message: Message, includeContactCard: boolean): Promise<void> {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
@@ -111,7 +111,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         ? message.data
         : new Uint8Array();
     const seqNumber = this.pending.register();
-    const signedData = await signData(this.keyhive, data);
+    const signedData = await signData(this.keyhive, data, includeContactCard);
     // Wait for network to be ready before sending
     await this.networkAdapter.whenReady();
     this.pending.fire(seqNumber, () => {
@@ -150,12 +150,14 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     message: Message,
     keyhiveMessageData: KeyhiveMessageData
   ) {
-    const maybeAgent = await this.keyhive.getAgent(keyhiveMessageData.contactCard.id);
-    if (!maybeAgent) {
-      console.log("!@ No agent found! Receiving Contact Card");
-      await this.keyhive.receiveContactCard(keyhiveMessageData.contactCard);
-    } else {
-      console.log("!@ Agent found! Not receiving Contact Card");
+    if (keyhiveMessageData.contactCard) {
+      const maybeAgent = await this.keyhive.getAgent(keyhiveMessageData.contactCard.id);
+      if (!maybeAgent) {
+        console.log("!@ No agent found! Receiving Contact Card");
+        await this.keyhive.receiveContactCard(keyhiveMessageData.contactCard);
+      } else {
+        console.log("!@ Agent found! Not receiving Contact Card");
+      }
     }
     message.data = keyhiveMessageData.signed.payload;
     // FIXME: We should either remove "keyhive-archive" and "keyhive-archive-request"
@@ -168,6 +170,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       await this.sendKeyhiveSyncResponse(message);
     } else if (message.type === "keyhive-sync-response") {
       await this.sendKeyhiveSyncOps(message);
+    } else if (message.type === "keyhive-sync-request-contact-card") {
+      await this.sendKeyhiveSyncMissingContactCard(message);
+    } else if (message.type === "keyhive-sync-missing-contact-card") {
+      await this.syncKeyhive(this.keyhive, message.senderId, true);
     } else if (message.type === "keyhive-sync-ops") {
       await this.receiveKeyhiveSyncOps(message);
     } else {
@@ -177,14 +183,16 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
   syncKeyhive(
     keyhive: Keyhive,
-    maybeSenderId: PeerId | undefined = undefined
+    maybeSenderId: PeerId | undefined = undefined,
+    includeContactCard: boolean = false,
   ): void {
-    void this.asyncSyncKeyhive(keyhive, maybeSenderId);
+    void this.asyncSyncKeyhive(keyhive, maybeSenderId, includeContactCard);
   }
 
   private async asyncSyncKeyhive(
     keyhive: Keyhive,
-    maybeSenderId: PeerId | undefined
+    maybeSenderId: PeerId | undefined,
+    includeContactCard: boolean,
   ): Promise<void> {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
@@ -231,7 +239,14 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         console.debug(
           `Sending keyhive sync request to ${targetId} from ${senderId}`
         );
-        this.send(message);
+        this.send(message, includeContactCard);
+      } else {
+        const message = {
+          type: "keyhive-sync-request-contact-card",
+          senderId: senderId,
+          targetId: targetId,
+        };
+        this.send(message, true);
       }
     }
   }
@@ -288,6 +303,16 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         `Sending keyhive sync response to ${message.senderId} from ${this.peerId}`
       );
       this.send(response);
+    } else {
+      console.debug(
+        `[AMRepoKeyhive] No agent found for ${message.senderId}, sending keyhive-sync-missing-contact-card`
+      );
+      const response = {
+        type: "keyhive-sync-missing-contact-card",
+        senderId: this.peerId,
+        targetId: message.senderId,
+      };
+      this.send(response, true);
     }
   }
 
@@ -356,6 +381,29 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         this.send(response);
       }
     }
+  }
+
+  private async sendKeyhiveSyncMissingContactCard(message: Message): Promise<void> {
+    if (message.type !== "keyhive-sync-request-contact-card") {
+      console.error(
+        `[AMRepoKeyhive] Expected keyhive-sync-request-contact-card, but got ${message.type}`
+      );
+      return;
+    }
+    if (this.peerId === undefined) {
+      throw new Error("peerId must be defined!");
+    }
+
+    console.debug(
+      `[AMRepoKeyhive] Sending keyhive-sync-missing-contact-card to ${message.senderId}`
+    );
+
+    const response = {
+      type: "keyhive-sync-missing-contact-card",
+      senderId: this.peerId,
+      targetId: message.senderId,
+    };
+    this.send(response, true);
   }
 
   private async receiveKeyhiveSyncOps(message: Message): Promise<void> {

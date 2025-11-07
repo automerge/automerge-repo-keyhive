@@ -5,12 +5,12 @@ import { ContactCard, Signed, Keyhive } from "@keyhive/keyhive/slim";
 import { verifyingKeyPeerIdWithoutSuffix } from "../utilities.js";
 
 export type KeyhiveMessageData = {
-  contactCard: ContactCard;
+  contactCard?: ContactCard;
   signed: Signed;
 };
 
 function encodeKeyhiveMessageData(msg: KeyhiveMessageData): Uint8Array {
-  const contactCardJson = msg.contactCard.toJson();
+  const contactCardJson = msg.contactCard ? msg.contactCard.toJson() : "";
   const signedBytes = msg.signed.toBytes();
 
   return encode({
@@ -28,7 +28,7 @@ export function decodeKeyhiveMessageData(
       signed: Uint8Array;
     };
 
-    const contactCard = ContactCard.fromJson(decoded.contactCard);
+    const contactCard = decoded.contactCard === "" ? undefined : ContactCard.fromJson(decoded.contactCard);
     const signed = Signed.fromBytes(decoded.signed);
 
     return {
@@ -46,11 +46,12 @@ export function decodeKeyhiveMessageData(
 
 export async function signData(
   keyhive: Keyhive,
-  data: Uint8Array
+  data: Uint8Array,
+  includeContactCard: boolean,
 ): Promise<Uint8Array> {
   try {
     const signed = await keyhive.trySign(data);
-    const contactCard = await keyhive.contactCard();
+    const contactCard = includeContactCard ? await keyhive.contactCard() : undefined;
     return encodeKeyhiveMessageData({
       contactCard,
       signed,
