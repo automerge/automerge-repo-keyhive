@@ -1,7 +1,40 @@
 import { type PeerId } from "@automerge/automerge-repo/slim";
+import { encode, decode } from "cbor-x";
 
-import { Signed, Keyhive } from "@keyhive/keyhive/slim";
+import { ContactCard, Signed, Keyhive } from "@keyhive/keyhive/slim";
 import { verifyingKeyPeerIdWithoutSuffix } from "../utilities.js";
+
+export type KeyhiveMessageData = {
+  contactCard: ContactCard;
+  signed: Signed;
+};
+
+function encodeKeyhiveMessageData(msg: KeyhiveMessageData): Uint8Array {
+  const contactCardJson = msg.contactCard.toJson();
+  const signedBytes = msg.signed.toBytes();
+
+  return encode({
+    contactCard: contactCardJson,
+    signed: signedBytes,
+  });
+}
+
+export function decodeKeyhiveMessageData(
+  encoded: Uint8Array
+): KeyhiveMessageData {
+  const decoded = decode(encoded) as {
+    contactCard: string;
+    signed: Uint8Array;
+  };
+
+  const contactCard = ContactCard.fromJson(decoded.contactCard);
+  const signed = Signed.fromBytes(decoded.signed);
+
+  return {
+    contactCard,
+    signed,
+  };
+}
 
 export async function signData(
   keyhive: Keyhive,
@@ -9,7 +42,11 @@ export async function signData(
 ): Promise<Uint8Array> {
   try {
     const signed = await keyhive.trySign(data);
-    return signed.toBytes();
+    const contactCard = await keyhive.contactCard();
+    return encodeKeyhiveMessageData({
+      contactCard,
+      signed,
+    });
   } catch (error) {
     console.error("[AMRepoKeyhive] Error during signing:", error);
     throw error;
@@ -20,21 +57,23 @@ export async function signData(
 export function verifyData(
   peerId: PeerId,
   data: Uint8Array
-): Signed | undefined {
+): KeyhiveMessageData | undefined {
   try {
-    const signed = Signed.fromBytes(data);
+    const keyhiveMessageData = decodeKeyhiveMessageData(data);
     const verifyingKeyPeerId = verifyingKeyPeerIdWithoutSuffix(peerId);
-    if (peerIdFromSigned(signed) !== verifyingKeyPeerId) {
+    if (peerIdFromSigned(keyhiveMessageData.signed) !== verifyingKeyPeerId) {
       console.log(
         "[AMRepoKeyhive] Peer id on Signed does not match provided peer id"
       );
       console.debug("[AMRepoKeyhive] Expected: " + peerId);
-      console.debug("[AMRepoKeyhive] Found: " + peerIdFromSigned(signed));
+      console.debug(
+        "[AMRepoKeyhive] Found: " + peerIdFromSigned(keyhiveMessageData.signed)
+      );
       return undefined;
     }
 
-    if (signed.verify()) {
-      return signed;
+    if (keyhiveMessageData.signed.verify()) {
+      return keyhiveMessageData;
     } else {
       return undefined;
     }

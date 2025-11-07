@@ -17,6 +17,9 @@ importers:
       '@keyhive/keyhive':
         specifier: ^0.0.0-alpha.42
         version: 0.0.0-alpha.42
+      cbor-x:
+        specifier: ^1.6.0
+        version: 1.6.0
       eventemitter3:
         specifier: ^5.0.1
         version: 5.0.1

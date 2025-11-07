@@ -7,7 +7,7 @@ import {
 } from "@automerge/automerge-repo/slim";
 import { Keyhive } from "@keyhive/keyhive/slim";
 
-import { signData, verifyData } from "./messages.js";
+import { KeyhiveMessageData, signData, verifyData } from "./messages.js";
 import { Pending } from "./pending.js";
 import { getMembershipOpsForPeer } from "../utilities.js";
 
@@ -65,33 +65,30 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
-    if ("data" in message && message.data !== undefined) {
-      if (message.type === "keyhive-archive") {
-        if (message.targetId == this.peerId) {
-          const originalSenderId = message.senderId;
-          message.senderId = this.peerId;
-          for (const targetId of this.peers) {
-            if (targetId === originalSenderId || targetId === this.peerId) {
-              continue;
-            }
-            message.targetId = targetId;
-            console.debug(
-              `[AMRepoKeyhive] Sending keyhive message to ${targetId}`
-            );
-            this.signAndSend(message);
-          }
-        } else {
-          console.debug(
-            `[AMRepoKeyhive] Sending keyhive message to ${message.targetId}`
-          );
-          this.signAndSend(message);
-        }
-      } else {
-        this.signAndSend(message);
-      }
-    } else {
-      this.networkAdapter.send(message);
-    }
+    // if ("data" in message && message.data !== undefined) {
+    //   if (message.type === "keyhive-archive") {
+    //     if (message.targetId == this.peerId) {
+    //       const originalSenderId = message.senderId;
+    //       message.senderId = this.peerId;
+    //       for (const targetId of this.peers) {
+    //         if (targetId === originalSenderId || targetId === this.peerId) {
+    //           continue;
+    //         }
+    //         message.targetId = targetId;
+    //         console.debug(
+    //           `[AMRepoKeyhive] Sending keyhive message to ${targetId}`
+    //         );
+    //         this.signAndSend(message);
+    //       }
+    //     } else {
+    //       console.debug(
+    //         `[AMRepoKeyhive] Sending keyhive message to ${message.targetId}`
+    //       );
+    //         this.signAndSend(message);
+    //     }
+    //   }
+    // }
+    this.signAndSend(message);
   }
 
   private signAndSend(message: Message): void {
@@ -102,11 +99,12 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
-    if (!("data" in message && message.data !== undefined)) {
-      throw new Error("Data is expected for message to sign");
-    }
+    const data: Uint8Array =
+      "data" in message && message.data !== undefined
+        ? message.data
+        : new Uint8Array();
     const seqNumber = this.pending.register();
-    const signedData = await signData(this.keyhive, message.data as Uint8Array);
+    const signedData = await signData(this.keyhive, data);
     // Wait for network to be ready before sending
     await this.networkAdapter.whenReady();
     this.pending.fire(seqNumber, () => {
@@ -123,36 +121,45 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       //   console.log(`Unknown remote peer ${message.senderId}. Ignoring message!`);
       //   return;
       // }
-      if ("data" in message && message.data !== undefined) {
-        const maybeSigned = verifyData(message.senderId, message.data);
-        if (maybeSigned) {
-          message.data = maybeSigned.payload;
-          if (message.type === "keyhive-archive") {
-            (this as any).emit("keyhive-archive", message);
-          } else if (message.type === "keyhive-sync-request") {
-            this.sendKeyhiveSyncResponse(message);
-          } else if (message.type === "keyhive-sync-response") {
-            this.sendKeyhiveSyncOps(message);
-          } else if (message.type === "keyhive-sync-ops") {
-            this.receiveKeyhiveSyncOps(message);
-          } else {
-            this.emit("message", message);
-          }
-        } else {
-          console.error(
-            "[AMRepoKeyhive] Signed message could not be verified!"
-          );
-        }
+      if (!("data" in message) || message.data === undefined) {
+        console.error("[AMRepoKeyhive] Expected signed message data not found");
+        return;
+      }
+      const maybeKeyhiveMessageData = verifyData(
+        message.senderId,
+        message.data
+      );
+      if (maybeKeyhiveMessageData) {
+        void this.handleKeyhiveMessage(message, maybeKeyhiveMessageData);
       } else {
-        if (message.type === "request-keyhive") {
-          (this as any).emit("request-keyhive", message);
-        } else {
-          this.emit("message", message);
-        }
+        console.error("[AMRepoKeyhive] Signed message could not be verified!");
       }
     } catch (e) {
       console.error("[AMRepoKeyhive] Could not decode signed message:", e);
       return;
+    }
+  }
+
+  private async handleKeyhiveMessage(
+    message: Message,
+    keyhiveMessageData: KeyhiveMessageData
+  ) {
+    await this.keyhive.receiveContactCard(keyhiveMessageData.contactCard);
+    message.data = keyhiveMessageData.signed.payload;
+    // FIXME: We should either remove "keyhive-archive" and "keyhive-archive-request"
+    // or handle them here.
+    if (message.type === "keyhive-archive") {
+      (this as any).emit("keyhive-archive", message);
+    } else if (message.type === "request-keyhive") {
+      (this as any).emit("request-keyhive", message);
+    } else if (message.type === "keyhive-sync-request") {
+      await this.sendKeyhiveSyncResponse(message);
+    } else if (message.type === "keyhive-sync-response") {
+      await this.sendKeyhiveSyncOps(message);
+    } else if (message.type === "keyhive-sync-ops") {
+      await this.receiveKeyhiveSyncOps(message);
+    } else {
+      this.emit("message", message);
     }
   }
 
@@ -217,11 +224,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
   }
 
-  private sendKeyhiveSyncResponse(message: Message): void {
-    void this.asyncSendKeyhiveSyncResponse(message);
-  }
-
-  private async asyncSendKeyhiveSyncResponse(message: Message): Promise<void> {
+  private async sendKeyhiveSyncResponse(message: Message): Promise<void> {
     if (!("data" in message) || !message.data) {
       console.error("[AMRepoKeyhive] Expected data in keyhive-sync-request");
       return;
@@ -276,11 +279,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
   }
 
-  private sendKeyhiveSyncOps(message: Message): void {
-    void this.asyncSendKeyhiveSyncOps(message);
-  }
-
-  private async asyncSendKeyhiveSyncOps(message: Message): Promise<void> {
+  private async sendKeyhiveSyncOps(message: Message): Promise<void> {
     if (!("data" in message) || !message.data) {
       console.error("[AMRepoKeyhive] Expected data in keyhive-sync-response");
       return;
@@ -347,11 +346,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
   }
 
-  private receiveKeyhiveSyncOps(message: Message): void {
-    void this.asyncReceiveKeyhiveSyncOps(message);
-  }
-
-  private async asyncReceiveKeyhiveSyncOps(message: Message): Promise<void> {
+  private async receiveKeyhiveSyncOps(message: Message): Promise<void> {
     if (!("data" in message) || !message.data) {
       console.error("[AMRepoKeyhive] Expected data in keyhive-sync-ops");
       return;
