@@ -6,6 +6,7 @@ import {
   StorageAdapterInterface,
 } from "@automerge/automerge-repo/slim";
 import { Keyhive } from "@keyhive/keyhive/slim";
+import { encode, decode } from "cbor-x";
 
 import {
   decodeKeyhiveMessageData,
@@ -102,7 +103,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     void this.asyncSignAndSend(message, includeContactCard);
   }
 
-  async asyncSignAndSend(message: Message, includeContactCard: boolean): Promise<void> {
+  async asyncSignAndSend(
+    message: Message,
+    includeContactCard: boolean
+  ): Promise<void> {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
@@ -151,7 +155,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     keyhiveMessageData: KeyhiveMessageData
   ) {
     if (keyhiveMessageData.contactCard) {
-      const maybeAgent = await this.keyhive.getAgent(keyhiveMessageData.contactCard.id);
+      const maybeAgent = await this.keyhive.getAgent(
+        keyhiveMessageData.contactCard.id
+      );
       if (!maybeAgent) {
         console.log("!@ No agent found! Receiving Contact Card");
         await this.keyhive.receiveContactCard(keyhiveMessageData.contactCard);
@@ -184,7 +190,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   syncKeyhive(
     keyhive: Keyhive,
     maybeSenderId: PeerId | undefined = undefined,
-    includeContactCard: boolean = false,
+    includeContactCard: boolean = false
   ): void {
     void this.asyncSyncKeyhive(keyhive, maybeSenderId, includeContactCard);
   }
@@ -192,7 +198,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private async asyncSyncKeyhive(
     keyhive: Keyhive,
     maybeSenderId: PeerId | undefined,
-    includeContactCard: boolean,
+    includeContactCard: boolean
   ): Promise<void> {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
@@ -228,8 +234,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       if (ops) {
         console.log(`!@ asyncSyncKeyhive: Got agent for targetId ${targetId}`);
         const opHashes = Array.from(ops.keys());
-        const dataString = JSON.stringify(opHashes);
-        const data = new TextEncoder().encode(dataString);
+        const data = encode(opHashes);
         const message = {
           type: "keyhive-sync-request",
           senderId: senderId,
@@ -267,7 +272,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
 
     const peerOpHashes = new Set(
-      JSON.parse(new TextDecoder().decode(message.data as Uint8Array))
+      decode(message.data as Uint8Array)
     );
     console.debug(
       `[AMRepoKeyhive] Received keyhive sync request with ${peerOpHashes.size} operation hashes`
@@ -284,15 +289,16 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       const foundOps = Array.from(hashesToSend).map((hash) => ops.get(hash));
 
       const requested = Array.from(peerOpHashes.difference(opHashes));
-      console.debug(`Found ${foundOps.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`);
+      console.debug(
+        `Found ${foundOps.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`
+      );
 
       const responseData = {
         requested,
         found: foundOps,
       };
 
-      const dataString = JSON.stringify(responseData);
-      const data = new TextEncoder().encode(dataString);
+      const data = encode(responseData);
       const response = {
         type: "keyhive-sync-response",
         senderId: this.peerId,
@@ -331,9 +337,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       throw new Error("peerId must be defined!");
     }
 
-    const responseData = JSON.parse(
-      new TextDecoder().decode(message.data as Uint8Array)
-    );
+    const responseData = decode(message.data as Uint8Array);
     const requestedHashes: Uint8Array[] = responseData.requested || [];
     const foundEvents: Uint8Array[] = responseData.found || [];
 
@@ -371,7 +375,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           `[AMRepoKeyhive] Sending ${requestedOps.length} requested ops to ${message.senderId}`
         );
 
-        const data = new TextEncoder().encode(JSON.stringify(requestedOps));
+        const data = encode(requestedOps);
         const response = {
           type: "keyhive-sync-ops",
           senderId: this.peerId,
@@ -383,7 +387,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
   }
 
-  private async sendKeyhiveSyncMissingContactCard(message: Message): Promise<void> {
+  private async sendKeyhiveSyncMissingContactCard(
+    message: Message
+  ): Promise<void> {
     if (message.type !== "keyhive-sync-request-contact-card") {
       console.error(
         `[AMRepoKeyhive] Expected keyhive-sync-request-contact-card, but got ${message.type}`
@@ -421,9 +427,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       throw new Error("peerId must be defined!");
     }
 
-    const receivedEvents = JSON.parse(
-      new TextDecoder().decode(message.data as Uint8Array)
-    );
+    const receivedEvents = decode(message.data as Uint8Array);
 
     console.debug(
       `[AMRepoKeyhive] Received ${receivedEvents.length} keyhive events`

@@ -28,7 +28,10 @@ export function decodeKeyhiveMessageData(
       signed: Uint8Array;
     };
 
-    const contactCard = decoded.contactCard === "" ? undefined : ContactCard.fromJson(decoded.contactCard);
+    const contactCard =
+      decoded.contactCard === ""
+        ? undefined
+        : ContactCard.fromJson(decoded.contactCard);
     const signed = Signed.fromBytes(decoded.signed);
 
     return {
@@ -47,11 +50,13 @@ export function decodeKeyhiveMessageData(
 export async function signData(
   keyhive: Keyhive,
   data: Uint8Array,
-  includeContactCard: boolean,
+  includeContactCard: boolean
 ): Promise<Uint8Array> {
   try {
     const signed = await keyhive.trySign(data);
-    const contactCard = includeContactCard ? await keyhive.contactCard() : undefined;
+    const contactCard = includeContactCard
+      ? await keyhive.contactCard()
+      : undefined;
     return encodeKeyhiveMessageData({
       contactCard,
       signed,
