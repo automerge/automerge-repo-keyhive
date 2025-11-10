@@ -179,7 +179,9 @@ export async function ingestKeyhiveFromStorage(
   kh: Keyhive,
   db: StorageAdapterInterface
 ): Promise<void> {
-  console.log("[AMRepoKeyhive] Attempting to recover from UnknownInvitePrekey error by reloading storage");
+  console.log(
+    "[AMRepoKeyhive] Attempting to recover from UnknownInvitePrekey error by reloading storage"
+  );
 
   const keyhiveArchiveChunks = await db.loadRange([
     KEYHIVE_DB_KEY,
@@ -199,7 +201,10 @@ export async function ingestKeyhiveFromStorage(
       try {
         await kh.ingestArchive(new Archive(chunk.data));
       } catch (error) {
-        console.warn(`[AMRepoKeyhive] Failed to re-ingest archive during recovery:`, error);
+        console.warn(
+          `[AMRepoKeyhive] Failed to re-ingest archive during recovery:`,
+          error
+        );
       }
     }
   }
@@ -216,7 +221,10 @@ export async function ingestKeyhiveFromStorage(
     try {
       await kh.ingestEventsBytes(eventsBytes);
     } catch (error) {
-      console.warn(`[AMRepoKeyhive] Failed to ingest events during recovery:`, error);
+      console.warn(
+        `[AMRepoKeyhive] Failed to ingest events during recovery:`,
+        error
+      );
     }
   }
 

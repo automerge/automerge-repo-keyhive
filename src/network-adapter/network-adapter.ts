@@ -16,7 +16,10 @@ import {
 } from "./messages.js";
 import { Pending } from "./pending.js";
 import { getMembershipOpsForPeer } from "../utilities.js";
-import { ingestKeyhiveFromStorage, saveEventBytesWithHash } from "../keyhive/keyhive.js";
+import {
+  ingestKeyhiveFromStorage,
+  saveEventBytesWithHash,
+} from "../keyhive/keyhive.js";
 
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
@@ -516,36 +519,30 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           error.toError()
         : error;
 
-    const errorMessage = jsError instanceof Error ? jsError.message : String(jsError);
+    const errorMessage =
+      jsError instanceof Error ? jsError.message : String(jsError);
 
-    if (errorMessage.includes("UnknownInvitePrekey")) {
-      console.warn(
-        `[AMRepoKeyhive] UnknownInvitePrekey error detected while ingesting events from ${senderId}. Attempting recovery.`
+    console.warn(
+      `[AMRepoKeyhive] Error while ingesting events from ${senderId}: ${errorMessage}. Attempting recovery from storage.`
+    );
+
+    try {
+      // Attempt recovery by ingesting all archives and events from storage
+      await ingestKeyhiveFromStorage(this.keyhive, this.storage);
+      await this.keyhive.ingestEventsBytes(events);
+      console.log(
+        `[AMRepoKeyhive] Successfully ingested events from ${senderId} after recovery from storage`
       );
-
-      try {
-        // Attempt recovery by ingesting all archives and events from storage
-        await ingestKeyhiveFromStorage(this.keyhive, this.storage);
-        await this.keyhive.ingestEventsBytes(events);
-        console.log(
-          `[AMRepoKeyhive] Successfully ingested events from ${senderId} after recovery`
-        );
-      } catch (retryError) {
-        // @ts-ignore
-        const retryJsError =
-          retryError && typeof retryError == "object" && "toError" in retryError
-            ? // @ts-ignore
-              retryError.toError()
-            : retryError;
-        console.error(
-          `[AMRepoKeyhive] Failed to ingest events from ${senderId} even after recovery:`,
-          retryJsError
-        );
-      }
-    } else {
+    } catch (retryError) {
+      // @ts-ignore
+      const retryJsError =
+        retryError && typeof retryError == "object" && "toError" in retryError
+          ? // @ts-ignore
+            retryError.toError()
+          : retryError;
       console.error(
-        `[AMRepoKeyhive] Failed to ingest events from ${senderId}:`,
-        jsError
+        `[AMRepoKeyhive] Failed to ingest events from ${senderId} even after recovery from storage:`,
+        retryJsError
       );
     }
   }
