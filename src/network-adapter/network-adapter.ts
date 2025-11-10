@@ -375,7 +375,36 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         `[AMRepoKeyhive] Ingesting ${foundEvents.length} keyhive events from ${message.senderId}`
       );
       try {
-        await this.keyhive.ingestEventsBytes(foundEvents);
+        const pendingEvents = await this.keyhive.ingestEventsBytes(foundEvents);
+        console.debug(
+          `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
+        );
+
+        // If there are pending events, attempt recovery from storage
+        if (pendingEvents.length > 0) {
+          console.warn(
+            `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending. Attempting recovery from storage.`
+          );
+          try {
+            await ingestKeyhiveFromStorage(this.keyhive, this.storage);
+            const retryPending = await this.keyhive.ingestEventsBytes(foundEvents);
+            if (retryPending.length === 0) {
+              console.log(
+                `[AMRepoKeyhive] Successfully ingested all events after recovery from storage`
+              );
+            } else {
+              console.warn(
+                `[AMRepoKeyhive] Still have ${retryPending.length} pending events after recovery`
+              );
+            }
+          } catch (recoveryError) {
+            console.error(
+              `[AMRepoKeyhive] Failed during storage recovery:`,
+              recoveryError
+            );
+          }
+        }
+
         // Save all received events to storage
         await this.saveReceivedEvents(foundEvents);
       } catch (error) {
@@ -475,7 +504,36 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         `[AMRepoKeyhive] Ingesting ${receivedEvents.length} keyhive events from ${message.senderId}`
       );
       try {
-        await this.keyhive.ingestEventsBytes(receivedEvents);
+        const pendingEvents = await this.keyhive.ingestEventsBytes(receivedEvents);
+        console.debug(
+          `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
+        );
+
+        // If there are pending events, attempt recovery from storage
+        if (pendingEvents.length > 0) {
+          console.warn(
+            `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending. Attempting recovery from storage.`
+          );
+          try {
+            await ingestKeyhiveFromStorage(this.keyhive, this.storage);
+            const retryPending = await this.keyhive.ingestEventsBytes(receivedEvents);
+            if (retryPending.length === 0) {
+              console.log(
+                `[AMRepoKeyhive] Successfully ingested all events after recovery from storage`
+              );
+            } else {
+              console.warn(
+                `[AMRepoKeyhive] Still have ${retryPending.length} pending events after recovery`
+              );
+            }
+          } catch (recoveryError) {
+            console.error(
+              `[AMRepoKeyhive] Failed during storage recovery:`,
+              recoveryError
+            );
+          }
+        }
+
         // Save all received events to storage
         await this.saveReceivedEvents(receivedEvents);
       } catch (error) {
