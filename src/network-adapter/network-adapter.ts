@@ -16,6 +16,7 @@ import {
 } from "./messages.js";
 import { Pending } from "./pending.js";
 import { getMembershipOpsForPeer } from "../utilities.js";
+import { ingestKeyhiveFromStorage } from "../keyhive/keyhive.js";
 
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
@@ -370,7 +371,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       console.debug(
         `[AMRepoKeyhive] Ingesting ${foundEvents.length} keyhive events from ${message.senderId}`
       );
-      await this.keyhive.ingestEventsBytes(foundEvents);
+      try {
+        await this.keyhive.ingestEventsBytes(foundEvents);
+      } catch (error) {
+        await this.handleIngestError(error, foundEvents, message.senderId);
+      }
     }
 
     if (requestedHashes.length > 0) {
@@ -464,7 +469,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       console.debug(
         `[AMRepoKeyhive] Ingesting ${receivedEvents.length} keyhive events from ${message.senderId}`
       );
-      await this.keyhive.ingestEventsBytes(receivedEvents);
+      try {
+        await this.keyhive.ingestEventsBytes(receivedEvents);
+      } catch (error) {
+        await this.handleIngestError(error, receivedEvents, message.senderId);
+      }
     }
   }
 
@@ -477,6 +486,52 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   //   };
   //   this.send(message);
   // }
+
+  private async handleIngestError(
+    error: unknown,
+    events: Uint8Array[],
+    senderId: PeerId
+  ): Promise<void> {
+    // @ts-ignore
+    const jsError =
+      error && typeof error == "object" && "toError" in error
+        ? // @ts-ignore
+          error.toError()
+        : error;
+
+    const errorMessage = jsError instanceof Error ? jsError.message : String(jsError);
+
+    if (errorMessage.includes("UnknownInvitePrekey")) {
+      console.warn(
+        `[AMRepoKeyhive] UnknownInvitePrekey error detected while ingesting events from ${senderId}. Attempting recovery.`
+      );
+
+      try {
+        // Attempt recovery by ingesting all archives and events from storage
+        await ingestKeyhiveFromStorage(this.keyhive, this.storage);
+        await this.keyhive.ingestEventsBytes(events);
+        console.log(
+          `[AMRepoKeyhive] Successfully ingested events from ${senderId} after recovery`
+        );
+      } catch (retryError) {
+        // @ts-ignore
+        const retryJsError =
+          retryError && typeof retryError == "object" && "toError" in retryError
+            ? // @ts-ignore
+              retryError.toError()
+            : retryError;
+        console.error(
+          `[AMRepoKeyhive] Failed to ingest events from ${senderId} even after recovery:`,
+          retryJsError
+        );
+      }
+    } else {
+      console.error(
+        `[AMRepoKeyhive] Failed to ingest events from ${senderId}:`,
+        jsError
+      );
+    }
+  }
 
   // FIXME: syncKeyhive should probably find keyhive and peerId on its own.
   private requestKeyhiveSync(): void {

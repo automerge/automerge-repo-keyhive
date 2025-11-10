@@ -167,6 +167,55 @@ export async function saveEventWithHash(
   );
 }
 
+// FIXME: Can we break out common functionality with `loadOrCreateKeyhive`?
+export async function ingestKeyhiveFromStorage(
+  kh: Keyhive,
+  db: StorageAdapterInterface
+): Promise<void> {
+  console.log("[AMRepoKeyhive] Attempting to recover from UnknownInvitePrekey error by reloading storage");
+
+  const keyhiveArchiveChunks = await db.loadRange([
+    KEYHIVE_DB_KEY,
+    KEYHIVE_ARCHIVES_KEY,
+  ]);
+  const keyhiveEventsChunks = await db.loadRange([
+    KEYHIVE_DB_KEY,
+    KEYHIVE_EVENTS_KEY,
+  ]);
+
+  // Ingest all archives
+  for (const chunk of keyhiveArchiveChunks) {
+    if (chunk.data) {
+      console.debug(
+        `[AMRepoKeyhive] Re-ingesting archive from storage. Hash: ${chunk.key[2]}`
+      );
+      try {
+        await kh.ingestArchive(new Archive(chunk.data));
+      } catch (error) {
+        console.warn(`[AMRepoKeyhive] Failed to re-ingest archive during recovery:`, error);
+      }
+    }
+  }
+
+  // Ingest all events
+  const eventsBytes: Array<Uint8Array> = keyhiveEventsChunks
+    .map((chunk) => chunk.data)
+    .filter((data): data is Uint8Array => data !== undefined);
+
+  if (eventsBytes.length > 0) {
+    console.debug(
+      `[AMRepoKeyhive] Ingesting ${eventsBytes.length} events from storage`
+    );
+    try {
+      await kh.ingestEventsBytes(eventsBytes);
+    } catch (error) {
+      console.warn(`[AMRepoKeyhive] Failed to ingest events during recovery:`, error);
+    }
+  }
+
+  console.log("[AMRepoKeyhive] Recovery attempt completed");
+}
+
 export type KeyhiveArchiveBytes = Uint8Array;
 
 async function loadOrCreateKeyhive(
