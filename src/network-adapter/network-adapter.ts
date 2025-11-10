@@ -16,7 +16,7 @@ import {
 } from "./messages.js";
 import { Pending } from "./pending.js";
 import { getMembershipOpsForPeer } from "../utilities.js";
-import { ingestKeyhiveFromStorage } from "../keyhive/keyhive.js";
+import { ingestKeyhiveFromStorage, saveEventBytesWithHash } from "../keyhive/keyhive.js";
 
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
@@ -373,6 +373,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       );
       try {
         await this.keyhive.ingestEventsBytes(foundEvents);
+        // Save all received events to storage
+        await this.saveReceivedEvents(foundEvents);
       } catch (error) {
         await this.handleIngestError(error, foundEvents, message.senderId);
       }
@@ -471,6 +473,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       );
       try {
         await this.keyhive.ingestEventsBytes(receivedEvents);
+        // Save all received events to storage
+        await this.saveReceivedEvents(receivedEvents);
       } catch (error) {
         await this.handleIngestError(error, receivedEvents, message.senderId);
       }
@@ -486,6 +490,19 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   //   };
   //   this.send(message);
   // }
+
+  private async saveReceivedEvents(events: Uint8Array[]): Promise<void> {
+    for (const event of events) {
+      try {
+        await saveEventBytesWithHash(event, this.storage);
+      } catch (error) {
+        console.error("[AMRepoKeyhive] Failed to save received event:", error);
+      }
+    }
+    console.debug(
+      `[AMRepoKeyhive] Saved ${events.length} received events to storage`
+    );
+  }
 
   private async handleIngestError(
     error: unknown,

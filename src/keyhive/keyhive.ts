@@ -157,6 +157,13 @@ export async function saveEventWithHash(
   db: StorageAdapterInterface
 ) {
   const eventBytes = event.toBytes();
+  await saveEventBytesWithHash(eventBytes, db);
+}
+
+export async function saveEventBytesWithHash(
+  eventBytes: Uint8Array,
+  db: StorageAdapterInterface
+) {
   const hash = await crypto.subtle.digest(
     "SHA-256",
     new Uint8Array(eventBytes)
@@ -187,7 +194,7 @@ export async function ingestKeyhiveFromStorage(
   for (const chunk of keyhiveArchiveChunks) {
     if (chunk.data) {
       console.debug(
-        `[AMRepoKeyhive] Re-ingesting archive from storage. Hash: ${chunk.key[2]}`
+        `[AMRepoKeyhive] Ingesting archive from storage. Hash: ${chunk.key[2]}`
       );
       try {
         await kh.ingestArchive(new Archive(chunk.data));
