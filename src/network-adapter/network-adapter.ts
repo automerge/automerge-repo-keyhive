@@ -580,29 +580,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     const errorMessage =
       jsError instanceof Error ? jsError.message : String(jsError);
 
-    console.warn(
-      `[AMRepoKeyhive] Error while ingesting events from ${senderId}: ${errorMessage}. Attempting recovery from storage.`
+    console.error(
+      `[AMRepoKeyhive] Error while ingesting events from ${senderId}: ${errorMessage}`
     );
-
-    try {
-      // Attempt recovery by ingesting all archives and events from storage
-      await ingestKeyhiveFromStorage(this.keyhive, this.storage);
-      await this.keyhive.ingestEventsBytes(events);
-      console.log(
-        `[AMRepoKeyhive] Successfully ingested events from ${senderId} after recovery from storage`
-      );
-    } catch (retryError) {
-      // @ts-ignore
-      const retryJsError =
-        retryError && typeof retryError == "object" && "toError" in retryError
-          ? // @ts-ignore
-            retryError.toError()
-          : retryError;
-      console.error(
-        `[AMRepoKeyhive] Failed to ingest events from ${senderId} even after recovery from storage:`,
-        retryJsError
-      );
-    }
   }
 
   // FIXME: syncKeyhive should probably find keyhive and peerId on its own.
