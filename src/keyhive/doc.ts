@@ -50,6 +50,10 @@ export async function addMemberToDoc(
     return;
   }
 
+  if (!kh.getAgent(contactCard.id)) {
+    kh.receiveContactCard(contactCard);
+  }
+
   const docId: KeyhiveDocumentId = docIdFromAutomergeUrl(docUrl);
   console.debug(
     `[AMRepoKeyhive] addMemberToDoc: From url ${docUrl} derived Doc Id ${docId.toBytes()}`
