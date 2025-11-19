@@ -37,7 +37,7 @@ export function hexToUint8Array(hex: string): Uint8Array {
   return bytes;
 }
 
-export async function getMembershipOpsForPeer(
+export async function getEventsForPeer(
   keyhive: Keyhive,
   peerId: PeerId
 ): Promise<Map<Uint8Array, any> | null> {
@@ -48,7 +48,5 @@ export async function getMembershipOpsForPeer(
     console.warn(`[AMRepoKeyhive] No agent found for peer ${peerId}`);
     return null;
   }
-  // FIXME
-  // return await keyhive.eventsForAgent(agent);
-  return await keyhive.membershipOpsForAgent(agent);
+  return await keyhive.eventsForAgent(agent);
 }

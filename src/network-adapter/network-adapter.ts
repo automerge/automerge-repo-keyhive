@@ -15,7 +15,7 @@ import {
   verifyData,
 } from "./messages.js";
 import { Pending } from "./pending.js";
-import { getMembershipOpsForPeer } from "../utilities.js";
+import { getEventsForPeer } from "../utilities.js";
 import {
   ingestKeyhiveFromStorage,
   saveEventBytesWithHash,
@@ -234,7 +234,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         continue;
       }
 
-      const ops = await getMembershipOpsForPeer(this.keyhive, targetId);
+      const ops = await getEventsForPeer(this.keyhive, targetId);
       if (ops) {
         console.log(`!@ asyncSyncKeyhive: Got agent for targetId ${targetId}`);
         const opHashes = Array.from(ops.keys());
@@ -280,7 +280,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       `[AMRepoKeyhive] Received keyhive sync request with ${peerOpHashesArray.length} operation hashes`
     );
 
-    const ops = await getMembershipOpsForPeer(this.keyhive, message.senderId);
+    const ops = await getEventsForPeer(this.keyhive, message.senderId);
     if (ops) {
       const opHashesArray = Array.from(ops.keys());
       console.debug(
@@ -413,7 +413,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
 
     if (requestedHashes.length > 0) {
-      const ops = await getMembershipOpsForPeer(this.keyhive, message.senderId);
+      const ops = await getEventsForPeer(this.keyhive, message.senderId);
       if (ops) {
         console.log(
           `!@ asyncSendKeyhiveSyncOps: Got ops for senderId ${message.senderId}`
