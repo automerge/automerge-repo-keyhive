@@ -255,12 +255,12 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       throw new Error("peerId must be defined!");
     }
 
-    const peerOpHashesArray: Uint8Array[] = decode(message.data as Uint8Array);
+    const peerOpHashes: { found: Uint8Array[], pending: Uint8Array[] } = decode(message.data as Uint8Array);
     console.debug(
-      `[AMRepoKeyhive] Received keyhive sync request with ${peerOpHashesArray.length} operation hashes`
+      `[AMRepoKeyhive] Received keyhive sync request with ${peerOpHashes.found.length} operation hashes`
     );
     // Log peer's event hashes
-    const peerHashesHex = peerOpHashesArray.map((h) =>
+    const peerHashesHex = peerOpHashes.found.map((h) =>
       Array.from(h).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16)
     );
     console.debug(`[AMRepoKeyhive] Peer's event hashes (truncated): ${JSON.stringify(peerHashesHex)}`);
@@ -288,7 +288,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       // Convert Uint8Arrays to strings for value-based comparison in Set operations
       const opHashStrings = new Set(opHashesArray.map((h) => h.toString()));
       const peerOpHashStrings = new Set(
-        peerOpHashesArray.map((h) => h.toString())
+        peerOpHashes.found.map((h) => h.toString())
+      );
+      const peerPendingOpHashStrings = new Set(
+        peerOpHashes.pending.map((h) => h.toString())
       );
       const pendingOpHashStrings = new Set(
         pendingOpHashesArray.map((h) => h.toString())
@@ -299,13 +302,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         opHashesArray.map((h) => [h.toString(), h])
       );
       const peerHashStringToBytes = new Map(
-        peerOpHashesArray.map((h) => [h.toString(), h])
-      );
-      const pendingOpHashStringToBytes = new Map(
-        pendingOpHashesArray.map((h) => [h.toString(), h])
+        peerOpHashes.found.map((h) => [h.toString(), h])
       );
 
-      const hashStringsToSend = opHashStrings.difference(peerOpHashStrings);
+      const hashStringsToSend = opHashStrings.difference(peerOpHashStrings.union(peerPendingOpHashStrings));
       const foundOps = Array.from(hashStringsToSend)
         .map((str) => {
           const hash = hashStringToBytes.get(str);
