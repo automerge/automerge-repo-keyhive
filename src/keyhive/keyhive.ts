@@ -25,6 +25,8 @@ import { KeyhiveEventEmitter } from "./emitter.js";
 export const KEYHIVE_DB_KEY = "keyhive-db";
 export const KEYHIVE_ARCHIVES_KEY = "/archives/";
 export const KEYHIVE_EVENTS_KEY = "/ops/";
+// FIXME: This is not secure
+export const KEYHIVE_PREKEY_SECRETS_KEY = "/prekey-secrets/";
 
 export type AutomergeRepoKeyhive = {
   active: Active;
@@ -61,6 +63,10 @@ export async function initializeAutomergeRepoKeyhive(options: {
     uniqueIdHash,
     emitter.handleKeyhiveEvent
   );
+
+  // FIXME: This is not secure - load prekey secrets from storage
+  await loadAndConsolidatePrekeySecrets(keyhive, options.storage);
+
   const active = await createActive(keyPair, signer, keyhive);
   const peerId = peerIdFromSigner(active.signer, options.peerIdSuffix);
 
@@ -121,6 +127,16 @@ export async function initializeAutomergeRepoKeyhive(options: {
     emitter.on("update", async (event: KeyhiveEvent) => {
       console.debug("[AMRepoKeyhive] Keyhive updated. Saving and syncing events.");
       await saveEventWithHash(event, options.storage);
+
+      // FIXME: This is not secure - save prekey secrets on rotation/expansion
+      const variant = event.variant;
+      if (variant === "PREKEY_ROTATED" || variant === "PREKEYS_EXPANDED") {
+        console.debug(
+          `[AMRepoKeyhive] Prekey event detected (${variant}). Saving prekey secrets.`
+        );
+        await savePrekeySecrets(keyhive, options.storage);
+      }
+
       keyhiveNetworkAdapter.syncKeyhive(keyhive);
     });
   }
@@ -167,6 +183,63 @@ export async function saveEventBytesWithHash(
     [KEYHIVE_DB_KEY, KEYHIVE_EVENTS_KEY, uint8ArrayToHex(new Uint8Array(hash))],
     eventBytes
   );
+}
+
+// FIXME: This is not secure
+export async function savePrekeySecrets(
+  kh: Keyhive,
+  db: StorageAdapterInterface
+) {
+  const secretsBytes = await kh.exportPrekeySecretsBytes();
+  const hash = await crypto.subtle.digest("SHA-256", secretsBytes);
+  const hashHex = uint8ArrayToHex(new Uint8Array(hash));
+  console.debug(`[AMRepoKeyhive] Saving prekey secrets. Hash: ${hashHex}`);
+  await db.save(
+    [KEYHIVE_DB_KEY, KEYHIVE_PREKEY_SECRETS_KEY, hashHex],
+    secretsBytes
+  );
+}
+
+// FIXME: This is not secure
+export async function loadAndConsolidatePrekeySecrets(
+  kh: Keyhive,
+  db: StorageAdapterInterface
+): Promise<void> {
+  const secretsChunks = await db.loadRange([
+    KEYHIVE_DB_KEY,
+    KEYHIVE_PREKEY_SECRETS_KEY,
+  ]);
+
+  if (secretsChunks.length === 0) {
+    console.debug("[AMRepoKeyhive] No prekey secrets found in storage");
+    return;
+  }
+
+  console.debug(
+    `[AMRepoKeyhive] Loading ${secretsChunks.length} prekey secrets entries from storage`
+  );
+
+  // Import all secrets entries (they will be merged)
+  for (const chunk of secretsChunks) {
+    if (chunk.data) {
+      try {
+        await kh.importPrekeySecretsBytes(chunk.data);
+      } catch (error) {
+        console.warn(
+          `[AMRepoKeyhive] Failed to import prekey secrets from ${chunk.key[2]}:`,
+          error
+        );
+      }
+    }
+  }
+
+  // Save consolidated secrets and remove old entries
+  await savePrekeySecrets(kh, db);
+  for (const chunk of secretsChunks) {
+    await db.remove(chunk.key);
+  }
+
+  console.debug("[AMRepoKeyhive] Prekey secrets consolidated");
 }
 
 // FIXME: Can we break out common functionality with `loadOrCreateKeyhive`?
