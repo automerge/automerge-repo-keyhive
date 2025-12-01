@@ -255,12 +255,15 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       throw new Error("peerId must be defined!");
     }
 
-    const peerOpHashes: { found: Uint8Array[], pending: Uint8Array[] } = decode(message.data as Uint8Array);
+    const requestData = decode(message.data as Uint8Array);
+    const peerFoundHashes: Uint8Array[] = requestData.found || [];
+    const peerPendingHashes: Uint8Array[] = requestData.pending || [];
+
     console.debug(
-      `[AMRepoKeyhive] Received keyhive sync request with ${peerOpHashes.found.length} operation hashes`
+      `[AMRepoKeyhive] Received keyhive sync request with ${peerFoundHashes.length} operation hashes`
     );
     // Log peer's event hashes
-    const peerHashesHex = peerOpHashes.found.map((h) =>
+    const peerHashesHex = peerFoundHashes.map((h) =>
       Array.from(h).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16)
     );
     console.debug(`[AMRepoKeyhive] Peer's event hashes (truncated): ${JSON.stringify(peerHashesHex)}`);
@@ -288,10 +291,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       // Convert Uint8Arrays to strings for value-based comparison in Set operations
       const opHashStrings = new Set(opHashesArray.map((h) => h.toString()));
       const peerOpHashStrings = new Set(
-        peerOpHashes.found.map((h) => h.toString())
+        peerFoundHashes.map((h) => h.toString())
       );
       const peerPendingOpHashStrings = new Set(
-        peerOpHashes.pending.map((h) => h.toString())
+        peerPendingHashes.map((h) => h.toString())
       );
       const pendingOpHashStrings = new Set(
         pendingOpHashesArray.map((h) => h.toString())
@@ -302,7 +305,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         opHashesArray.map((h) => [h.toString(), h])
       );
       const peerHashStringToBytes = new Map(
-        peerOpHashes.found.map((h) => [h.toString(), h])
+        peerFoundHashes.map((h) => [h.toString(), h])
       );
 
       const hashStringsToSend = opHashStrings.difference(peerOpHashStrings.union(peerPendingOpHashStrings));
