@@ -251,6 +251,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     console.debug(
       `[AMRepoKeyhive] Received keyhive sync request with ${peerOpHashesArray.length} operation hashes`
     );
+    // Log peer's event hashes
+    const peerHashesHex = peerOpHashesArray.map((h) =>
+      Array.from(h).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16)
+    );
+    console.debug(`[AMRepoKeyhive] Peer's event hashes (truncated): ${JSON.stringify(peerHashesHex)}`);
 
     const ops = await getEventsForPeer(this.keyhive, message.senderId);
     if (ops) {
@@ -258,6 +263,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       console.debug(
         `[AMRepoKeyhive] asyncSendKeyhiveSyncResponse: Found ${opHashesArray.length} total local operation hashes for ${message.senderId}`
       );
+      // Log local event hashes from eventsForAgent
+      const localHashesHex = opHashesArray.map((h) =>
+        Array.from(h).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16)
+      );
+      console.debug(`[AMRepoKeyhive] Local eventsForAgent hashes (truncated): ${JSON.stringify(localHashesHex)}`);
 
       // Convert Uint8Arrays to strings for value-based comparison in Set operations
       const opHashStrings = new Set(opHashesArray.map((h) => h.toString()));
@@ -285,17 +295,30 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       // events we already have.
       const pendingOps = await this.keyhive.pendingEventHashes()
       if (pendingOps) {
-        const pendingOpHashesArray = Array.from(pendingOps.keys())
+        const pendingOpHashesArray: Uint8Array[] = Array.from(pendingOps.keys()) as Uint8Array[]
+        // Log pending event hashes
+        const pendingHashesHex = pendingOpHashesArray.map((h: Uint8Array) =>
+          Array.from(h).map((b: number) => b.toString(16).padStart(2, "0")).join("").slice(0, 16)
+        );
+        console.debug(`[AMRepoKeyhive] Pending event hashes (truncated): ${JSON.stringify(pendingHashesHex)}`);
         for (let hash of pendingOpHashesArray) {
           opHashStrings.add(hash.toString())
           hashStringToBytes.set(hash.toString(), hash)
         }
+      } else {
+        console.debug(`[AMRepoKeyhive] No pending event hashes`);
       }
 
       const requestedHashStrings = peerOpHashStrings.difference(opHashStrings);
       const requested = Array.from(requestedHashStrings)
         .map((str) => peerHashStringToBytes.get(str))
         .filter((hash) => hash !== undefined);
+
+      // Log requested hashes (ones we're asking peer to send us)
+      const requestedHashesHex = requested.map((h) =>
+        Array.from(h).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16)
+      );
+      console.debug(`[AMRepoKeyhive] Requesting these hashes from peer (truncated): ${JSON.stringify(requestedHashesHex)}`);
 
       console.debug(
         `Found ${foundOps.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`
@@ -396,8 +419,20 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
 
     if (requestedHashes.length > 0) {
+      // Log what hashes the peer is requesting from us
+      const requestedHashesHex = requestedHashes.map((h) =>
+        Array.from(h).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16)
+      );
+      console.debug(`[AMRepoKeyhive] Peer requested these hashes (truncated): ${JSON.stringify(requestedHashesHex)}`);
+
       const ops = await getEventsForPeer(this.keyhive, message.senderId);
       if (ops) {
+        // Log what we have for this peer
+        const opsHashesHex = Array.from(ops.keys()).map((h) =>
+          Array.from(h).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16)
+        );
+        console.debug(`[AMRepoKeyhive] Our eventsForAgent for peer (truncated): ${JSON.stringify(opsHashesHex)}`);
+
         // Create a map from hash string to operation for value-based lookup
         const hashStringToOp = new Map(
           Array.from(ops.entries()).map(([hash, op]) => [hash.toString(), op])
@@ -408,8 +443,15 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           .filter((op) => op !== undefined);
 
         if (requestedOps.length < requestedHashes.length) {
+          // Log which specific hashes we couldn't find
+          const missingHashes = requestedHashes.filter(
+            (hash) => !hashStringToOp.has(hash.toString())
+          );
+          const missingHashesHex = missingHashes.map((h) =>
+            Array.from(h).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16)
+          );
           console.warn(
-            `[AMRepoKeyhive] ${requestedHashes.length} keyhive events requested, ${requestedOps.length} found`
+            `[AMRepoKeyhive] ${requestedHashes.length} keyhive events requested, ${requestedOps.length} found. Missing hashes (truncated): ${JSON.stringify(missingHashesHex)}`
           );
           if (requestedOps.length === 0) {
             return;
