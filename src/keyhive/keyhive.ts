@@ -119,13 +119,6 @@ export async function initializeAutomergeRepoKeyhive(options: {
     });
 
     emitter.on("update", async (event: KeyhiveEvent) => {
-      // // FIXME: This is a hack since we are not currently saving private keys
-      // // for a prekey rotation in storage.
-      // if (event.variant === "PREKEY_ROTATED") {
-      //   console.debug("[AMRepoKeyhive] Keyhive updated with prekey rotation. Saving full archive and syncing events.");
-      //   await saveKeyhiveWithHash(keyhive, options.storage, uniqueIdHash);
-      //   keyhiveNetworkAdapter.syncKeyhive(keyhive);
-      // } else {
       console.debug("[AMRepoKeyhive] Keyhive updated. Saving and syncing events.");
       await saveEventWithHash(event, options.storage);
       keyhiveNetworkAdapter.syncKeyhive(keyhive);

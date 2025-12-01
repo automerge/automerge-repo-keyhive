@@ -24,8 +24,6 @@ import {
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
   private peers: Set<PeerId> = new Set();
-  // FIXME: Write to this on successful response
-  // private hashesSent: Map<PeerId, Set<Uint8Array>> = new Map();
 
   constructor(
     private networkAdapter: NetworkAdapter,
@@ -77,33 +75,6 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
-    // if ("data" in message && message.data !== undefined) {
-    //   if (message.type === "keyhive-archive") {
-    //     if (message.targetId == this.peerId) {
-    //       const originalSenderId = message.senderId;
-    //       message.senderId = this.peerId;
-    //       for (const targetId of this.peers) {
-    //         if (targetId === originalSenderId || targetId === this.peerId) {
-    //           continue;
-    //         }
-    //         message.targetId = targetId;
-    //         console.debug(
-    //           `[AMRepoKeyhive] Sending keyhive message to ${targetId}`
-    //         );
-    //         this.signAndSend(message);
-    //       }
-    //     } else {
-    //       console.debug(
-    //         `[AMRepoKeyhive] Sending keyhive message to ${message.targetId}`
-    //       );
-    //         this.signAndSend(message);
-    //     }
-    //   }
-    // }
-    this.signAndSend(message, includeContactCard);
-  }
-
-  private signAndSend(message: Message, includeContactCard: boolean): void {
     void this.asyncSignAndSend(message, includeContactCard);
   }
 
@@ -163,10 +134,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         keyhiveMessageData.contactCard.id
       );
       if (!maybeAgent) {
-        console.log("!@ No agent found! Receiving Contact Card");
         await this.keyhive.receiveContactCard(keyhiveMessageData.contactCard);
-      } else {
-        console.log("!@ Agent found! Not receiving Contact Card");
       }
     }
     message.data = keyhiveMessageData.signed.payload;
@@ -194,18 +162,23 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   syncKeyhive(
     keyhive: Keyhive,
     maybeSenderId: PeerId | undefined = undefined,
-    includeContactCard: boolean = false
+    includeContactCard: boolean = false,
+    attemptRecovery: boolean = false,
   ): void {
-    void this.asyncSyncKeyhive(keyhive, maybeSenderId, includeContactCard);
+    void this.asyncSyncKeyhive(keyhive, maybeSenderId, includeContactCard, attemptRecovery);
   }
 
   private async asyncSyncKeyhive(
     keyhive: Keyhive,
     maybeSenderId: PeerId | undefined,
-    includeContactCard: boolean
+    includeContactCard: boolean,
+    attemptRecovery: boolean = false,
   ): Promise<void> {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
+    }
+    if (attemptRecovery) {
+      await ingestKeyhiveFromStorage(this.keyhive, this.storage);
     }
     let archiveBytes: Uint8Array;
     try {
@@ -236,7 +209,6 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
       const ops = await getEventsForPeer(this.keyhive, targetId);
       if (ops) {
-        console.log(`!@ asyncSyncKeyhive: Got agent for targetId ${targetId}`);
         const opHashes = Array.from(ops.keys());
         const data = encode(opHashes);
         const message = {
@@ -378,7 +350,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     const foundEvents: Uint8Array[] = responseData.found || [];
 
     console.debug(
-      `[AMRepoKeyhive] Received keyhive sync response: ${foundEvents.length} ops found, ${requestedHashes.length} ops requested`
+      `[AMRepoKeyhive] Received keyhive sync response from ${message.senderId}: ${foundEvents.length} ops found, ${requestedHashes.length} ops requested`
     );
 
     if (foundEvents.length > 0) {
@@ -426,10 +398,6 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (requestedHashes.length > 0) {
       const ops = await getEventsForPeer(this.keyhive, message.senderId);
       if (ops) {
-        console.log(
-          `!@ asyncSendKeyhiveSyncOps: Got ops for senderId ${message.senderId}`
-        );
-
         // Create a map from hash string to operation for value-based lookup
         const hashStringToOp = new Map(
           Array.from(ops.entries()).map(([hash, op]) => [hash.toString(), op])
@@ -553,16 +521,6 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
   }
 
-  // private sendKeyhive(senderId: PeerId, targetId: PeerId, archiveBytes: Uint8Array): void {
-  //   const message = {
-  //     type: "keyhive-archive",
-  //     senderId: senderId,
-  //     targetId: targetId,
-  //     data: archiveBytes,
-  //   };
-  //   this.send(message);
-  // }
-
   private async saveReceivedEvents(events: Uint8Array[]): Promise<void> {
     for (const event of events) {
       try {
@@ -601,14 +559,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.peerId === undefined) {
       return;
     }
-    this.syncKeyhive(this.keyhive, this.peerId);
-    // for (const targetId of this.peers) {
-    //   const message = {
-    //     type: "request-keyhive",
-    //     senderId: this.peerId,
-    //     targetId: targetId,
-    //   };
-    //   this.send(message);
-    // }
+    let includeContactCard = false
+    let attemptRecovery = true
+    this.syncKeyhive(this.keyhive, this.peerId, includeContactCard, attemptRecovery);
   }
 }
