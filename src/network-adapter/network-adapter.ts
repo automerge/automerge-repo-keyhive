@@ -309,6 +309,17 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         })
         .filter((op) => op !== undefined);
 
+      // Add in pending events to our local set to make sure we're not requesting
+      // events we already have.
+      const pendingOps = await this.keyhive.pendingEventHashes()
+      if (pendingOps) {
+        const pendingOpHashesArray = Array.from(pendingOps.keys())
+        for (let hash of pendingOpHashesArray) {
+          opHashStrings.add(hash.toString())
+          hashStringToBytes.set(hash.toString(), hash)
+        }
+      }
+
       const requestedHashStrings = peerOpHashStrings.difference(opHashStrings);
       const requested = Array.from(requestedHashStrings)
         .map((str) => peerHashStringToBytes.get(str))
