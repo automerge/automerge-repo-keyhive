@@ -210,7 +210,15 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       const ops = await getEventsForPeer(this.keyhive, targetId);
       if (ops) {
         const opHashes = Array.from(ops.keys());
-        const data = encode(opHashes);
+        let pendingOpHashesArray: Uint8Array[] = new Array();
+        const pendingOps = await this.keyhive.pendingEventHashes()
+        if (pendingOps) {
+          pendingOpHashesArray = Array.from(pendingOps.keys()) as Uint8Array[]
+        }
+        const data = encode({
+          found: opHashes,
+          pending: pendingOpHashesArray,
+        });
         const message = {
           type: "keyhive-sync-request",
           senderId: senderId,
@@ -269,10 +277,21 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       );
       console.debug(`[AMRepoKeyhive] Local eventsForAgent hashes (truncated): ${JSON.stringify(localHashesHex)}`);
 
+      // Add in pending events to our local set to make sure we're not requesting
+      // events we already have.
+      let pendingOpHashesArray: Uint8Array[] = new Array();
+      const pendingOps = await this.keyhive.pendingEventHashes()
+      if (pendingOps) {
+        pendingOpHashesArray = Array.from(pendingOps.keys()) as Uint8Array[]
+      }
+
       // Convert Uint8Arrays to strings for value-based comparison in Set operations
       const opHashStrings = new Set(opHashesArray.map((h) => h.toString()));
       const peerOpHashStrings = new Set(
         peerOpHashesArray.map((h) => h.toString())
+      );
+      const pendingOpHashStrings = new Set(
+        pendingOpHashesArray.map((h) => h.toString())
       );
 
       // Create maps for converting back from string to Uint8Array
@@ -281,6 +300,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       );
       const peerHashStringToBytes = new Map(
         peerOpHashesArray.map((h) => [h.toString(), h])
+      );
+      const pendingOpHashStringToBytes = new Map(
+        pendingOpHashesArray.map((h) => [h.toString(), h])
       );
 
       const hashStringsToSend = opHashStrings.difference(peerOpHashStrings);
@@ -291,25 +313,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         })
         .filter((op) => op !== undefined);
 
-      // Add in pending events to our local set to make sure we're not requesting
-      // events we already have.
-      const pendingOps = await this.keyhive.pendingEventHashes()
-      if (pendingOps) {
-        const pendingOpHashesArray: Uint8Array[] = Array.from(pendingOps.keys()) as Uint8Array[]
-        // Log pending event hashes
-        const pendingHashesHex = pendingOpHashesArray.map((h: Uint8Array) =>
-          Array.from(h).map((b: number) => b.toString(16).padStart(2, "0")).join("").slice(0, 16)
-        );
-        console.debug(`[AMRepoKeyhive] Pending event hashes (truncated): ${JSON.stringify(pendingHashesHex)}`);
-        for (let hash of pendingOpHashesArray) {
-          opHashStrings.add(hash.toString())
-          hashStringToBytes.set(hash.toString(), hash)
-        }
-      } else {
-        console.debug(`[AMRepoKeyhive] No pending event hashes`);
-      }
-
-      const requestedHashStrings = peerOpHashStrings.difference(opHashStrings);
+      const requestedHashStrings = peerOpHashStrings.difference(opHashStrings.union(pendingOpHashStrings));
       const requested = Array.from(requestedHashStrings)
         .map((str) => peerHashStringToBytes.get(str))
         .filter((hash) => hash !== undefined);
