@@ -11,7 +11,6 @@ import { peerIdFromSigner, uint8ArrayToHex } from "../utilities.js";
 import {
   Archive,
   CiphertextStore,
-  ContactCard,
   DocumentId as KeyhiveDocumentId,
   Event as KeyhiveEvent,
   Keyhive,
@@ -80,7 +79,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
     options.networkAdapter,
     keyhive,
     options.storage,
-    ContactCard.fromJson(active.contactCard),
+    active.contactCard,
     serverPeerId
   );
 
