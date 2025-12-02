@@ -5,7 +5,7 @@ import {
   PeerMetadata,
   StorageAdapterInterface,
 } from "@automerge/automerge-repo/slim";
-import { Keyhive } from "@keyhive/keyhive/slim";
+import { ContactCard, Keyhive } from "@keyhive/keyhive/slim";
 import { encode, decode } from "cbor-x";
 
 import {
@@ -29,6 +29,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     private networkAdapter: NetworkAdapter,
     private keyhive: Keyhive,
     private storage: StorageAdapterInterface,
+    private contactCard: ContactCard,
     // TODO: Replace with dynamic configuration
     private hardcodedRemoteId: PeerId | null = null
   ) {
@@ -71,16 +72,16 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     this.networkAdapter.disconnect();
   }
 
-  send(message: Message, includeContactCard: boolean = false): void {
+  send(message: Message, contactCard?: ContactCard): void {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
-    void this.asyncSignAndSend(message, includeContactCard);
+    void this.asyncSignAndSend(message, contactCard);
   }
 
   async asyncSignAndSend(
     message: Message,
-    includeContactCard: boolean
+    contactCard?: ContactCard
   ): Promise<void> {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
@@ -90,7 +91,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         ? message.data
         : new Uint8Array();
     const seqNumber = this.pending.register();
-    const signedData = await signData(this.keyhive, data, includeContactCard);
+    const signedData = await signData(this.keyhive, data, contactCard);
     // Wait for network to be ready before sending
     await this.networkAdapter.whenReady();
     this.pending.fire(seqNumber, () => {
@@ -178,8 +179,12 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       throw new Error("peerId must be defined!");
     }
     if (attemptRecovery) {
-      console.log("[AMRepoKeyhive] Preparing for keyhive sync. Reading from storage");
-      await ingestKeyhiveFromStorage(this.keyhive, this.storage);
+      console.debug("[AMRepoKeyhive] Preparing for keyhive sync. Reading from storage");
+      try {
+        await ingestKeyhiveFromStorage(this.keyhive, this.storage);
+      } catch (error) {
+        console.error(`Unable to ingest from storage: ${error}`)
+      }
     }
     let archiveBytes: Uint8Array;
     try {
@@ -203,6 +208,13 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     } else {
       senderId = this.peerId;
     }
+
+    // Get contact card once for all peers if needed, to avoid multiple rotations
+    let contactCard: ContactCard | undefined;
+    if (includeContactCard) {
+      contactCard = this.contactCard;
+    }
+
     for (const targetId of this.peers) {
       if (targetId == senderId) {
         continue;
@@ -229,14 +241,21 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         console.debug(
           `Sending keyhive sync request to ${targetId} from ${senderId}`
         );
-        this.send(message, includeContactCard);
+        this.send(message, contactCard);
       } else {
+        console.debug(
+          `Requesting ContactCard from ${senderId}`
+        );
+        // Get contact card for this request if we don't already have one
+        if (!contactCard) {
+          contactCard = this.contactCard;
+        }
         const message = {
           type: "keyhive-sync-request-contact-card",
           senderId: senderId,
           targetId: targetId,
         };
-        this.send(message, true);
+        this.send(message, contactCard);
       }
     }
   }
@@ -357,7 +376,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         senderId: this.peerId,
         targetId: message.senderId,
       };
-      this.send(response, true);
+      this.send(response, this.contactCard);
     }
   }
 
@@ -504,7 +523,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       senderId: this.peerId,
       targetId: message.senderId,
     };
-    this.send(response, true);
+    this.send(response, this.contactCard);
   }
 
   private async receiveKeyhiveSyncOps(message: Message): Promise<void> {

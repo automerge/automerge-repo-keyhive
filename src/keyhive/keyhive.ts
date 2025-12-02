@@ -11,6 +11,7 @@ import { peerIdFromSigner, uint8ArrayToHex } from "../utilities.js";
 import {
   Archive,
   CiphertextStore,
+  ContactCard,
   DocumentId as KeyhiveDocumentId,
   Event as KeyhiveEvent,
   Keyhive,
@@ -79,6 +80,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
     options.networkAdapter,
     keyhive,
     options.storage,
+    ContactCard.fromJson(active.contactCard),
     serverPeerId
   );
 
@@ -120,9 +122,16 @@ export async function initializeAutomergeRepoKeyhive(options: {
 
     emitter.on("update", async (event: KeyhiveEvent) => {
       console.debug("[AMRepoKeyhive] Keyhive updated. Saving and syncing events.");
-      console.debug("!@ VARIANT: ${event.variant}");
+      console.debug(`!@ VARIANT: ${event.variant}`);
+      // FIXME: This is a temporary fix until we have local prekey storage implemented in
+      // keyhive.
+      if (event.variant === "PREKEY_ROTATED" || event.variant === "PREKEYS_EXPANDED") {
+        await saveKeyhiveWithHash(keyhive, options.storage, uniqueIdHash)
+      }
       await saveEventWithHash(event, options.storage);
-      keyhiveNetworkAdapter.syncKeyhive(keyhive);
+      if (event.variant !== "CGKA_OPERATION") {
+        keyhiveNetworkAdapter.syncKeyhive(keyhive);
+      }
     });
   }
 
