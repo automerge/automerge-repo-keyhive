@@ -120,6 +120,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
 
     emitter.on("update", async (event: KeyhiveEvent) => {
       console.debug("[AMRepoKeyhive] Keyhive updated. Saving and syncing events.");
+      console.debug("!@ VARIANT: ${event.variant}");
       await saveEventWithHash(event, options.storage);
       keyhiveNetworkAdapter.syncKeyhive(keyhive);
     });
@@ -174,10 +175,6 @@ export async function ingestKeyhiveFromStorage(
   kh: Keyhive,
   db: StorageAdapterInterface
 ): Promise<void> {
-  console.log(
-    "[AMRepoKeyhive] Attempting to recover from UnknownInvitePrekey error by reloading storage"
-  );
-
   const keyhiveArchiveChunks = await db.loadRange([
     KEYHIVE_DB_KEY,
     KEYHIVE_ARCHIVES_KEY,
@@ -223,7 +220,7 @@ export async function ingestKeyhiveFromStorage(
     }
   }
 
-  console.log("[AMRepoKeyhive] Recovery attempt completed");
+  console.debug("[AMRepoKeyhive] Reading from storage completed");
 }
 
 export type KeyhiveArchiveBytes = Uint8Array;
