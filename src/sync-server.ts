@@ -3,7 +3,8 @@ import { ContactCard, Individual, Keyhive } from "@keyhive/keyhive/slim";
 
 export type SyncServer = {
   individualId: Uint8Array;
-  contactCard: string;
+  contactCard: ContactCard;
+  contactCardJson: string;
   peerId: PeerId;
 };
 
@@ -21,7 +22,8 @@ export async function syncServerFromContactCard(
 
   return {
     individualId,
-    contactCard: contactCardJson,
+    contactCard: serverContactCard,
+    contactCardJson: contactCardJson,
     peerId: serverPeerId,
   };
 }
