@@ -12,6 +12,7 @@ export async function syncServerFromContactCard(
   serverPeerId: PeerId,
   keyhive: Keyhive
 ): Promise<SyncServer> {
+  console.debug("[AMRepoKeyhive] syncServerFromContactCard: parsing server contact card");
   const serverContactCard = ContactCard.fromJson(contactCardJson);
   const serverIndividual: Individual =
     await keyhive.receiveContactCard(serverContactCard);
