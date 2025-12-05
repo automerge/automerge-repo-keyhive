@@ -81,8 +81,8 @@ export async function initializeAutomergeRepoKeyhive(options: {
 
   const keyhiveNetworkAdapter = new KeyhiveNetworkAdapter(
     options.networkAdapter,
-    keyhive,
     active.contactCard,
+    keyhive,
     keyhiveStorage,
     serverPeerId
   );

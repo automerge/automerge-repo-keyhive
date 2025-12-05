@@ -3,7 +3,6 @@ import {
   NetworkAdapter,
   PeerId,
   PeerMetadata,
-  StorageAdapterInterface,
 } from "@automerge/automerge-repo/slim";
 import { ContactCard, Keyhive } from "@keyhive/keyhive/slim";
 import { encode, decode } from "cbor-x";
@@ -21,7 +20,6 @@ import {
   KeyhiveStorage,
   receiveContactCard,
 } from "../keyhive/keyhive.js";
-import { getEventsForPeer } from "../utilities.js";
 
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
@@ -29,8 +27,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
   constructor(
     private networkAdapter: NetworkAdapter,
-    private keyhive: Keyhive,
     private contactCard: ContactCard,
+    private keyhive: Keyhive,
     private keyhiveStorage: KeyhiveStorage,
     // TODO: Replace with dynamic configuration
     private hardcodedRemoteId: PeerId | null = null
