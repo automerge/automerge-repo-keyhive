@@ -21,7 +21,7 @@
   "dependencies": {
     "@automerge/automerge-repo": "2.5.0-alpha.2",
     "@automerge/automerge-repo-network-websocket": "2.5.0-alpha.2",
-    "@keyhive/keyhive": "0.0.0-alpha.52",
+    "@keyhive/keyhive": "0.0.0-alpha.52b",
     "eventemitter3": "^5.0.1",
     "cbor-x": "^1.6.0"
   },

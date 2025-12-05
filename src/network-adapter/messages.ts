@@ -28,9 +28,11 @@ export function decodeKeyhiveMessageData(
       signed: Uint8Array;
     };
 
-    console.debug(
-      "[AMRepoKeyhive] decodeKeyhiveMessageData: parsing contact card from message"
-    );
+    if (decoded.contactCard !== "") {
+      console.debug(
+        "[AMRepoKeyhive] decodeKeyhiveMessageData: parsing contact card from message"
+      );
+    }
     const contactCard =
       decoded.contactCard === ""
         ? undefined

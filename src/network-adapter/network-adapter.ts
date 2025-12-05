@@ -101,10 +101,13 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
   receiveMessage(message: Message): void {
     try {
-      if (this.hardcodedRemoteId &&
+      if (
+        this.hardcodedRemoteId &&
         message.senderId !== this.hardcodedRemoteId
       ) {
-        console.log(`Unknown remote peer ${message.senderId}. Ignoring message!`);
+        console.log(
+          `Unknown remote peer ${message.senderId}. Ignoring message!`
+        );
         return;
       }
       if (!("data" in message) || message.data === undefined) {
@@ -212,9 +215,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
 
     // Get contact card once for all peers if needed, to avoid multiple rotations
-    let contactCard: ContactCard | undefined;
+    let maybeContactCard: ContactCard | undefined;
     if (includeContactCard) {
-      contactCard = this.contactCard;
+      console.debug("[AMRepoKeyhive] Including Contact Card in sync message.")
+      maybeContactCard = this.contactCard;
     }
 
     for (const targetId of this.peers) {
@@ -239,18 +243,18 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         console.debug(
           `Sending keyhive sync request to ${targetId} from ${senderId}`
         );
-        this.send(message, contactCard);
+        this.send(message, maybeContactCard);
       } else {
         console.debug(`Requesting ContactCard from ${senderId}`);
-        if (!contactCard) {
-          contactCard = this.contactCard;
+        if (!maybeContactCard) {
+          maybeContactCard = this.contactCard;
         }
         const message = {
           type: "keyhive-sync-request-contact-card",
           senderId: senderId,
           targetId: targetId,
         };
-        this.send(message, contactCard);
+        this.send(message, maybeContactCard);
       }
     }
   }
@@ -395,17 +399,28 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       );
 
       try {
-        const pendingEvents = await this.keyhive.ingestEventsBytes(foundEvents);
-        console.debug(
-          `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
-        );
+        let pendingEvents: any[] | null = null;
+        try {
+          pendingEvents = await this.keyhive.ingestEventsBytes(foundEvents);
+        } catch (error) {
+          console.error(`Error ingesting events: ${error}`);
+        }
 
-        // If there are pending events, try reading from storage (e.g., in case
-        // they have already been processed by a separate tab in a browser).
-        if (pendingEvents.length > 0) {
-          console.warn(
-            `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending. Reading from storage`
+        if (pendingEvents) {
+          console.debug(
+            `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
           );
+        }
+
+        // If there are pending events or something went wrong ingesting, try reading from
+        // storage (e.g., in case they have already been processed by a separate tab in a
+        // browser).
+        if (!pendingEvents || pendingEvents.length > 0) {
+          if (pendingEvents) {
+            console.warn(
+              `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending. Reading from storage`
+            );
+          }
           try {
             await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
             const retryPending =
@@ -446,7 +461,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
         const requestedOps = requestedHashes
           .map((hash) => hashStringToOp.get(hash.toString())?.toBytes())
-          .filter((op) => op !== undefined);
+          .filter((op): op is Uint8Array => op !== undefined);
 
         if (requestedOps.length === 0) {
           console.debug(
@@ -531,6 +546,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       console.debug(
         `[AMRepoKeyhive] Ingesting ${receivedEvents.length} keyhive events from ${message.senderId}`
       );
+
       try {
         const pendingEvents =
           await this.keyhive.ingestEventsBytes(receivedEvents);
