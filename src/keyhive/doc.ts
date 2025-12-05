@@ -7,7 +7,11 @@ import {
   Identifier,
   Keyhive,
 } from "@keyhive/keyhive/slim";
-import { docIdFromAutomergeUrl } from "./keyhive.js";
+import {
+  docIdFromAutomergeUrl,
+  KeyhiveStorage,
+  receiveContactCard,
+} from "./keyhive.js";
 import { hexToUint8Array } from "../utilities.js";
 import { AutomergeUrl, Heads } from "@automerge/automerge-repo/slim";
 import { KeyhiveNetworkAdapter } from "../network-adapter/network-adapter.js";
@@ -26,7 +30,10 @@ export async function generateDoc(kh: Keyhive): Promise<KeyhiveDocument> {
   return doc;
 }
 
-export function keyhiveIdFactory(adapter: KeyhiveNetworkAdapter, keyhive: Keyhive): (heads: Heads) => Promise<Uint8Array> {
+export function keyhiveIdFactory(
+  adapter: KeyhiveNetworkAdapter,
+  keyhive: Keyhive
+): (heads: Heads) => Promise<Uint8Array> {
   return async (_heads: Heads) => {
     const doc = await generateDoc(keyhive);
     return doc.doc_id.toBytes();
@@ -35,15 +42,20 @@ export function keyhiveIdFactory(adapter: KeyhiveNetworkAdapter, keyhive: Keyhiv
 
 export async function addMemberToDoc(
   kh: Keyhive,
+  khStorage: KeyhiveStorage,
   docUrl: AutomergeUrl,
   contactCard: ContactCard,
   access: Access
 ) {
   const agent = contactCard.toAgent();
   if (!access || !agent) {
-    console.error("[AMRepoKeyhive] Failed to add member: invalid access or agent!");
+    console.error(
+      "[AMRepoKeyhive] Failed to add member: invalid access or agent!"
+    );
     return;
   }
+
+  receiveContactCard(kh, contactCard, khStorage);
 
   const docId: KeyhiveDocumentId = docIdFromAutomergeUrl(docUrl);
   console.debug(

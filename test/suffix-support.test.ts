@@ -1,17 +1,20 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { Signer } from "@keyhive/keyhive/slim";
 import { PeerId } from "@automerge/automerge-repo/slim";
+import { initKeyhiveWasm } from "../src/index.js";
+import { peerIdFromVerifyingKey } from "../src/network-adapter/messages.js";
 import {
   peerIdFromSigner,
   verifyingKeyPeerIdWithoutSuffix,
 } from "../src/utilities.js";
-import { peerIdFromVerifyingKey } from "../src/messages.js";
 
 describe("Suffix support for peerIds", () => {
   let signer: Signer;
   let verifyingKey: Uint8Array;
 
   beforeAll(async () => {
+    initKeyhiveWasm();
+
     signer = Signer.generateMemory();
     verifyingKey = signer.verifyingKey;
   });
