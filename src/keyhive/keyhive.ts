@@ -124,7 +124,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
 export async function receiveContactCard(
   kh: Keyhive,
   contactCard: ContactCard,
-  khStorage: KeyhiveStorage | null
+  khStorage: KeyhiveStorage
 ): Promise<Individual | undefined> {
   let agent = await kh.getAgent(contactCard.id);
   if (agent) {
@@ -132,10 +132,7 @@ export async function receiveContactCard(
   } else {
     if (contactCard.op) {
       console.debug(`Saving Contact Card event: ${contactCard.op}`);
-      // FIXME: Require khStorage
-      if (khStorage) {
-        khStorage.saveEventWithHash(contactCard.op);
-      }
+      khStorage.saveEventWithHash(contactCard.op);
     } else {
       console.error(`No op found for ${contactCard.toJson()}`);
     }
@@ -156,13 +153,13 @@ export async function getPendingOpHashes(
 
 export class KeyhiveStorage {
   constructor(
-    private peerIdHash: Uint8Array,
+    private keyhiveStorageId: Uint8Array,
     private storage: StorageAdapterInterface
   ) {}
 
   async saveKeyhiveWithHash(kh: Keyhive) {
     const khBytes = (await kh.toArchive()).toBytes();
-    const hash = uint8ArrayToHex(this.peerIdHash);
+    const hash = uint8ArrayToHex(this.keyhiveStorageId);
     console.debug(`[AMRepoKeyhive] Saving keyhive archive. Hash: ${hash}`);
     await this.storage.save(
       [KEYHIVE_DB_KEY, KEYHIVE_ARCHIVES_KEY, hash],

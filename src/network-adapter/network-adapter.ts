@@ -31,8 +31,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     private networkAdapter: NetworkAdapter,
     private keyhive: Keyhive,
     private contactCard: ContactCard,
-    // FIXME: Require keyhiveStorage
-    private keyhiveStorage: KeyhiveStorage | null = null,
+    private keyhiveStorage: KeyhiveStorage,
     // TODO: Replace with dynamic configuration
     private hardcodedRemoteId: PeerId | null = null
   ) {
@@ -175,8 +174,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
-    // FIXME: Require keyhiveStorage
-    if (this.keyhiveStorage && attemptRecovery) {
+    if (attemptRecovery) {
       console.debug(
         "[AMRepoKeyhive] Preparing for keyhive sync. Reading from storage"
       );
@@ -397,10 +395,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending. Reading from storage`
           );
           try {
-            // FIXME: Require keyhiveStorage
-            if (this.keyhiveStorage) {
-              await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
-            }
+            await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
             const retryPending =
               await this.keyhive.ingestEventsBytes(foundEvents);
             if (retryPending.length === 0) {
@@ -442,7 +437,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           .filter((op) => op !== undefined);
 
         if (requestedOps.length === 0) {
-          console.debug(`[AMRepoKeyhive] 0 ops requested by ${message.senderId}`);
+          console.debug(
+            `[AMRepoKeyhive] 0 ops requested by ${message.senderId}`
+          );
           return;
         }
 
@@ -532,10 +529,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending. Reading from storage`
           );
           try {
-            // FIXME: Require keyhiveStorage
-            if (this.keyhiveStorage) {
-              await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
-            }
+            await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
             const retryPending =
               await this.keyhive.ingestEventsBytes(receivedEvents);
             if (retryPending.length === 0) {
@@ -563,22 +557,16 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   }
 
   private async saveReceivedEvents(events: Uint8Array[]): Promise<void> {
-    // FIXME: Require keyhiveStorage
-    if (this.keyhiveStorage) {
-      for (const event of events) {
-        try {
-          await this.keyhiveStorage.saveEventBytesWithHash(event);
-        } catch (error) {
-          console.error(
-            "[AMRepoKeyhive] Failed to save received event:",
-            error
-          );
-        }
+    for (const event of events) {
+      try {
+        await this.keyhiveStorage.saveEventBytesWithHash(event);
+      } catch (error) {
+        console.error("[AMRepoKeyhive] Failed to save received event:", error);
       }
-      console.debug(
-        `[AMRepoKeyhive] Saved ${events.length} received events to storage`
-      );
     }
+    console.debug(
+      `[AMRepoKeyhive] Saved ${events.length} received events to storage`
+    );
   }
 
   private async handleIngestError(
@@ -607,10 +595,6 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
     let includeContactCard = false;
     let attemptRecovery = true;
-    this.syncKeyhive(
-      this.peerId,
-      includeContactCard,
-      attemptRecovery
-    );
+    this.syncKeyhive(this.peerId, includeContactCard, attemptRecovery);
   }
 }
