@@ -35,6 +35,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   ) {
     super();
 
+    // Periodically trigger the keyhive op sync protocol.
     setInterval(this.requestKeyhiveSync.bind(this), 15000);
 
     networkAdapter.on("message", (msg) => {
@@ -100,12 +101,12 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
   receiveMessage(message: Message): void {
     try {
-      // if (this.hardcodedRemoteId &&
-      //   message.senderId !== this.hardcodedRemoteId
-      // ) {
-      //   console.log(`Unknown remote peer ${message.senderId}. Ignoring message!`);
-      //   return;
-      // }
+      if (this.hardcodedRemoteId &&
+        message.senderId !== this.hardcodedRemoteId
+      ) {
+        console.log(`Unknown remote peer ${message.senderId}. Ignoring message!`);
+        return;
+      }
       if (!("data" in message) || message.data === undefined) {
         this.emit("message", message);
         return;
@@ -164,6 +165,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     );
   }
 
+  // Trigger the keyhive op set reconciliation sync protocol. Determine the hashes
+  // that are relevant for the given peer as well as any pending hashes on this
+  // keyhive (any pending hash might be relevant). Then send a request to the
+  // peer to begin the sync protocol.
+  // This is the first keyhive op sync protocol message.
   private async asyncSyncKeyhive(
     maybeSenderId: PeerId | undefined,
     includeContactCard: boolean,
@@ -249,6 +255,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
   }
 
+  // Send a response to a request from a peer to initiate the keyhive op set
+  // reconciliation sync protocol. Given the hashes sent by the peer, determine
+  // which ops to send them. Then determine any missing ops to request from the
+  // peer.
+  // This is the second keyhive op sync protocol message.
   private async sendKeyhiveSyncResponse(message: Message): Promise<void> {
     if (!("data" in message) || !message.data) {
       console.error("[AMRepoKeyhive] Expected data in keyhive-sync-request");
@@ -352,6 +363,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
   }
 
+  // Send requested ops in response to a keyhive sync response. Look up ops
+  // for the requested hashes and send them to the requesting peer.
+  // This is the third (and final) keyhive op sync protocol message.
   private async sendKeyhiveSyncOps(message: Message): Promise<void> {
     if (!("data" in message) || !message.data) {
       console.error("[AMRepoKeyhive] Expected data in keyhive-sync-response");
@@ -463,6 +477,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
   }
 
+  // In response to a message from a peer indicating they are missing our contact
+  // card, send it along. This response will trigger a keyhive op sync.
   private async sendKeyhiveSyncMissingContactCard(
     message: Message
   ): Promise<void> {
@@ -488,6 +504,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     this.send(response, this.contactCard);
   }
 
+  // Receive ops sent by a peer as part of the third (and final) keyhive ops
+  // sync protocol message.
   private async receiveKeyhiveSyncOps(message: Message): Promise<void> {
     if (!("data" in message) || !message.data) {
       console.error("[AMRepoKeyhive] Expected data in keyhive-sync-ops");
