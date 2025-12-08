@@ -47,15 +47,14 @@ export async function addMemberToDoc(
   contactCard: ContactCard,
   access: Access
 ) {
-  const agent = contactCard.toAgent();
+  receiveContactCard(kh, contactCard, khStorage);
+  const agent = await kh.getAgent(contactCard.id)
   if (!access || !agent) {
     console.error(
       "[AMRepoKeyhive] Failed to add member: invalid access or agent!"
     );
     return;
   }
-
-  receiveContactCard(kh, contactCard, khStorage);
 
   const docId: KeyhiveDocumentId = docIdFromAutomergeUrl(docUrl);
   console.debug(
