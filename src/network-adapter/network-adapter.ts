@@ -446,7 +446,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           }
         }
 
-        await this.saveReceivedEvents(foundEvents);
+        void this.saveReceivedEvents(foundEvents);
       } catch (error) {
         await this.handleIngestError(error, foundEvents, message.senderId);
       }
@@ -585,7 +585,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           }
         }
 
-        await this.saveReceivedEvents(receivedEvents);
+        void this.saveReceivedEvents(receivedEvents);
       } catch (error) {
         await this.handleIngestError(error, receivedEvents, message.senderId);
       }
