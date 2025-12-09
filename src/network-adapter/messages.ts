@@ -9,7 +9,7 @@ export type KeyhiveMessageData = {
   signed: Signed;
 };
 
-function encodeKeyhiveMessageData(msg: KeyhiveMessageData): Uint8Array {
+export function encodeKeyhiveMessageData(msg: KeyhiveMessageData): Uint8Array {
   const contactCardJson = msg.contactCard ? msg.contactCard.toJson() : "";
   const signedBytes = msg.signed.toBytes();
 
@@ -53,21 +53,21 @@ export function decodeKeyhiveMessageData(
 }
 
 export async function signData(
-  keyhive: Keyhive,
-  data: Uint8Array,
-  contactCard?: ContactCard
-): Promise<Uint8Array> {
-  try {
-    const signed = await keyhive.trySign(data);
-    return encodeKeyhiveMessageData({
-      contactCard,
-      signed,
-    });
-  } catch (error) {
-    console.error("[AMRepoKeyhive] Error during signing:", error);
-    throw error;
+    keyhive: Keyhive,
+    data: Uint8Array,
+    contactCard ?: ContactCard
+  ): Promise < Uint8Array > {
+    try {
+      const signed = await keyhive.trySign(data);
+      return encodeKeyhiveMessageData({
+        contactCard,
+        signed,
+      });
+    } catch(error) {
+      console.error("[AMRepoKeyhive] Error during signing:", error);
+      throw error;
+    }
   }
-}
 
 // Verifies the provided data has a valid signature. Returns a `Signed` if so and `undefined` if not.
 export function verifyData(peerId: PeerId, data: KeyhiveMessageData): boolean {

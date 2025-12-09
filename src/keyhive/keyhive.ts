@@ -1,6 +1,5 @@
 import {
   AutomergeUrl,
-  Heads,
   NetworkAdapter,
   parseAutomergeUrl,
   PeerId,
@@ -18,26 +17,15 @@ import {
   Keyhive,
   Signer,
 } from "@keyhive/keyhive/slim";
-import { SyncServer, syncServerFromContactCard } from "../sync-server.js";
-import { Active, createActive, loadOrCreateSigner } from "./active.js";
+import { syncServerFromContactCard } from "../sync-server.js";
+import { createActive, loadOrCreateSigner } from "./active.js";
 import { KeyhiveNetworkAdapter } from "../network-adapter/network-adapter.js";
-import { keyhiveIdFactory } from "./doc.js";
 import { KeyhiveEventEmitter } from "./emitter.js";
+import { AutomergeRepoKeyhive, keyhiveIdFactory } from "./automerge-repo-keyhive.js";
 
 export const KEYHIVE_DB_KEY = "keyhive-db";
 export const KEYHIVE_ARCHIVES_KEY = "/archives/";
 export const KEYHIVE_EVENTS_KEY = "/ops/";
-
-export type AutomergeRepoKeyhive = {
-  active: Active;
-  keyhive: Keyhive;
-  keyhiveStorage: KeyhiveStorage;
-  peerId: PeerId;
-  syncServer: SyncServer;
-  networkAdapter: KeyhiveNetworkAdapter;
-  emitter: KeyhiveEventEmitter;
-  idFactory: (heads: Heads) => Promise<Uint8Array>;
-};
 
 export function docIdFromAutomergeUrl(url: AutomergeUrl): KeyhiveDocumentId {
   const { binaryDocumentId } = parseAutomergeUrl(url);
@@ -109,40 +97,35 @@ export async function initializeAutomergeRepoKeyhive(options: {
     });
   }
 
-  return {
+  return new AutomergeRepoKeyhive(
     active,
     keyhive,
     keyhiveStorage,
     peerId,
     syncServer,
-    networkAdapter: keyhiveNetworkAdapter,
+    keyhiveNetworkAdapter,
     emitter,
-    idFactory: keyhiveIdFactory(keyhiveNetworkAdapter, keyhive),
-  };
+    keyhiveIdFactory(keyhiveNetworkAdapter, keyhive),
+  );
 }
 
-export async function receiveContactCard(
-  kh: Keyhive,
-  contactCard: ContactCard,
-  khStorage: KeyhiveStorage
-): Promise<Individual | undefined> {
-  let agent = await kh.getAgent(contactCard.id);
+export async function receiveContactCard(keyhive: Keyhive, contactCard: ContactCard, keyhiveStorage: KeyhiveStorage
+  ): Promise<Individual | undefined> {
+  let agent = await keyhive.getAgent(contactCard.id);
   if (agent) {
-    return await kh.getIndividual(contactCard.individualId);
+    return await keyhive.getIndividual(contactCard.individualId);
   } else {
     if (contactCard.op) {
       console.debug(`Saving Contact Card event: ${contactCard.op}`);
-      khStorage.saveEventWithHash(contactCard.op);
+      keyhiveStorage.saveEventWithHash(contactCard.op);
     } else {
       console.error(`No op found for ${contactCard.toJson()}`);
     }
-    return await kh.receiveContactCard(contactCard);
+    return await keyhive.receiveContactCard(contactCard);
   }
 }
 
-export async function getPendingOpHashes(
-  keyhive: Keyhive
-): Promise<Uint8Array[]> {
+export async function getPendingOpHashes(keyhive: Keyhive): Promise<Uint8Array[]> {
   let pendingOpHashes: Uint8Array[] = new Array();
   const pendingOps = await keyhive.pendingEventHashes();
   if (pendingOps) {
@@ -150,7 +133,6 @@ export async function getPendingOpHashes(
   }
   return pendingOpHashes;
 }
-
 export class KeyhiveStorage {
   constructor(
     private keyhiveStorageId: Uint8Array,

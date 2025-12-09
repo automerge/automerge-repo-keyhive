@@ -29,10 +29,9 @@ export function isWasmInitialized(): boolean {
 }
 
 export { Active } from "./keyhive/active.js";
-export { addMemberToDoc, revokeMemberFromDoc } from "./keyhive/doc.js";
 export { KeyhiveEventEmitter } from "./keyhive/emitter.js";
+export { AutomergeRepoKeyhive } from "./keyhive/automerge-repo-keyhive.js"
 export {
-  AutomergeRepoKeyhive,
   docIdFromAutomergeUrl,
   initializeAutomergeRepoKeyhive,
   KeyhiveStorage,
