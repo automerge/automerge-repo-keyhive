@@ -14,7 +14,7 @@ import {
   verifyData,
 } from "./messages.js";
 import { Pending } from "./pending.js";
-import { getEventsForPeerPair } from "../utilities.js";
+import { getEventsForPeerPair, keyhiveIdentifierFromPeerId } from "../utilities.js";
 import {
   getPendingOpHashes,
   KeyhiveStorage,
@@ -245,16 +245,20 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         );
         this.send(message, maybeContactCard);
       } else {
-        console.debug(`Requesting ContactCard from ${senderId}`);
-        if (!maybeContactCard) {
-          maybeContactCard = this.contactCard;
+        const keyhiveId = keyhiveIdentifierFromPeerId(senderId);
+        const agent = await this.keyhive.getAgent(keyhiveId);
+        if (!agent) {
+          console.debug(`Requesting ContactCard from ${senderId}`);
+          if (!maybeContactCard) {
+            maybeContactCard = this.contactCard;
+          }
+          const message = {
+            type: "keyhive-sync-request-contact-card",
+            senderId: senderId,
+            targetId: targetId,
+          };
+          this.send(message, maybeContactCard);
         }
-        const message = {
-          type: "keyhive-sync-request-contact-card",
-          senderId: senderId,
-          targetId: targetId,
-        };
-        this.send(message, maybeContactCard);
       }
     }
   }
