@@ -1,5 +1,13 @@
-import { PeerId, StorageAdapterInterface } from "@automerge/automerge-repo/slim";
-import { Individual, Keyhive, Signer } from "@keyhive/keyhive/slim";
+import {
+  PeerId,
+  StorageAdapterInterface,
+} from "@automerge/automerge-repo/slim";
+import {
+  ContactCard,
+  Individual,
+  Keyhive,
+  Signer,
+} from "@keyhive/keyhive/slim";
 import { peerIdFromSigner } from "../utilities.js";
 
 const ACTIVE_DB_KEY: string = "active-key-pair-2";
@@ -36,7 +44,7 @@ export type Active = {
   keyPair: CryptoKeyPair;
   peerId: PeerId;
   individual: Individual;
-  contactCard: string;
+  contactCard: ContactCard;
   signer: Signer;
 };
 
@@ -87,7 +95,7 @@ export async function createActive(
     peerId: peerId,
     signer: signer,
     individual: individual,
-    contactCard: contactCard.toJson(),
+    contactCard: contactCard,
   };
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "@automerge/automerge-repo-keyhive",
-  "version": "0.0.0-alpha.71",
+  "version": "0.1.0-alpha.10",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,7 +12,8 @@
     "build": "tsc",
     "build:watch": "tsc --watch",
     "watch": "tsc --watch",
-    "lint": "eslint .",
+    "lint": "npx prettier --check \"** /*.js\" --check \"**/*.ts\"; echo \"Run pnpm lint:fix to fix\"",
+    "lint:fix": "npx prettier --write \"** /*.js\" --write \"**/*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "pnpm build"
@@ -20,8 +21,9 @@
   "dependencies": {
     "@automerge/automerge-repo": "2.5.0-alpha.2",
     "@automerge/automerge-repo-network-websocket": "2.5.0-alpha.2",
+    "@keyhive/keyhive": "0.0.0-alpha.52b",
     "eventemitter3": "^5.0.1",
-    "@keyhive/keyhive": "^0.0.0-alpha.40"
+    "cbor-x": "^1.6.0"
   },
   "devDependencies": {
     "@noble/ed25519": "^3.0.0",
