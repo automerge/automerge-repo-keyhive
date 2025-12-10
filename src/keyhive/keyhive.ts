@@ -18,8 +18,9 @@ import {
   Signer,
 } from "@keyhive/keyhive/slim";
 import { syncServerFromContactCard } from "../sync-server.js";
-import { createActive, loadOrCreateSigner } from "./active.js";
+import { createActive, loadOrCreateSigner, storeActiveKeyPair } from "./active.js";
 import { KeyhiveNetworkAdapter } from "../network-adapter/network-adapter.js";
+import { PromiseQueue } from "../network-adapter/pending.js";
 import { KeyhiveEventEmitter } from "./emitter.js";
 import { AutomergeRepoKeyhive, keyhiveIdFactory } from "./automerge-repo-keyhive.js";
 
@@ -37,8 +38,10 @@ export async function initializeAutomergeRepoKeyhive(options: {
   peerIdSuffix: string;
   networkAdapter: NetworkAdapter;
   automaticArchiveIngestion: boolean;
+  onlyShareWithHardcodedServerPeerId: boolean;
+  keyPair?: CryptoKeyPair;
 }): Promise<AutomergeRepoKeyhive> {
-  const { keyPair, signer } = await loadOrCreateSigner(options.storage);
+  const { keyPair, signer } = await loadOrCreateKeyPairAndSigner(options.storage, options.keyPair)
   const emitter = new KeyhiveEventEmitter();
   const uniqueIdHash = new Uint8Array(
     await crypto.subtle.digest(
@@ -67,33 +70,43 @@ export async function initializeAutomergeRepoKeyhive(options: {
     keyhiveStorage
   );
 
+  let hardcodedServerPeerId = null;
+  if (options.onlyShareWithHardcodedServerPeerId) {
+    hardcodedServerPeerId = serverPeerId
+  }
+
+  const keyhiveQueue = new PromiseQueue();
+
   const keyhiveNetworkAdapter = new KeyhiveNetworkAdapter(
     options.networkAdapter,
     active.contactCard,
     keyhive,
     keyhiveStorage,
-    serverPeerId
+    keyhiveQueue,
+    hardcodedServerPeerId
   );
 
   if (options.automaticArchiveIngestion) {
-    emitter.on("update", async (event: KeyhiveEvent) => {
-      console.debug(
-        "[AMRepoKeyhive] Keyhive updated. Saving and syncing events."
-      );
-      // TODO: This is a temporary fix until we have local prekey secret storage implemented in
-      // keyhive.
-      if (
-        event.variant === "PREKEY_ROTATED" ||
-        event.variant === "PREKEYS_EXPANDED"
-      ) {
-        await keyhiveStorage.saveKeyhiveWithHash(keyhive);
-      }
-      await keyhiveStorage.saveEventWithHash(event);
-      // TODO: We are currently filtering out CGKA ops in the sync protocol but
-      // will need to restore them once we add encryption.
-      if (event.variant !== "CGKA_OPERATION") {
-        keyhiveNetworkAdapter.syncKeyhive();
-      }
+    emitter.on("update", (event: KeyhiveEvent) => {
+      void keyhiveQueue.run(async () => {
+        console.debug(
+          "[AMRepoKeyhive] Keyhive updated. Saving and syncing events."
+        );
+        // TODO: This is a temporary fix until we have local prekey secret storage implemented in
+        // keyhive.
+        if (
+          event.variant === "PREKEY_ROTATED" ||
+          event.variant === "PREKEYS_EXPANDED"
+        ) {
+          await keyhiveStorage.saveKeyhiveWithHash(keyhive);
+        }
+        await keyhiveStorage.saveEventWithHash(event);
+        // TODO: We are currently filtering out CGKA ops in the sync protocol but
+        // will need to restore them once we add encryption.
+        if (event.variant !== "CGKA_OPERATION") {
+          keyhiveNetworkAdapter.syncKeyhive();
+        }
+      });
     });
   }
 
@@ -132,6 +145,16 @@ export async function getPendingOpHashes(keyhive: Keyhive): Promise<Uint8Array[]
     pendingOpHashes = Array.from(pendingOps.keys()) as Uint8Array[];
   }
   return pendingOpHashes;
+}
+
+async function loadOrCreateKeyPairAndSigner(storage: StorageAdapterInterface, keyPair?: CryptoKeyPair): Promise<{keyPair: CryptoKeyPair, signer: Signer}> {
+  if (keyPair) {
+    await storeActiveKeyPair(keyPair, storage);
+    const signer = await Signer.webCryptoSigner(keyPair);
+    return { keyPair, signer };
+  } else {
+    return await loadOrCreateSigner(storage);
+  }
 }
 export class KeyhiveStorage {
   constructor(

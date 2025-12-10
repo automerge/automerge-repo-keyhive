@@ -42,3 +42,16 @@ export class Pending {
     }
   }
 }
+
+export class PromiseQueue {
+  private queue: Promise<void> = Promise.resolve();
+
+  run<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.queue.then(fn);
+    this.queue = result.then(
+      () => {},
+      () => {}
+    );
+    return result;
+  }
+}
