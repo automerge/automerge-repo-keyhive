@@ -13,7 +13,7 @@ import {
   signData,
   verifyData,
 } from "./messages.js";
-import { Pending } from "./pending.js";
+import { PromiseQueue, Pending } from "./pending.js";
 import { getEventsForPeerPair, keyhiveIdentifierFromPeerId } from "../utilities.js";
 import {
   getPendingOpHashes,
@@ -30,6 +30,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     private contactCard: ContactCard,
     private keyhive: Keyhive,
     private keyhiveStorage: KeyhiveStorage,
+    private keyhiveQueue: PromiseQueue,
     // TODO: Replace with dynamic configuration
     private hardcodedRemoteId: PeerId | null = null
   ) {
@@ -91,7 +92,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         ? message.data
         : new Uint8Array();
     const seqNumber = this.pending.register();
-    const signedData = await signData(this.keyhive, data, contactCard);
+    const signedData = await this.keyhiveQueue.run(() =>
+      signData(this.keyhive, data, contactCard)
+    );
     await this.networkAdapter.whenReady();
     this.pending.fire(seqNumber, () => {
       message.data = signedData;
@@ -181,86 +184,88 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
-    if (attemptRecovery) {
-      console.debug(
-        "[AMRepoKeyhive] Preparing for keyhive sync. Reading from storage"
-      );
-      try {
-        await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
-      } catch (error) {
-        console.error(`Unable to ingest from storage: ${error}`);
+    await this.keyhiveQueue.run(async () => {
+      if (attemptRecovery) {
+        console.debug(
+          "[AMRepoKeyhive] Preparing for keyhive sync. Reading from storage"
+        );
+        try {
+          await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
+        } catch (error) {
+          console.error(`Unable to ingest from storage: ${error}`);
+        }
       }
-    }
-    let archiveBytes: Uint8Array;
-    try {
-      archiveBytes = (await this.keyhive.toArchive()).toBytes();
-      if (!archiveBytes || archiveBytes.length === 0) {
+      let archiveBytes: Uint8Array;
+      try {
+        archiveBytes = (await this.keyhive.toArchive()).toBytes();
+        if (!archiveBytes || archiveBytes.length === 0) {
+          console.error(
+            "[AMRepoKeyhive] Archive serialization produced empty bytes, skipping sync"
+          );
+          return;
+        }
+      } catch (error) {
         console.error(
-          "[AMRepoKeyhive] Archive serialization produced empty bytes, skipping sync"
+          "[AMRepoKeyhive] Failed to serialize keyhive archive:",
+          error
         );
         return;
       }
-    } catch (error) {
-      console.error(
-        "[AMRepoKeyhive] Failed to serialize keyhive archive:",
-        error
-      );
-      return;
-    }
-    let senderId: PeerId;
-    if (maybeSenderId) {
-      senderId = maybeSenderId;
-    } else {
-      senderId = this.peerId;
-    }
-
-    // Get contact card once for all peers if needed, to avoid multiple rotations
-    let maybeContactCard: ContactCard | undefined;
-    if (includeContactCard) {
-      console.debug("[AMRepoKeyhive] Including Contact Card in sync message.")
-      maybeContactCard = this.contactCard;
-    }
-
-    for (const targetId of this.peers) {
-      if (targetId == senderId) {
-        continue;
+      let senderId: PeerId;
+      if (maybeSenderId) {
+        senderId = maybeSenderId;
+      } else {
+        senderId = this.peerId!;
       }
 
-      const ops = await getEventsForPeerPair(this.keyhive, senderId, targetId);
-      if (ops) {
-        const opHashes = Array.from(ops.keys());
-        let pendingOpHashes = await getPendingOpHashes(this.keyhive);
-        const data = encode({
-          found: opHashes,
-          pending: pendingOpHashes,
-        });
-        const message = {
-          type: "keyhive-sync-request",
-          senderId: senderId,
-          targetId: targetId,
-          data: data,
-        };
-        console.debug(
-          `Sending keyhive sync request to ${targetId} from ${senderId}`
-        );
-        this.send(message, maybeContactCard);
-      } else {
-        const keyhiveId = keyhiveIdentifierFromPeerId(senderId);
-        const agent = await this.keyhive.getAgent(keyhiveId);
-        if (!agent) {
-          console.debug(`Requesting ContactCard from ${senderId}`);
-          if (!maybeContactCard) {
-            maybeContactCard = this.contactCard;
-          }
+      // Get contact card once for all peers if needed, to avoid multiple rotations
+      let maybeContactCard: ContactCard | undefined;
+      if (includeContactCard) {
+        console.debug("[AMRepoKeyhive] Including Contact Card in sync message.")
+        maybeContactCard = this.contactCard;
+      }
+
+      for (const targetId of this.peers) {
+        if (targetId == senderId) {
+          continue;
+        }
+
+        const ops = await getEventsForPeerPair(this.keyhive, senderId, targetId);
+        if (ops) {
+          const opHashes = Array.from(ops.keys());
+          let pendingOpHashes = await getPendingOpHashes(this.keyhive);
+          const data = encode({
+            found: opHashes,
+            pending: pendingOpHashes,
+          });
           const message = {
-            type: "keyhive-sync-request-contact-card",
+            type: "keyhive-sync-request",
             senderId: senderId,
             targetId: targetId,
+            data: data,
           };
+          console.debug(
+            `Sending keyhive sync request to ${targetId} from ${senderId}`
+          );
           this.send(message, maybeContactCard);
+        } else {
+          const keyhiveId = keyhiveIdentifierFromPeerId(senderId);
+          const agent = await this.keyhive.getAgent(keyhiveId);
+          if (!agent) {
+            console.debug(`Requesting ContactCard from ${senderId}`);
+            if (!maybeContactCard) {
+              maybeContactCard = this.contactCard;
+            }
+            const message = {
+              type: "keyhive-sync-request-contact-card",
+              senderId: senderId,
+              targetId: targetId,
+            };
+            this.send(message, maybeContactCard);
+          }
         }
       }
-    }
+    });
   }
 
   // Send a response to a request from a peer to initiate the keyhive op set
@@ -282,6 +287,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
+    const peerId = this.peerId;
 
     const requestData = decode(message.data as Uint8Array);
     const peerFoundHashes: Uint8Array[] = requestData.found || [];
@@ -291,84 +297,90 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       `[AMRepoKeyhive] Received keyhive sync request from ${message.senderId} with ${peerFoundHashes.length} found hashes, ${peerPendingHashes.length} pending hashes`
     );
 
-    const ops = await getEventsForPeerPair(
-      this.keyhive,
-      this.peerId,
-      message.senderId
-    );
-    if (ops) {
-      const pendingOpHashes = await getPendingOpHashes(this.keyhive);
-      console.debug(
-        `[AMRepoKeyhive] asyncSendKeyhiveSyncResponse: Found ${ops.size} total local operation hashes for ${message.senderId} and ${pendingOpHashes.length} total pending hashes`
+    await this.keyhiveQueue.run(async () => {
+      const ops = await getEventsForPeerPair(
+        this.keyhive,
+        peerId,
+        message.senderId
       );
+      if (ops) {
+        const pendingOpHashes = await getPendingOpHashes(this.keyhive);
+        console.debug(
+          `[AMRepoKeyhive] asyncSendKeyhiveSyncResponse: Found ${ops.size} total local operation hashes for ${message.senderId} and ${pendingOpHashes.length} total pending hashes`
+        );
 
-      // Build maps to look up hashes again after doing set operations on strings
-      const opsByHashString = new Map<string, { bytes: Uint8Array; op: any }>();
-      for (const [hash, op] of ops.entries()) {
-        opsByHashString.set(hash.toString(), { bytes: hash, op });
+        // Build maps to look up hashes again after doing set operations on strings
+        const opsByHashString = new Map<string, { bytes: Uint8Array; op: any }>();
+        for (const [hash, op] of ops.entries()) {
+          opsByHashString.set(hash.toString(), { bytes: hash, op });
+        }
+        const peerFoundByHashString = new Map<string, Uint8Array>();
+        for (const hash of peerFoundHashes) {
+          peerFoundByHashString.set(hash.toString(), hash);
+        }
+
+        // Build sets for set operations
+        const pendingHashStrings = new Set(
+          pendingOpHashes.map((h) => h.toString())
+        );
+        const peerPendingHashStrings = new Set(
+          peerPendingHashes.map((h) => h.toString())
+        );
+        const localHashStrings = new Set(opsByHashString.keys());
+        const peerFoundHashStrings = new Set(peerFoundByHashString.keys());
+
+        // Determine which ops we need to send to the peer
+        const hashStringsToSend = localHashStrings.difference(
+          peerFoundHashStrings.union(peerPendingHashStrings)
+        );
+        const foundOps = Array.from(hashStringsToSend)
+          .map((str) => opsByHashString.get(str)?.op.toBytes())
+          .filter((op) => op !== undefined);
+
+        // Determine which ops we need to request from the peer
+        const hashStringsToRequest = peerFoundHashStrings.difference(
+          localHashStrings.union(pendingHashStrings)
+        );
+        const requested = Array.from(hashStringsToRequest)
+          .map((str) => peerFoundByHashString.get(str))
+          .filter((hash) => hash !== undefined);
+
+        console.debug(
+          `Found ${foundOps.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`
+        );
+
+        const responseData = {
+          requested,
+          found: foundOps,
+        };
+
+        const data = encode(responseData);
+        const response = {
+          type: "keyhive-sync-response",
+          senderId: peerId,
+          targetId: message.senderId,
+          data,
+        };
+        console.debug(
+          `Sending keyhive sync response to ${message.senderId} from ${peerId}`
+        );
+        this.send(response);
+      } else {
+        const keyhiveId = keyhiveIdentifierFromPeerId(message.senderId);
+        const agent = await this.keyhive.getAgent(keyhiveId);
+        if (!agent) {
+          console.debug(
+            `[AMRepoKeyhive] No agent found for ${message.senderId}, sending keyhive-sync-missing-contact-card`
+          );
+          const response = {
+            type: "keyhive-sync-request-contact-card",
+            senderId: peerId,
+            targetId: message.senderId,
+          };
+          this.send(response, this.contactCard);
+        }
       }
-      const peerFoundByHashString = new Map<string, Uint8Array>();
-      for (const hash of peerFoundHashes) {
-        peerFoundByHashString.set(hash.toString(), hash);
-      }
-
-      // Build sets for set operations
-      const pendingHashStrings = new Set(
-        pendingOpHashes.map((h) => h.toString())
-      );
-      const peerPendingHashStrings = new Set(
-        peerPendingHashes.map((h) => h.toString())
-      );
-      const localHashStrings = new Set(opsByHashString.keys());
-      const peerFoundHashStrings = new Set(peerFoundByHashString.keys());
-
-      // Determine which ops we need to send to the peer
-      const hashStringsToSend = localHashStrings.difference(
-        peerFoundHashStrings.union(peerPendingHashStrings)
-      );
-      const foundOps = Array.from(hashStringsToSend)
-        .map((str) => opsByHashString.get(str)?.op.toBytes())
-        .filter((op) => op !== undefined);
-
-      // Determine which ops we need to request from the peer
-      const hashStringsToRequest = peerFoundHashStrings.difference(
-        localHashStrings.union(pendingHashStrings)
-      );
-      const requested = Array.from(hashStringsToRequest)
-        .map((str) => peerFoundByHashString.get(str))
-        .filter((hash) => hash !== undefined);
-
-      console.debug(
-        `Found ${foundOps.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`
-      );
-
-      const responseData = {
-        requested,
-        found: foundOps,
-      };
-
-      const data = encode(responseData);
-      const response = {
-        type: "keyhive-sync-response",
-        senderId: this.peerId,
-        targetId: message.senderId,
-        data,
-      };
-      console.debug(
-        `Sending keyhive sync response to ${message.senderId} from ${this.peerId}`
-      );
-      this.send(response);
-    } else {
-      console.debug(
-        `[AMRepoKeyhive] No agent found for ${message.senderId}, sending keyhive-sync-missing-contact-card`
-      );
-      const response = {
-        type: "keyhive-sync-missing-contact-card",
-        senderId: this.peerId,
-        targetId: message.senderId,
-      };
-      this.send(response, this.contactCard);
-    }
+    });
   }
 
   // Send requested ops in response to a keyhive sync response. Look up ops
@@ -388,6 +400,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
+    const peerId = this.peerId;
 
     const responseData = decode(message.data as Uint8Array);
     const requestedHashes: Uint8Array[] = responseData.requested || [];
@@ -397,103 +410,106 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       `[AMRepoKeyhive] Received keyhive sync response from ${message.senderId}: ${foundEvents.length} ops found, ${requestedHashes.length} ops requested`
     );
 
-    if (foundEvents.length > 0) {
-      console.debug(
-        `[AMRepoKeyhive] Ingesting ${foundEvents.length} keyhive events from ${message.senderId}`
-      );
+    await this.keyhiveQueue.run(async () => {
+      if (foundEvents.length > 0) {
+        console.debug(
+          `[AMRepoKeyhive] Ingesting ${foundEvents.length} keyhive events from ${message.senderId}`
+        );
 
-      try {
-        let pendingEvents: any[] | null = null;
         try {
-          pendingEvents = await this.keyhive.ingestEventsBytes(foundEvents);
-        } catch (error) {
-          console.error(`Error ingesting events: ${error}`);
-        }
+          let pendingEvents: any[] | null = null;
+          try {
+            pendingEvents = await this.keyhive.ingestEventsBytes(foundEvents);
+          } catch (error) {
+            console.error(`Error ingesting events: ${error}`);
+          }
 
-        if (pendingEvents) {
-          console.debug(
-            `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
-          );
-        }
-
-        // If there are pending events or something went wrong ingesting, try reading from
-        // storage (e.g., in case they have already been processed by a separate tab in a
-        // browser).
-        if (!pendingEvents || pendingEvents.length > 0) {
           if (pendingEvents) {
-            console.warn(
-              `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending. Reading from storage`
+            console.debug(
+              `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
             );
           }
-          try {
-            await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
-            const retryPending =
-              await this.keyhive.ingestEventsBytes(foundEvents);
-            if (retryPending.length === 0) {
-              console.log(
-                `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
-              );
-            } else {
+
+          // If there are pending events or something went wrong ingesting, try reading from
+          // storage (e.g., in case they have already been processed by a separate tab in a
+          // browser).
+          if (!pendingEvents || pendingEvents.length > 0) {
+            if (pendingEvents) {
               console.warn(
-                `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
+                `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending. Reading from storage`
               );
             }
-          } catch (storageError) {
-            console.error(
-              `[AMRepoKeyhive] Failed while reading from storage:`,
-              storageError
+            try {
+              await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
+              const retryPending =
+                await this.keyhive.ingestEventsBytes(foundEvents);
+              if (retryPending.length === 0) {
+                console.log(
+                  `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
+                );
+              } else {
+                console.warn(
+                  `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
+                );
+              }
+            } catch (storageError) {
+              console.error(
+                `[AMRepoKeyhive] Failed while reading from storage:`,
+                storageError
+              );
+            }
+          }
+
+          void this.saveReceivedEvents(foundEvents);
+          (this.emit as any)("ingest-remote");
+        } catch (error) {
+          await this.handleIngestError(error, foundEvents, message.senderId);
+        }
+      }
+
+      if (requestedHashes.length > 0) {
+        const ops = await getEventsForPeerPair(
+          this.keyhive,
+          peerId,
+          message.senderId
+        );
+        if (ops) {
+          const hashStringToOp = new Map(
+            Array.from(ops.entries()).map(([hash, op]) => [hash.toString(), op])
+          );
+
+          const requestedOps = requestedHashes
+            .map((hash) => hashStringToOp.get(hash.toString())?.toBytes())
+            .filter((op): op is Uint8Array => op !== undefined);
+
+          if (requestedOps.length === 0) {
+            console.debug(
+              `[AMRepoKeyhive] 0 ops requested by ${message.senderId}`
+            );
+            return;
+          }
+
+          if (requestedOps.length < requestedHashes.length) {
+            console.warn(
+              `[AMRepoKeyhive] ${requestedHashes.length} keyhive events requested, ${requestedOps.length} found.`
             );
           }
-        }
 
-        void this.saveReceivedEvents(foundEvents);
-      } catch (error) {
-        await this.handleIngestError(error, foundEvents, message.senderId);
-      }
-    }
-
-    if (requestedHashes.length > 0) {
-      const ops = await getEventsForPeerPair(
-        this.keyhive,
-        this.peerId,
-        message.senderId
-      );
-      if (ops) {
-        const hashStringToOp = new Map(
-          Array.from(ops.entries()).map(([hash, op]) => [hash.toString(), op])
-        );
-
-        const requestedOps = requestedHashes
-          .map((hash) => hashStringToOp.get(hash.toString())?.toBytes())
-          .filter((op): op is Uint8Array => op !== undefined);
-
-        if (requestedOps.length === 0) {
           console.debug(
-            `[AMRepoKeyhive] 0 ops requested by ${message.senderId}`
+            `[AMRepoKeyhive] Sending ${requestedOps.length} requested ops to ${message.senderId}`
           );
-          return;
+
+          const data = encode(requestedOps);
+          const response = {
+            type: "keyhive-sync-ops",
+            senderId: peerId,
+            targetId: message.senderId,
+            data,
+          };
+          this.send(response);
         }
-
-        if (requestedOps.length < requestedHashes.length) {
-          console.warn(
-            `[AMRepoKeyhive] ${requestedHashes.length} keyhive events requested, ${requestedOps.length} found.`
-          );
-        }
-
-        console.debug(
-          `[AMRepoKeyhive] Sending ${requestedOps.length} requested ops to ${message.senderId}`
-        );
-
-        const data = encode(requestedOps);
-        const response = {
-          type: "keyhive-sync-ops",
-          senderId: this.peerId,
-          targetId: message.senderId,
-          data,
-        };
-        this.send(response);
       }
-    }
+    });
   }
 
   // In response to a message from a peer indicating they are missing our contact
@@ -546,50 +562,53 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       `[AMRepoKeyhive] Received ${receivedEvents.length} keyhive events`
     );
 
-    if (receivedEvents.length > 0) {
-      console.debug(
-        `[AMRepoKeyhive] Ingesting ${receivedEvents.length} keyhive events from ${message.senderId}`
-      );
-
-      try {
-        const pendingEvents =
-          await this.keyhive.ingestEventsBytes(receivedEvents);
+    await this.keyhiveQueue.run(async () => {
+      if (receivedEvents.length > 0) {
         console.debug(
-          `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
+          `[AMRepoKeyhive] Ingesting ${receivedEvents.length} keyhive events from ${message.senderId}`
         );
 
-        // If there are pending events, try reading from storage (e.g., in case
-        // they have already been processed by a separate tab in a browser).
-        if (pendingEvents.length > 0) {
-          console.warn(
-            `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending. Reading from storage`
+        try {
+          const pendingEvents =
+            await this.keyhive.ingestEventsBytes(receivedEvents);
+          console.debug(
+            `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
           );
-          try {
-            await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
-            const retryPending =
-              await this.keyhive.ingestEventsBytes(receivedEvents);
-            if (retryPending.length === 0) {
-              console.log(
-                `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
-              );
-            } else {
-              console.warn(
-                `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
+
+          // If there are pending events, try reading from storage (e.g., in case
+          // they have already been processed by a separate tab in a browser).
+          if (pendingEvents.length > 0) {
+            console.warn(
+              `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending. Reading from storage`
+            );
+            try {
+              await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
+              const retryPending =
+                await this.keyhive.ingestEventsBytes(receivedEvents);
+              if (retryPending.length === 0) {
+                console.log(
+                  `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
+                );
+              } else {
+                console.warn(
+                  `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
+                );
+              }
+            } catch (storageError) {
+              console.error(
+                `[AMRepoKeyhive] Failed while reading from storage:`,
+                storageError
               );
             }
-          } catch (storageError) {
-            console.error(
-              `[AMRepoKeyhive] Failed while reading from storage:`,
-              storageError
-            );
           }
-        }
 
-        void this.saveReceivedEvents(receivedEvents);
-      } catch (error) {
-        await this.handleIngestError(error, receivedEvents, message.senderId);
+          void this.saveReceivedEvents(receivedEvents);
+          (this.emit as any)("ingest-remote");
+        } catch (error) {
+          await this.handleIngestError(error, receivedEvents, message.senderId);
+        }
       }
-    }
+    });
   }
 
   private async saveReceivedEvents(events: Uint8Array[]): Promise<void> {
