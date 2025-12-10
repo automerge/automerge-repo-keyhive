@@ -2,6 +2,7 @@ import {
   AutomergeUrl,
   Heads,
   PeerId,
+  Repo,
 } from "@automerge/automerge-repo/slim";
 import { hexToUint8Array } from "../utilities.js";
 import {
@@ -10,6 +11,7 @@ import {
   ContactCard,
   Document as KeyhiveDocument,
   DocumentId as KeyhiveDocumentId,
+  Event as KeyhiveEvent,
   Identifier,
   Individual,
   Keyhive,
@@ -38,6 +40,14 @@ export class AutomergeRepoKeyhive {
     public emitter: KeyhiveEventEmitter,
     public idFactory: (heads: Heads) => Promise<Uint8Array>
   ) {}
+
+  // Configure `AutomergeRepoKeyhive` to notify the provided `Repo` about
+  // potential `Keyhive` membership updates.
+  linkRepo(repo: Repo) {
+    (this.networkAdapter as any).on("ingest-remote", async () => {
+      repo.shareConfigChanged()
+    })
+  }
 
   async receiveContactCard(contactCard: ContactCard
   ): Promise<Individual | undefined> {
