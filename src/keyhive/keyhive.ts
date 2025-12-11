@@ -129,10 +129,10 @@ export async function receiveContactCard(keyhive: Keyhive, contactCard: ContactC
     return await keyhive.getIndividual(contactCard.individualId);
   } else {
     if (contactCard.op) {
-      console.debug(`Saving Contact Card event: ${contactCard.op}`);
+      console.debug(`[AMRepoKeyhive] Saving Contact Card event: ${contactCard.op}`);
       keyhiveStorage.saveEventWithHash(contactCard.op);
     } else {
-      console.error(`No op found for ${contactCard.toJson()}`);
+      console.error(`[AMRepoKeyhive] No op found for ${contactCard.toJson()}`);
     }
     return await keyhive.receiveContactCard(contactCard);
   }

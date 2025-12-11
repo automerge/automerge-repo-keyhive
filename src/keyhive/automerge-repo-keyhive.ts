@@ -73,12 +73,12 @@ export class AutomergeRepoKeyhive {
       `[AMRepoKeyhive] addMemberToDoc: From url ${docUrl} derived Doc Id ${docId.toBytes()}`
     );
     if (!docId) {
-      console.error(`Failed to parse docId from AutomergeUrl`);
+      console.error(`[AMRepoKeyhive] Failed to parse docId from AutomergeUrl`);
       return;
     }
     const doc = await this.keyhive.getDocument(docId);
     if (!doc) {
-      console.error(`Failed to add member: doc not found for id ${docId}`);
+      console.error(`[AMRepoKeyhive] Failed to add member: doc not found for id ${docId}`);
       return;
     }
     await this.keyhive.addMember(agent, doc.toMembered(), access, []);
@@ -99,7 +99,7 @@ export class AutomergeRepoKeyhive {
     const docId = docIdFromAutomergeUrl(docUrl);
     const doc = await this.keyhive.getDocument(docId);
     if (!doc) {
-      console.error(`Failed to revoke member: doc not found for id ${docId}`);
+      console.error(`[AMRepoKeyhive] Failed to revoke member: doc not found for id ${docId}`);
       return;
     }
 
