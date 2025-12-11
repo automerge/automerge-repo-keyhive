@@ -109,7 +109,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         message.senderId !== this.hardcodedRemoteId
       ) {
         console.log(
-          `Unknown remote peer ${message.senderId}. Ignoring message!`
+          `[AMRepoKeyhive] Unknown remote peer ${message.senderId}. Ignoring message!`
         );
         return;
       }
@@ -192,7 +192,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         try {
           await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
         } catch (error) {
-          console.error(`Unable to ingest from storage: ${error}`);
+          console.error(`[AMRepoKeyhive] Unable to ingest from storage: ${error}`);
         }
       }
       let archiveBytes: Uint8Array;
@@ -245,14 +245,14 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             data: data,
           };
           console.debug(
-            `Sending keyhive sync request to ${targetId} from ${senderId}`
+            `[AMRepoKeyhive] Sending keyhive sync request to ${targetId} from ${senderId}`
           );
           this.send(message, maybeContactCard);
         } else {
           const keyhiveId = keyhiveIdentifierFromPeerId(senderId);
           const agent = await this.keyhive.getAgent(keyhiveId);
           if (!agent) {
-            console.debug(`Requesting ContactCard from ${senderId}`);
+            console.debug(`[AMRepoKeyhive] Requesting ContactCard from ${senderId}`);
             if (!maybeContactCard) {
               maybeContactCard = this.contactCard;
             }
@@ -346,7 +346,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           .filter((hash) => hash !== undefined);
 
         console.debug(
-          `Found ${foundOps.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`
+          `[AMRepoKeyhive] Found ${foundOps.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`
         );
 
         const responseData = {
@@ -362,7 +362,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           data,
         };
         console.debug(
-          `Sending keyhive sync response to ${message.senderId} from ${peerId}`
+          `[AMRepoKeyhive] Sending keyhive sync response to ${message.senderId} from ${peerId}`
         );
         this.send(response);
       } else {
@@ -421,7 +421,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           try {
             pendingEvents = await this.keyhive.ingestEventsBytes(foundEvents);
           } catch (error) {
-            console.error(`Error ingesting events: ${error}`);
+            console.error(`[AMRepoKeyhive] Error ingesting events: ${error}`);
           }
 
           if (pendingEvents) {
