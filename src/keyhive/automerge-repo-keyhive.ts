@@ -107,6 +107,30 @@ export class AutomergeRepoKeyhive {
     await this.keyhive.revokeMember(agent, true, membered);
   }
 
+  async setPublicAccess(docUrl: AutomergeUrl, access: Access) {
+    const publicId = Identifier.publicId();
+    const agent = await this.keyhive.getAgent(publicId);
+    if (!agent) {
+      console.error("[AMRepoKeyhive] Failed to get public agent");
+      return;
+    }
+
+    const docId = docIdFromAutomergeUrl(docUrl);
+    const doc = await this.keyhive.getDocument(docId);
+    if (!doc) {
+      console.error(`[AMRepoKeyhive] Failed to set public access: doc not found for id ${docId}`);
+      return;
+    }
+
+    await this.keyhive.addMember(agent, doc.toMembered(), access, []);
+  }
+
+  async getPublicAccess(docUrl: AutomergeUrl): Promise<Access | undefined> {
+    const publicId = Identifier.publicId();
+    const docId = docIdFromAutomergeUrl(docUrl);
+    return await this.keyhive.accessForDoc(publicId, docId);
+  }
+
   async generateDoc(): Promise<KeyhiveDocument> {
     return generateDoc(this.keyhive)
   }
