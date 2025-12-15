@@ -39,7 +39,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     super();
 
     // Periodically trigger the keyhive op sync protocol.
-    this.syncIntervalId = setInterval(this.requestKeyhiveSync.bind(this), 15000);
+    this.syncIntervalId = setInterval(this.requestKeyhiveSync.bind(this), 60000);
 
     // Periodically compact keyhive storage (every 60 seconds).
     this.compactionIntervalId = setInterval(
@@ -197,9 +197,6 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     includeContactCard: boolean,
     attemptRecovery: boolean = false
   ): Promise<void> {
-    // FIXME: Temporarily disabling
-    return;
-
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
