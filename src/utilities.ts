@@ -46,7 +46,15 @@ export async function getEventsForPeer(
   if (!agent) {
     return null;
   }
-  return await keyhive.eventsForAgent(agent);
+  const eventsForPeer = await keyhive.eventsForAgent(agent);
+  const publicAgent = await keyhive.getAgent(Identifier.publicId());
+  if (publicAgent) {
+    const eventsForPublic = await keyhive.eventsForAgent(publicAgent);
+    for (const [hash, event] of eventsForPublic.entries()) {
+      eventsForPeer.set(hash, event);
+    }
+  }
+  return eventsForPeer;
 }
 
 // Get the intersection of events that both peers can access, and union
