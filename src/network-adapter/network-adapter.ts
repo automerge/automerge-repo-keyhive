@@ -245,7 +245,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             data: data,
           };
           console.debug(
-            `[AMRepoKeyhive] Sending keyhive sync request to ${targetId} from ${senderId}`
+            `[AMRepoKeyhive] Sending keyhive sync request to ${targetId} from ${senderId} with ${opHashes.length} local operations and ${pendingOpHashes.length} pending operations.`
           );
           this.send(message, maybeContactCard);
         } else {
