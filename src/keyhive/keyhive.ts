@@ -192,6 +192,92 @@ export class KeyhiveStorage {
     );
   }
 
+  async compact(kh: Keyhive): Promise<void> {
+    const keyhiveArchiveChunks = await this.storage.loadRange([
+      KEYHIVE_DB_KEY,
+      KEYHIVE_ARCHIVES_KEY,
+    ]);
+    const keyhiveEventsChunks = await this.storage.loadRange([
+      KEYHIVE_DB_KEY,
+      KEYHIVE_EVENTS_KEY,
+    ]);
+
+    // Nothing to compact if no events and at most one archive
+    if (keyhiveEventsChunks.length === 0 && keyhiveArchiveChunks.length <= 1) {
+      return;
+    }
+
+    console.debug(
+      `[AMRepoKeyhive] Compacting: ${keyhiveArchiveChunks.length} archives, ${keyhiveEventsChunks.length} events`
+    );
+
+    // Ingest all archives
+    for (const chunk of keyhiveArchiveChunks) {
+      if (chunk.data) {
+        try {
+          await kh.ingestArchive(new Archive(chunk.data));
+        } catch (error) {
+          console.warn(
+            `[AMRepoKeyhive] Failed to ingest archive during compaction:`,
+            error
+          );
+        }
+      }
+    }
+
+    // Build map from event data to key for tracking pending events
+    const dataToKey = new Map<Uint8Array, StorageKey>();
+    for (const chunk of keyhiveEventsChunks) {
+      if (chunk.data) {
+        dataToKey.set(chunk.data, chunk.key);
+      }
+    }
+
+    // Ingest all events
+    const eventsBytes: Array<Uint8Array> = keyhiveEventsChunks
+      .map((chunk) => chunk.data)
+      .filter((data): data is Uint8Array => data !== undefined);
+
+    let pendingKeys: StorageKey[] = [];
+    if (eventsBytes.length > 0) {
+      try {
+        pendingKeys = (await kh.ingestEventsBytes(eventsBytes))
+          .map((bytes: Uint8Array) => dataToKey.get(bytes))
+          .filter((key): key is StorageKey => key !== undefined);
+      } catch (error) {
+        console.warn(
+          `[AMRepoKeyhive] Failed to ingest events during compaction:`,
+          error
+        );
+      }
+    }
+
+    // Write the new compacted archive
+    await this.saveKeyhiveWithHash(kh);
+
+    // Remove old archives
+    for (const chunk of keyhiveArchiveChunks) {
+      await this.storage.remove(chunk.key);
+    }
+
+    // Remove events that are not pending
+    for (const chunk of keyhiveEventsChunks) {
+      const isPendingKey = pendingKeys.some(
+        (pendingKey) =>
+          pendingKey.length === chunk.key.length &&
+          pendingKey.every((val, index) => val === chunk.key[index])
+      );
+
+      if (!isPendingKey) {
+        await this.storage.remove(chunk.key);
+      }
+    }
+
+    console.debug(
+      `[AMRepoKeyhive] Compaction complete. ${pendingKeys.length} pending events retained.`
+    );
+  }
+
   async ingestKeyhiveFromStorage(kh: Keyhive): Promise<void> {
     const keyhiveArchiveChunks = await this.storage.loadRange([
       KEYHIVE_DB_KEY,

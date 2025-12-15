@@ -25,6 +25,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
   private peers: Set<PeerId> = new Set();
   private syncIntervalId?: ReturnType<typeof setInterval>;
+  private compactionIntervalId?: ReturnType<typeof setInterval>;
 
   constructor(
     private networkAdapter: NetworkAdapter,
@@ -39,6 +40,12 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
     // Periodically trigger the keyhive op sync protocol.
     this.syncIntervalId = setInterval(this.requestKeyhiveSync.bind(this), 15000);
+
+    // Periodically compact keyhive storage (every 60 seconds).
+    this.compactionIntervalId = setInterval(
+      this.runCompaction.bind(this),
+      60000
+    );
 
     networkAdapter.on("message", (msg) => {
       this.receiveMessage(msg);
@@ -74,6 +81,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.syncIntervalId) {
       clearInterval(this.syncIntervalId);
       this.syncIntervalId = undefined;
+    }
+    if (this.compactionIntervalId) {
+      clearInterval(this.compactionIntervalId);
+      this.compactionIntervalId = undefined;
     }
     this.networkAdapter.disconnect();
   }
@@ -640,5 +651,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     let includeContactCard = false;
     let attemptRecovery = true;
     this.syncKeyhive(this.peerId, includeContactCard, attemptRecovery);
+  }
+
+  private runCompaction(): void {
+    void this.keyhiveQueue.run(async () => {
+      await this.keyhiveStorage.compact(this.keyhive);
+    });
   }
 }
