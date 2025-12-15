@@ -24,6 +24,7 @@ import {
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
   private peers: Set<PeerId> = new Set();
+  private syncIntervalId?: ReturnType<typeof setInterval>;
 
   constructor(
     private networkAdapter: NetworkAdapter,
@@ -37,7 +38,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     super();
 
     // Periodically trigger the keyhive op sync protocol.
-    setInterval(this.requestKeyhiveSync.bind(this), 15000);
+    this.syncIntervalId = setInterval(this.requestKeyhiveSync.bind(this), 15000);
 
     networkAdapter.on("message", (msg) => {
       this.receiveMessage(msg);
@@ -70,6 +71,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   }
 
   disconnect(): void {
+    if (this.syncIntervalId) {
+      clearInterval(this.syncIntervalId);
+      this.syncIntervalId = undefined;
+    }
     this.networkAdapter.disconnect();
   }
 
