@@ -195,22 +195,6 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           console.error(`[AMRepoKeyhive] Unable to ingest from storage: ${error}`);
         }
       }
-      let archiveBytes: Uint8Array;
-      try {
-        archiveBytes = (await this.keyhive.toArchive()).toBytes();
-        if (!archiveBytes || archiveBytes.length === 0) {
-          console.error(
-            "[AMRepoKeyhive] Archive serialization produced empty bytes, skipping sync"
-          );
-          return;
-        }
-      } catch (error) {
-        console.error(
-          "[AMRepoKeyhive] Failed to serialize keyhive archive:",
-          error
-        );
-        return;
-      }
       let senderId: PeerId;
       if (maybeSenderId) {
         senderId = maybeSenderId;
