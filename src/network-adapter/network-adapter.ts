@@ -14,18 +14,29 @@ import {
   verifyData,
 } from "./messages.js";
 import { PromiseQueue, Pending } from "./pending.js";
-import { getEventsForPeerPair, keyhiveIdentifierFromPeerId } from "../utilities.js";
+import { getEventsForPeer, keyhiveIdentifierFromPeerId } from "../utilities.js";
 import {
   getPendingOpHashes,
   KeyhiveStorage,
   receiveContactCard,
 } from "../keyhive/keyhive.js";
 
+// Cached events for a peer along with string versions of event hashes
+type CachedPeerEvents = {
+  events: Map<Uint8Array, any>;
+  hashStrings: Set<string>;
+};
+
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
   private peers: Set<PeerId> = new Set();
   private syncIntervalId?: ReturnType<typeof setInterval>;
   private compactionIntervalId?: ReturnType<typeof setInterval>;
+
+  // Cache for events per peer to avoid unnecessary WASM calls
+  private eventsCache: Map<PeerId, CachedPeerEvents> = new Map();
+  private pendingOpHashesCache: Uint8Array[] | null = null;
+  private lastKnownTotalOps: bigint = 0n;
 
   constructor(
     private networkAdapter: NetworkAdapter,
@@ -207,6 +218,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         );
         try {
           await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
+          // Check if ingestion changed state and invalidate cache if needed
+          await this.checkAndInvalidateCache();
         } catch (error) {
           console.error(`[AMRepoKeyhive] Unable to ingest from storage: ${error}`);
         }
@@ -230,10 +243,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           continue;
         }
 
-        const ops = await getEventsForPeerPair(this.keyhive, senderId, targetId);
+        const ops = await this.getCachedEventsForPeerPair(senderId, targetId);
         if (ops) {
           const opHashes = Array.from(ops.keys());
-          let pendingOpHashes = await getPendingOpHashes(this.keyhive);
+          const pendingOpHashes = await this.getCachedPendingOpHashes();
           const data = encode({
             found: opHashes,
             pending: pendingOpHashes,
@@ -298,13 +311,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     );
 
     await this.keyhiveQueue.run(async () => {
-      const ops = await getEventsForPeerPair(
-        this.keyhive,
-        peerId,
-        message.senderId
-      );
+      const ops = await this.getCachedEventsForPeerPair(peerId, message.senderId);
       if (ops) {
-        const pendingOpHashes = await getPendingOpHashes(this.keyhive);
+        const pendingOpHashes = await this.getCachedPendingOpHashes();
         console.debug(
           `[AMRepoKeyhive] asyncSendKeyhiveSyncResponse: Found ${ops.size} total local operation hashes for ${message.senderId} and ${pendingOpHashes.length} total pending hashes`
         );
@@ -461,6 +470,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           }
 
           void this.saveReceivedEvents(foundEvents);
+          // Invalidate cache since we ingested new events
+          await this.checkAndInvalidateCache();
           (this.emit as any)("ingest-remote");
         } catch (error) {
           await this.handleIngestError(error, foundEvents, message.senderId);
@@ -468,11 +479,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       }
 
       if (requestedHashes.length > 0) {
-        const ops = await getEventsForPeerPair(
-          this.keyhive,
-          peerId,
-          message.senderId
-        );
+        const ops = await this.getCachedEventsForPeerPair(peerId, message.senderId);
         if (ops) {
           const hashStringToOp = new Map(
             Array.from(ops.entries()).map(([hash, op]) => [hash.toString(), op])
@@ -603,6 +610,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           }
 
           void this.saveReceivedEvents(receivedEvents);
+          // Invalidate cache since we ingested new events
+          await this.checkAndInvalidateCache();
           (this.emit as any)("ingest-remote");
         } catch (error) {
           await this.handleIngestError(error, receivedEvents, message.senderId);
@@ -657,5 +666,92 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     void this.keyhiveQueue.run(async () => {
       await this.keyhiveStorage.compact(this.keyhive);
     });
+  }
+
+  // Invalidate all caches, forcing a refresh on next sync
+  private invalidateCaches(): void {
+    this.eventsCache.clear();
+    this.pendingOpHashesCache = null;
+  }
+
+  // Check if keyhive state changed and invalidate cache if needed
+  private async checkAndInvalidateCache(): Promise<void> {
+    const stats = await this.keyhive.stats();
+    const currentTotalOps = stats.totalOps;
+    if (currentTotalOps !== this.lastKnownTotalOps) {
+      console.debug(
+        `[AMRepoKeyhive] Total ops changed from ${this.lastKnownTotalOps} to ${currentTotalOps}, invalidating cache`
+      );
+      this.lastKnownTotalOps = currentTotalOps;
+      this.invalidateCaches();
+    }
+  }
+
+  // Get cached pending op hashes, or get and cache if not present
+  private async getCachedPendingOpHashes(): Promise<Uint8Array[]> {
+    if (this.pendingOpHashesCache !== null) {
+      return this.pendingOpHashesCache;
+    }
+    this.pendingOpHashesCache = await getPendingOpHashes(this.keyhive);
+    return this.pendingOpHashesCache;
+  }
+
+  // Get cached events for a peer, or get and cache if not present.
+  // Includes both membership events and prekeys for the peer.
+  private async getCachedEventsForPeer(
+    peerId: PeerId
+  ): Promise<CachedPeerEvents | null> {
+    const cached = this.eventsCache.get(peerId);
+    if (cached) {
+      return cached;
+    }
+
+    const events = await getEventsForPeer(this.keyhive, peerId);
+    if (!events) {
+      return null;
+    }
+
+    // Include prekeys for this peer
+    const agent = await this.keyhive.getAgent(
+      keyhiveIdentifierFromPeerId(peerId)
+    );
+    if (agent) {
+      for (const [hash, event] of (await agent.keyOps()).entries()) {
+        events.set(hash, event);
+      }
+    }
+
+    const hashStrings = new Set<string>();
+    for (const hash of events.keys()) {
+      hashStrings.add(hash.toString());
+    }
+
+    const cachedEvents: CachedPeerEvents = { events, hashStrings };
+    this.eventsCache.set(peerId, cachedEvents);
+    return cachedEvents;
+  }
+
+  // Returns the intersection of events both peers can access.
+  private async getCachedEventsForPeerPair(
+    peerA: PeerId,
+    peerB: PeerId
+  ): Promise<Map<Uint8Array, any> | null> {
+    const eventsForA = await this.getCachedEventsForPeer(peerA);
+    const eventsForB = await this.getCachedEventsForPeer(peerB);
+
+    if (!eventsForA || !eventsForB) {
+      return null;
+    }
+
+    const result = new Map<Uint8Array, any>();
+
+    for (const [hash, event] of eventsForA.events.entries()) {
+      const hashString = hash.toString();
+      if (eventsForB.hashStrings.has(hashString)) {
+        result.set(hash, event);
+      }
+    }
+
+    return result;
   }
 }
