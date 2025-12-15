@@ -50,7 +50,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     super();
 
     // Periodically trigger the keyhive op sync protocol.
-    this.syncIntervalId = setInterval(this.requestKeyhiveSync.bind(this), 60000);
+    this.syncIntervalId = setInterval(this.requestKeyhiveSync.bind(this), 15000);
 
     // Periodically compact keyhive storage (every 60 seconds).
     this.compactionIntervalId = setInterval(
