@@ -197,6 +197,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     includeContactCard: boolean,
     attemptRecovery: boolean = false
   ): Promise<void> {
+    // FIXME: Temporarily disabling
+    return;
+
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
