@@ -343,8 +343,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           peerFoundHashStrings.union(peerPendingHashStrings)
         );
         const foundOps = Array.from(hashStringsToSend)
-          .map((str) => opsByHashString.get(str)?.op.toBytes())
-          .filter((op) => op !== undefined);
+          .map((str) => opsByHashString.get(str)?.op)
+          .filter((op): op is Uint8Array => op !== undefined);
 
         // Determine which ops we need to request from the peer
         const hashStringsToRequest = peerFoundHashStrings.difference(
@@ -486,7 +486,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           );
 
           const requestedOps = requestedHashes
-            .map((hash) => hashStringToOp.get(hash.toString())?.toBytes())
+            .map((hash) => hashStringToOp.get(hash.toString()))
             .filter((op): op is Uint8Array => op !== undefined);
 
           if (requestedOps.length === 0) {
