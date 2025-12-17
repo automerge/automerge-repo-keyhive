@@ -30,7 +30,7 @@ type CachedPeerEvents = {
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
   private peers: Set<PeerId> = new Set();
-  private syncIntervalId?: ReturnType<typeof setInterval>;
+  private syncIntervalId?: ReturnType<typeof setInterval> | undefined;
   private compactionIntervalId?: ReturnType<typeof setInterval>;
 
   // Cache for events per peer to avoid unnecessary WASM calls
@@ -44,15 +44,16 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     private keyhive: Keyhive,
     private keyhiveStorage: KeyhiveStorage,
     private keyhiveQueue: PromiseQueue,
+    periodicallyRequestSync: boolean,
     // TODO: Replace with dynamic configuration
     private hardcodedRemoteId: PeerId | null = null
   ) {
     super();
 
-    // Periodically trigger the keyhive op sync protocol.
-    this.syncIntervalId = setInterval(this.requestKeyhiveSync.bind(this), 15000);
+    if (periodicallyRequestSync) {
+        this.syncIntervalId = setInterval(this.requestKeyhiveSync.bind(this), 15000);
+    }
 
-    // Periodically compact keyhive storage (every 60 seconds).
     this.compactionIntervalId = setInterval(
       this.runCompaction.bind(this),
       60000

@@ -37,10 +37,16 @@ export async function initializeAutomergeRepoKeyhive(options: {
   storage: StorageAdapterInterface;
   peerIdSuffix: string;
   networkAdapter: NetworkAdapter;
-  automaticArchiveIngestion: boolean;
-  onlyShareWithHardcodedServerPeerId: boolean;
+  automaticArchiveIngestion?: boolean;
+  onlyShareWithHardcodedServerPeerId?: boolean;
+  periodicallyRequestSync?: boolean;
   keyPair?: CryptoKeyPair;
 }): Promise<AutomergeRepoKeyhive> {
+  const {
+    automaticArchiveIngestion = true,
+    onlyShareWithHardcodedServerPeerId = false,
+    periodicallyRequestSync = true,
+  } = options;
   const { keyPair, signer } = await loadOrCreateKeyPairAndSigner(options.storage, options.keyPair)
   const emitter = new KeyhiveEventEmitter();
   const uniqueIdHash = new Uint8Array(
@@ -71,7 +77,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
   );
 
   let hardcodedServerPeerId = null;
-  if (options.onlyShareWithHardcodedServerPeerId) {
+  if (onlyShareWithHardcodedServerPeerId) {
     hardcodedServerPeerId = serverPeerId
   }
 
@@ -83,10 +89,11 @@ export async function initializeAutomergeRepoKeyhive(options: {
     keyhive,
     keyhiveStorage,
     keyhiveQueue,
+    periodicallyRequestSync,
     hardcodedServerPeerId
   );
 
-  if (options.automaticArchiveIngestion) {
+  if (automaticArchiveIngestion) {
     emitter.on("update", (event: KeyhiveEvent) => {
       void keyhiveQueue.run(async () => {
         console.debug(
