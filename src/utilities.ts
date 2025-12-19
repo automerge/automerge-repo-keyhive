@@ -56,3 +56,40 @@ export async function getEventsForPeer(
   }
   return eventsForPeer;
 }
+
+// Returns event hashes for a peer as Map<hashString, hashBytes>
+export async function getEventHashesForPeer(
+  keyhive: Keyhive,
+  peerId: PeerId
+): Promise<Map<string, Uint8Array> | null> {
+  const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
+  const agent = await keyhive.getAgent(keyhiveId);
+  if (!agent) {
+    return null;
+  }
+
+  const hashMap = new Map<string, Uint8Array>();
+
+  // Get membership + prekey hashes for the peer's agent
+  const eventHashes: Uint8Array[] = await keyhive.eventHashesForAgent(agent);
+  for (const hash of eventHashes) {
+    hashMap.set(hash.toString(), hash);
+  }
+
+  // Get the agent's own prekey hashes
+  const keyOpHashes: Uint8Array[] = await agent.keyOpHashes();
+  for (const hash of keyOpHashes) {
+    hashMap.set(hash.toString(), hash);
+  }
+
+  // Get public agent hashes
+  const publicAgent = await keyhive.getAgent(Identifier.publicId());
+  if (publicAgent) {
+    const publicHashes: Uint8Array[] = await keyhive.eventHashesForAgent(publicAgent);
+    for (const hash of publicHashes) {
+      hashMap.set(hash.toString(), hash);
+    }
+  }
+
+  return hashMap;
+}
