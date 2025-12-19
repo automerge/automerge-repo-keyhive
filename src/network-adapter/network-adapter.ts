@@ -71,6 +71,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     networkAdapter.on("peer-disconnected", (payload) => {
       this.emit("peer-disconnected", payload);
       this.peers.delete(payload.peerId);
+      this.eventsCache.delete(payload.peerId);
     });
   }
 
