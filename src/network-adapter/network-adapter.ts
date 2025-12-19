@@ -21,9 +21,10 @@ import {
   receiveContactCard,
 } from "../keyhive/keyhive.js";
 
-// Cached events for a peer along with string versions of event hashes
-type CachedPeerEvents = {
+type PeerEvents = {
+  // Map from event hash to event bytes
   events: Map<Uint8Array, any>;
+  // Stringified
   hashStrings: Set<string>;
 };
 
@@ -33,8 +34,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private syncIntervalId?: ReturnType<typeof setInterval> | undefined;
   private compactionIntervalId?: ReturnType<typeof setInterval>;
 
+  // Whether to cache events. Caching can use significant memory with many peers/events
+  private cacheEvents: boolean;
   // Cache for events per peer to avoid unnecessary WASM calls
-  private eventsCache: Map<PeerId, CachedPeerEvents> = new Map();
+  private eventsCache: Map<PeerId, PeerEvents> = new Map();
   private pendingOpHashesCache: Uint8Array[] | null = null;
   private lastKnownTotalOps: bigint = 0n;
 
@@ -45,10 +48,12 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     private keyhiveStorage: KeyhiveStorage,
     private keyhiveQueue: PromiseQueue,
     periodicallyRequestSync: boolean,
+    cacheEvents: boolean = false,
     // TODO: Replace with dynamic configuration
     private hardcodedRemoteId: PeerId | null = null
   ) {
     super();
+    this.cacheEvents = cacheEvents;
 
     if (periodicallyRequestSync) {
         this.syncIntervalId = setInterval(this.requestKeyhiveSync.bind(this), 15000);
@@ -689,23 +694,28 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
   }
 
-  // Get cached pending op hashes, or get and cache if not present
+  // Get pending op hashes, optionally using cache
   private async getCachedPendingOpHashes(): Promise<Uint8Array[]> {
-    if (this.pendingOpHashesCache !== null) {
+    if (this.cacheEvents && this.pendingOpHashesCache !== null) {
       return this.pendingOpHashesCache;
     }
-    this.pendingOpHashesCache = await getPendingOpHashes(this.keyhive);
-    return this.pendingOpHashesCache;
+    const hashes = await getPendingOpHashes(this.keyhive);
+    if (this.cacheEvents) {
+      this.pendingOpHashesCache = hashes;
+    }
+    return hashes;
   }
 
-  // Get cached events for a peer, or get and cache if not present.
+  // Get events for a peer, optionally using cache.
   // Includes both membership events and prekeys for the peer.
   private async getCachedEventsForPeer(
     peerId: PeerId
-  ): Promise<CachedPeerEvents | null> {
-    const cached = this.eventsCache.get(peerId);
-    if (cached) {
-      return cached;
+  ): Promise<PeerEvents | null> {
+    if (this.cacheEvents) {
+      const cached = this.eventsCache.get(peerId);
+      if (cached) {
+        return cached;
+      }
     }
 
     const events = await getEventsForPeer(this.keyhive, peerId);
@@ -728,8 +738,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       hashStrings.add(hash.toString());
     }
 
-    const cachedEvents: CachedPeerEvents = { events, hashStrings };
-    this.eventsCache.set(peerId, cachedEvents);
+    const cachedEvents: PeerEvents = { events, hashStrings };
+    if (this.cacheEvents) {
+      this.eventsCache.set(peerId, cachedEvents);
+    }
     return cachedEvents;
   }
 
