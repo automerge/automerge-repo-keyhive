@@ -99,7 +99,7 @@ export async function createActive(
   };
 }
 
-async function storeActiveKeyPair(
+export async function storeActiveKeyPair(
   keyPair: CryptoKeyPair,
   db: StorageAdapterInterface
 ): Promise<void> {
