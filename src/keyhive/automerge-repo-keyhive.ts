@@ -1,6 +1,7 @@
 import {
   AutomergeUrl,
   Heads,
+  NetworkAdapter,
   PeerId,
   Repo,
 } from "@automerge/automerge-repo/slim";
@@ -38,7 +39,8 @@ export class AutomergeRepoKeyhive {
     public syncServer: SyncServer,
     public networkAdapter: KeyhiveNetworkAdapter,
     public emitter: KeyhiveEventEmitter,
-    public idFactory: (heads: Heads) => Promise<Uint8Array>
+    public idFactory: (heads: Heads) => Promise<Uint8Array>,
+    public createKeyhiveNetworkAdapter: (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean) => KeyhiveNetworkAdapter,
   ) {}
 
   // Configure `AutomergeRepoKeyhive` to notify the provided `Repo` about

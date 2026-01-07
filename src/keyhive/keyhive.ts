@@ -78,23 +78,27 @@ export async function initializeAutomergeRepoKeyhive(options: {
     keyhiveStorage
   );
 
-  let hardcodedServerPeerId = null;
-  if (onlyShareWithHardcodedServerPeerId) {
-    hardcodedServerPeerId = serverPeerId
-  }
-
   const keyhiveQueue = new PromiseQueue();
 
-  const keyhiveNetworkAdapter = new KeyhiveNetworkAdapter(
-    options.networkAdapter,
-    active.contactCard,
-    keyhive,
-    keyhiveStorage,
-    keyhiveQueue,
-    periodicallyRequestSync,
-    cacheHashes,
-    hardcodedServerPeerId
-  );
+  const createKeyhiveNetworkAdapter = (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean) => {
+    let hardcodedServerPeerId = null;
+    if (onlyShareWithHardcodedServerPeerId) {
+      hardcodedServerPeerId = serverPeerId
+    }
+
+    return new KeyhiveNetworkAdapter(
+      networkAdapter,
+      active.contactCard,
+      keyhive,
+      keyhiveStorage,
+      keyhiveQueue,
+      periodicallyRequestSync,
+      cacheHashes,
+      hardcodedServerPeerId
+    )
+  };
+
+  const keyhiveNetworkAdapter = createKeyhiveNetworkAdapter(options.networkAdapter, onlyShareWithHardcodedServerPeerId);
 
   if (automaticArchiveIngestion) {
     emitter.on("update", (event: KeyhiveEvent) => {
@@ -129,6 +133,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
     keyhiveNetworkAdapter,
     emitter,
     keyhiveIdFactory(keyhiveNetworkAdapter, keyhive),
+    createKeyhiveNetworkAdapter,
   );
 }
 
