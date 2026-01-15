@@ -104,10 +104,12 @@ export async function initializeAutomergeRepoKeyhive(options: {
   const keyhiveNetworkAdapter = createKeyhiveNetworkAdapter(options.networkAdapter, onlyShareWithHardcodedServerPeerId, periodicallyRequestSync, syncRequestInterval);
 
   if (automaticArchiveIngestion) {
+    let syncTimeout: ReturnType<typeof setTimeout> | undefined;
+
     emitter.on("update", (event: KeyhiveEvent) => {
       void keyhiveQueue.run(async () => {
         console.debug(
-          "[AMRepoKeyhive] Keyhive updated. Saving and syncing events."
+          "[AMRepoKeyhive] Keyhive updated. Saving event."
         );
         // TODO: This is a temporary fix until we have local prekey secret storage implemented in
         // keyhive.
@@ -121,7 +123,13 @@ export async function initializeAutomergeRepoKeyhive(options: {
         // TODO: We are currently filtering out CGKA ops in the sync protocol but
         // will need to restore them once we add encryption.
         if (event.variant !== "CGKA_OPERATION") {
-          keyhiveNetworkAdapter.syncKeyhive();
+          // If there is a pending sync timeout, we don't need to schedule another.
+          if (!syncTimeout) {
+            syncTimeout = setTimeout(() => {
+              syncTimeout = undefined;
+              keyhiveNetworkAdapter.syncKeyhive();
+            }, 1000);
+          }
         }
       });
     });
