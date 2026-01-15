@@ -44,13 +44,14 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     periodicallyRequestSync: boolean,
     cacheHashes: boolean = false,
     // TODO: Replace with dynamic configuration
-    private hardcodedRemoteId: PeerId | null = null
+    private hardcodedRemoteId: PeerId | null = null,
+    private syncRequestInterval: number,
   ) {
     super();
     this.cacheHashes = cacheHashes;
 
     if (periodicallyRequestSync) {
-        this.syncIntervalId = setInterval(this.requestKeyhiveSync.bind(this), 15000);
+        this.syncIntervalId = setInterval(this.requestKeyhiveSync.bind(this), syncRequestInterval);
     }
 
     this.compactionIntervalId = setInterval(
