@@ -64,6 +64,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     });
 
     networkAdapter.on("peer-candidate", (payload) => {
+      console.debug(`[AMRepoKeyhive] peer-candidate: ${payload.peerId}`);
       this.emit("peer-candidate", payload);
       this.peers.add(payload.peerId);
     });
@@ -219,9 +220,15 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           "[AMRepoKeyhive] Preparing for keyhive sync. Reading from storage"
         );
         try {
+          const statsBefore = await this.keyhive.stats();
           await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
           // Check if ingestion changed state and invalidate cache if needed
           await this.checkAndInvalidateCache();
+          // Emit ingest-remote if new ops were added from storage
+          const statsAfter = await this.keyhive.stats();
+          if (statsAfter.totalOps !== statsBefore.totalOps) {
+            (this.emit as any)("ingest-remote");
+          }
         } catch (error) {
           console.error(`[AMRepoKeyhive] Unable to ingest from storage: ${error}`);
         }
@@ -240,6 +247,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         maybeContactCard = this.contactCard;
       }
 
+      console.debug(`[AMRepoKeyhive] Syncing with ${this.peers.size} peers`);
       for (const targetId of this.peers) {
         if (targetId == senderId) {
           continue;
@@ -264,10 +272,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           );
           this.send(message, maybeContactCard);
         } else {
-          const keyhiveId = keyhiveIdentifierFromPeerId(senderId);
+          const keyhiveId = keyhiveIdentifierFromPeerId(targetId);
           const agent = await this.keyhive.getAgent(keyhiveId);
           if (!agent) {
-            console.debug(`[AMRepoKeyhive] Requesting ContactCard from ${senderId}`);
+            console.debug(`[AMRepoKeyhive] Requesting ContactCard from ${targetId}`);
             if (!maybeContactCard) {
               maybeContactCard = this.contactCard;
             }
@@ -471,8 +479,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           }
 
           void this.saveReceivedEvents(foundEvents);
-          // Invalidate cache since we ingested new events
-          await this.checkAndInvalidateCache();
+          // Invalidate cache since we ingested events from a peer
+          this.invalidateCaches();
           (this.emit as any)("ingest-remote");
         } catch (error) {
           await this.handleIngestError(error, foundEvents, message.senderId);
@@ -605,8 +613,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           }
 
           void this.saveReceivedEvents(receivedEvents);
-          // Invalidate cache since we ingested new events
-          await this.checkAndInvalidateCache();
+          // Invalidate cache since we ingested events from a peer
+          this.invalidateCaches();
           (this.emit as any)("ingest-remote");
         } catch (error) {
           await this.handleIngestError(error, receivedEvents, message.senderId);
