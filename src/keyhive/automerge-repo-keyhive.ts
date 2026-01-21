@@ -30,6 +30,16 @@ export const KEYHIVE_DB_KEY = "keyhive-db";
 export const KEYHIVE_ARCHIVES_KEY = "/archives/";
 export const KEYHIVE_EVENTS_KEY = "/ops/";
 
+// TODO: This is temporarily for calculating "best access". Move this and
+// the best access method to WASM API.
+const accessLevels: Record<string, number> = {
+  "None": 0,
+  "Pull": 1,
+  "Read": 2,
+  "Write": 3,
+  "Admin": 4,
+}
+
 export class AutomergeRepoKeyhive {
   constructor(
     public active: Active,
@@ -134,15 +144,29 @@ export class AutomergeRepoKeyhive {
   }
 
   async generateDoc(): Promise<KeyhiveDocument> {
-    return generateDoc(this.keyhive)
+    return generateDoc(this.keyhive);
   }
 
-  async accessForDoc(id: Identifier, doc_id: KeyhiveDocumentId): Promise<Access | undefined> {
-    return await this.keyhive.accessForDoc(id, doc_id)
+  async accessForDoc(id: Identifier, docId: KeyhiveDocumentId): Promise<Access | undefined> {
+    return await this.keyhive.accessForDoc(id, docId);
+  }
+
+  async bestAccessForDoc(id: Identifier, docUrl: AutomergeUrl): Promise<Access | undefined> {
+    const docId = docIdFromAutomergeUrl(docUrl);
+    console.log(`docId: ${docId}`)
+    const idAccess = await this.accessForDoc(id, docId)
+    const idStr = idAccess ? idAccess.toString() : "None";
+    const idAccessLevel = accessLevels[idAccess ? idAccess.toString() : "None"]
+    const publicId = Identifier.publicId();
+    const publicAccess = await this.keyhive.accessForDoc(publicId, docId);
+    const publicStr = publicAccess ? publicAccess.toString() : "None";
+    const publicAccessLevel = accessLevels[publicAccess ? publicAccess.toString() : "None"]
+    console.log(`docId: ${docId}, idStr: ${idStr}, publicStr: ${publicStr}, idAccessLevel: ${idAccessLevel}, publicAccessLevel: ${publicAccessLevel}`)
+    return (idAccessLevel > publicAccessLevel) ? idAccess : publicAccess;
   }
 
   async docMemberCapabilities(doc_id: KeyhiveDocumentId): Promise<Membership[]> {
-    return await this.keyhive.docMemberCapabilities(doc_id)
+    return await this.keyhive.docMemberCapabilities(doc_id);
   }
 
   async signData(
