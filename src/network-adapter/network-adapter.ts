@@ -122,14 +122,22 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         ? message.data
         : new Uint8Array();
     const seqNumber = this.pending.register();
-    const signedData = await this.keyhiveQueue.run(() =>
-      signData(this.keyhive, data, contactCard)
-    );
-    await this.networkAdapter.whenReady();
-    this.pending.fire(seqNumber, () => {
-      message.data = signedData;
-      this.networkAdapter.send(message);
-    });
+    try {
+      const signedData = await this.keyhiveQueue.run(() =>
+        signData(this.keyhive, data, contactCard)
+      );
+      await this.networkAdapter.whenReady();
+      this.pending.fire(seqNumber, () => {
+        message.data = signedData;
+        this.networkAdapter.send(message);
+      });
+    } catch (error) {
+      console.error(
+        `[AMRepoKeyhive] asyncSignAndSend FAILED for seq=${seqNumber}, type=${message.type}:`,
+        error
+      );
+      this.pending.cancel(seqNumber);
+    }
   }
 
   receiveMessage(message: Message): void {
