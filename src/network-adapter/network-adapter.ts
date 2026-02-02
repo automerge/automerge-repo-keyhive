@@ -107,6 +107,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
+    if (message.type === "sync" || message.type === "request") {
+      console.log(
+        `[KNA-send] type=${message.type} doc=${(message as any).documentId} to=${message.targetId} from=${this.peerId}`
+      );
+    }
     void this.asyncSignAndSend(message, contactCard);
   }
 
@@ -159,6 +164,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       if (maybeKeyhiveMessageData) {
         if (verifyData(message.senderId, maybeKeyhiveMessageData)) {
           void this.handleKeyhiveMessage(message, maybeKeyhiveMessageData);
+        } else {
+          console.error(
+            `[KNA-recv] VERIFICATION FAILED for type=${message.type} from=${message.senderId} doc=${(message as any).documentId}`
+          );
         }
       } else {
         this.emit("message", message);
@@ -193,6 +202,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     } else if (message.type === "keyhive-sync-ops") {
       await this.receiveKeyhiveSyncOps(message);
     } else {
+      if (message.type === "sync" || message.type === "request") {
+        console.log(
+          `[KNA-recv] type=${message.type} doc=${(message as any).documentId} from=${message.senderId}`
+        );
+      }
       this.emit("message", message);
     }
   }
