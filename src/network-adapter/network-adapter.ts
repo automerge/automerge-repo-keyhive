@@ -146,6 +146,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   }
 
   receiveMessage(message: Message): void {
+    console.log(
+      `[KNA-recv-raw] type=${message.type} from=${message.senderId} doc=${(message as any).documentId ?? "n/a"}`
+    );
     try {
       if (
         this.hardcodedRemoteId &&
@@ -157,6 +160,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         return;
       }
       if (!("data" in message) || message.data === undefined) {
+        console.log(`[KNA-recv] no data, emitting directly`);
         this.emit("message", message);
         return;
       }
@@ -170,6 +174,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           );
         }
       } else {
+        console.log(`[KNA-recv] not keyhive message, emitting directly`);
         this.emit("message", message);
       }
     } catch (e) {
@@ -202,11 +207,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     } else if (message.type === "keyhive-sync-ops") {
       await this.receiveKeyhiveSyncOps(message);
     } else {
-      if (message.type === "sync" || message.type === "request") {
-        console.log(
-          `[KNA-recv] type=${message.type} doc=${(message as any).documentId} from=${message.senderId}`
-        );
-      }
+      console.log(
+        `[KNA-recv] type=${message.type} doc=${(message as any).documentId} from=${message.senderId} -> emitting to repo`
+      );
       this.emit("message", message);
     }
   }
