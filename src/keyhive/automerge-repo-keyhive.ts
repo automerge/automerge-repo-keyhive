@@ -119,6 +119,27 @@ export class AutomergeRepoKeyhive {
     await this.keyhive.revokeMember(agent, true, membered);
   }
 
+  async addSyncServerPullToDoc(docUrl: AutomergeUrl) {
+    if (!this.syncServer) return;
+    try {
+      const serverContactCard = ContactCard.fromJson(
+        this.syncServer.contactCard.toJson()
+      );
+      if (!serverContactCard) {
+        console.error("[AMRepoKeyhive] Failed to parse sync server contact card");
+        return;
+      }
+      const pullAccess = Access.tryFromString("pull");
+      if (!pullAccess) {
+        console.error("[AMRepoKeyhive] Failed to create Pull access");
+        return;
+      }
+      await this.addMemberToDoc(docUrl, serverContactCard, pullAccess);
+    } catch (err) {
+      console.error("[AMRepoKeyhive] Failed to add sync server to doc:", err);
+    }
+  }
+
   async setPublicAccess(docUrl: AutomergeUrl, access: Access) {
     const publicId = Identifier.publicId();
     const agent = await this.keyhive.getAgent(publicId);
