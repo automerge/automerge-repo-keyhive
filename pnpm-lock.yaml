@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@automerge/automerge-repo':
-        specifier: 2.5.2-alpha.0
-        version: 2.5.2-alpha.0
+        specifier: 2.5.3
+        version: 2.5.3
       '@automerge/automerge-repo-network-websocket':
-        specifier: 2.5.2-alpha.0
-        version: 2.5.2-alpha.0
+        specifier: 2.5.3
+        version: 2.5.3
       '@keyhive/keyhive':
         specifier: 0.0.0-alpha.54i
         version: 0.0.0-alpha.54i
@@ -57,11 +57,11 @@ importers:
 
 packages:
 
-  '@automerge/automerge-repo-network-websocket@2.5.2-alpha.0':
-    resolution: {integrity: sha512-r6oDOW7CztDEZ4qaxqXXMPMjyXQFr1BXQ8rRmgT+I7QhZncTALvX2mZWzjwMHpuLY6wChg4MHYnA2lAFe7ALUg==}
+  '@automerge/automerge-repo-network-websocket@2.5.3':
+    resolution: {integrity: sha512-p6K1YLo34cyGxJ6oMWqeBbWX9rGvEPGyPdX2eq8S/iWNDjYf8lbjKSOhOD8DX87uAMZN/y1XOY/RckwS8lPJbQ==}
 
-  '@automerge/automerge-repo@2.5.2-alpha.0':
-    resolution: {integrity: sha512-Q30SZRTlCaXj///S7Kx5+hSepJ1afcvjfrC9d0o0qXLwuVJ3+UL6UQgSFS12c8b5y9bInCh6+Po5pFYx09j/Dw==}
+  '@automerge/automerge-repo@2.5.3':
+    resolution: {integrity: sha512-5ppzsUlzCs6PY+GeFlquaYLnVnYPz/hWzedep37zjb15tqZju1ukPPkBzT7KGEhEAnA99l4vfhfqSVC+1GktJg==}
 
   '@automerge/automerge@3.2.1':
     resolution: {integrity: sha512-xsEZlZe8lWyVCbD7Z7roH4X6ZKlRxMmmumb0M5CuxJWptUEfYsf+1z9lFEJh4aDBbWTLAgxsXd+TBi6jKTj0+g==}
@@ -1136,9 +1136,9 @@ packages:
 
 snapshots:
 
-  '@automerge/automerge-repo-network-websocket@2.5.2-alpha.0':
+  '@automerge/automerge-repo-network-websocket@2.5.3':
     dependencies:
-      '@automerge/automerge-repo': 2.5.2-alpha.0
+      '@automerge/automerge-repo': 2.5.3
       cbor-x: 1.6.0
       debug: 4.4.3
       eventemitter3: 5.0.1
@@ -1149,7 +1149,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@automerge/automerge-repo@2.5.2-alpha.0':
+  '@automerge/automerge-repo@2.5.3':
     dependencies:
       '@automerge/automerge': 3.2.1
       bs58check: 3.0.1
