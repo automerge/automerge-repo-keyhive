@@ -20,6 +20,7 @@ import {
   KeyhiveStorage,
   receiveContactCard,
 } from "../keyhive/keyhive.js";
+import { KeyhiveEventEmitter } from "../keyhive/emitter.js";
 
 // Map from hash string to hash bytes
 type PeerHashes = Map<string, Uint8Array>;
@@ -29,6 +30,12 @@ class Peer {
   lastKeyhiveRequestSent: Date = new Date();
   constructor() {}
 };
+
+export type PeerSyncState = {
+  opsToSend: number
+  opsToRequest: number
+  timestamp: number
+}
 
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
@@ -41,6 +48,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private hashesCache: Map<PeerId, PeerHashes> = new Map();
   private pendingOpHashesCache: Uint8Array[] | null = null;
   private lastKnownTotalOps: bigint = 0n;
+  private syncStates: Map<PeerId, PeerSyncState> = new Map();
+  private lastAmMessageRcvdTimes: Map<PeerId, Date> = new Map();
+  private lastAmMessageSentTimes: Map<PeerId, Date> = new Map();
+  private lastKhMessageRcvdTimes: Map<PeerId, Date> = new Map();
+  private lastKhMessageSentTimes: Map<PeerId, Date> = new Map();
 
   private minSyncRequestInterval: number = 1000;
   private minSyncResponseInterval: number = 1000;
@@ -56,6 +68,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     // TODO: Replace with dynamic configuration
     private hardcodedRemoteId: PeerId | null = null,
     private syncRequestInterval: number,
+    private emitter?: KeyhiveEventEmitter,
   ) {
     super();
     this.cacheHashes = cacheHashes;
@@ -73,6 +86,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       this.receiveMessage(msg);
     });
 
+    this.on("message", (msg) => {
+      this.lastAmMessageRcvdTimes.set(msg.senderId, new Date());
+    });
+
     networkAdapter.on("peer-candidate", (payload) => {
       if (this.peerId && payload.peerId == this.peerId) {
         console.warn(`[AMRepoKeyhive] Received peer-candidate msg with our own peerID`);
@@ -87,7 +104,25 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       this.emit("peer-disconnected", payload);
       this.peers.delete(payload.peerId);
       this.hashesCache.delete(payload.peerId);
+      this.syncStates.delete(payload.peerId);
     });
+  }
+
+  get connectedPeers(): ReadonlySet<PeerId> {
+    return this.peers;
+  }
+
+  get peerSyncStates(): ReadonlyMap<PeerId, PeerSyncState> {
+    return this.syncStates;
+  }
+
+  private async ingestRemoteEvents(events: Uint8Array[]): Promise<any[]> {
+    if (this.emitter) this.emitter.isRemote = true;
+    try {
+      return await this.keyhive.ingestEventsBytes(events);
+    } finally {
+      if (this.emitter) this.emitter.isRemote = false;
+    }
   }
 
   connect(peerId: PeerId, peerMetadata?: PeerMetadata): void {
@@ -144,6 +179,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       this.pending.fire(seqNumber, () => {
         message.data = signedData;
         this.networkAdapter.send(message);
+        this.lastKhMessageSentTimes.set(message.targetId, new Date());
       });
     } catch (error) {
       console.error(
@@ -187,10 +223,42 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
   }
 
+  /////////////
+  // TELEMETRY
+  pendingSeqIds(): string[] {
+    return this.pending.seqIds()
+  }
+
+  lastAmMsgRcvdTimes(): Map<PeerId, Date> {
+    return this.lastAmMessageRcvdTimes
+  }
+
+  lastAmMsgSentTimes(): Map<PeerId, Date> {
+    return this.lastAmMessageSentTimes
+  }
+
+  lastKhMsgRcvdTimes(): Map<PeerId, Date> {
+    return this.lastKhMessageRcvdTimes
+  }
+
+  lastKhMsgSentTimes(): Map<PeerId, Date> {
+    return this.lastKhMessageSentTimes
+  }
+
+  queueStats(): { depth: number; enqueued: number; completed: number } {
+    return {
+      depth: this.keyhiveQueue.depth,
+      enqueued: this.keyhiveQueue.enqueued,
+      completed: this.keyhiveQueue.completed,
+    }
+  }
+  /////////////
+
   private async handleKeyhiveMessage(
     message: Message,
     keyhiveMessageData: KeyhiveMessageData
   ) {
+    this.lastKhMessageRcvdTimes.set(message.senderId, new Date());
     if (keyhiveMessageData.contactCard) {
       receiveContactCard(
         this.keyhive,
@@ -406,6 +474,13 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           `[AMRepoKeyhive] Found ${foundOps.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`
         );
 
+        this.syncStates.set(message.senderId, {
+          opsToSend: foundOps.length,
+          opsToRequest: requested.length,
+          timestamp: Date.now(),
+        });
+        (this.emit as any)("sync-state", { peerId: message.senderId, opsToSend: foundOps.length, opsToRequest: requested.length });
+
         const responseData = {
           requested,
           found: foundOps,
@@ -471,6 +546,13 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       `[AMRepoKeyhive] Received keyhive sync response from ${message.senderId}: ${foundEvents.length} ops found, ${requestedHashes.length} ops requested`
     );
 
+    this.syncStates.set(message.senderId, {
+      opsToSend: requestedHashes.length,
+      opsToRequest: foundEvents.length,
+      timestamp: Date.now(),
+    });
+    (this.emit as any)("sync-state", { peerId: message.senderId, opsToSend: requestedHashes.length, opsToRequest: foundEvents.length });
+
     await this.keyhiveQueue.run(async () => {
       if (foundEvents.length > 0) {
         console.debug(
@@ -480,7 +562,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         try {
           let pendingEvents: any[] | null = null;
           try {
-            pendingEvents = await this.keyhive.ingestEventsBytes(foundEvents);
+            pendingEvents = await this.ingestRemoteEvents(foundEvents);
           } catch (error) {
             console.error(`[AMRepoKeyhive] Error ingesting events: ${error}`);
           }
@@ -503,7 +585,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             try {
               await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
               const retryPending =
-                await this.keyhive.ingestEventsBytes(foundEvents);
+                await this.ingestRemoteEvents(foundEvents);
               if (retryPending.length === 0) {
                 console.log(
                   `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
@@ -615,6 +697,13 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       `[AMRepoKeyhive] Received ${receivedEvents.length} keyhive events`
     );
 
+    this.syncStates.set(message.senderId, {
+      opsToSend: 0,
+      opsToRequest: 0,
+      timestamp: Date.now(),
+    });
+    (this.emit as any)("sync-state", { peerId: message.senderId, opsToSend: 0, opsToRequest: 0 });
+
     await this.keyhiveQueue.run(async () => {
       if (receivedEvents.length > 0) {
         console.debug(
@@ -623,7 +712,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
         try {
           const pendingEvents =
-            await this.keyhive.ingestEventsBytes(receivedEvents);
+            await this.ingestRemoteEvents(receivedEvents);
           console.debug(
             `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
           );
@@ -637,7 +726,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             try {
               await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
               const retryPending =
-                await this.keyhive.ingestEventsBytes(receivedEvents);
+                await this.ingestRemoteEvents(receivedEvents);
               if (retryPending.length === 0) {
                 console.log(
                   `[AMRepoKeyhive] Successfully ingested all events after reading from storage`

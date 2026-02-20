@@ -98,6 +98,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
       cacheHashes,
       hardcodedServerPeerId,
       syncRequestInterval,
+      emitter,
     )
   };
 
@@ -107,6 +108,9 @@ export async function initializeAutomergeRepoKeyhive(options: {
     let syncTimeout: ReturnType<typeof setTimeout> | undefined;
 
     emitter.on("update", (event: KeyhiveEvent) => {
+      // Remote events (ingested from peers) don't need to be re-saved or re-synced
+      if ((event as any).isRemote) return;
+
       void keyhiveQueue.run(async () => {
         console.debug(
           "[AMRepoKeyhive] Keyhive updated. Saving event."

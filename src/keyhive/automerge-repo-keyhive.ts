@@ -21,7 +21,7 @@ import {
 } from "@keyhive/keyhive/slim";
 import { SyncServer } from "../sync-server.js";
 import { Active } from "./active.js";
-import { KeyhiveNetworkAdapter } from "../network-adapter/network-adapter.js";
+import { KeyhiveNetworkAdapter, PeerSyncState } from "../network-adapter/network-adapter.js";
 import { KeyhiveEventEmitter } from "./emitter.js";
 import { docIdFromAutomergeUrl, KeyhiveStorage, receiveContactCard } from "./keyhive.js";
 import { encodeKeyhiveMessageData } from "../network-adapter/messages.js";
@@ -52,6 +52,10 @@ export class AutomergeRepoKeyhive {
     public idFactory: (heads: Heads) => Promise<Uint8Array>,
     public createKeyhiveNetworkAdapter: (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean, periodicallyRequestSync: boolean, syncRequestInterval: number) => KeyhiveNetworkAdapter,
   ) {}
+
+  get peerSyncStates(): ReadonlyMap<PeerId, PeerSyncState> {
+    return this.networkAdapter.peerSyncStates;
+  }
 
   // Configure `AutomergeRepoKeyhive` to notify the provided `Repo` about
   // potential `Keyhive` membership updates. Debounces ingest-remote events
@@ -202,6 +206,15 @@ export class AutomergeRepoKeyhive {
 
   async docMemberCapabilities(doc_id: KeyhiveDocumentId): Promise<Membership[]> {
     return await this.keyhive.docMemberCapabilities(doc_id);
+  }
+
+  async revokedMembersForDoc(doc_id: KeyhiveDocumentId): Promise<Membership[]> {
+    // @ts-ignore - method may not exist in all keyhive WASM versions
+    return await this.keyhive.revokedMembersForDoc(doc_id);
+  }
+
+  async getDocument(doc_id: KeyhiveDocumentId): Promise<KeyhiveDocument | undefined> {
+    return await this.keyhive.getDocument(doc_id);
   }
 
   async signData(

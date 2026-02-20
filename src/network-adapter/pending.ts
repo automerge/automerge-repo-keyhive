@@ -29,6 +29,10 @@ export class Pending {
     }
   }
 
+  seqIds(): string[] {
+    return Object.keys(this.pending)
+  }
+
   private processQueue(): void {
     let seqNumber = this.lastCompleted + 1;
 
@@ -45,13 +49,20 @@ export class Pending {
 
 export class PromiseQueue {
   private queue: Promise<void> = Promise.resolve();
+  private _enqueued = 0;
+  private _completed = 0;
 
   run<T>(fn: () => Promise<T>): Promise<T> {
+    this._enqueued++;
     const result = this.queue.then(fn);
     this.queue = result.then(
-      () => {},
-      () => {}
+      () => { this._completed++; },
+      () => { this._completed++; }
     );
     return result;
   }
+
+  get depth(): number { return this._enqueued - this._completed; }
+  get enqueued(): number { return this._enqueued; }
+  get completed(): number { return this._completed; }
 }
