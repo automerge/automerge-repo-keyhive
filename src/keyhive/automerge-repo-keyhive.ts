@@ -54,10 +54,24 @@ export class AutomergeRepoKeyhive {
   ) {}
 
   // Configure `AutomergeRepoKeyhive` to notify the provided `Repo` about
-  // potential `Keyhive` membership updates.
-  linkRepo(repo: Repo) {
-    (this.networkAdapter as any).on("ingest-remote", async () => {
-      repo.shareConfigChanged()
+  // potential `Keyhive` membership updates. Debounces ingest-remote events
+  // so that bursts of keyhive ops don't trigger sweeps on every single event.
+  linkRepo(repo: Repo, options?: { debounceMs?: number, onBeforeShareConfigChanged?: () => void }) {
+    const debounceMs = options?.debounceMs ?? 2000
+    const onBefore = options?.onBeforeShareConfigChanged
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let dirty = false;
+
+    (this.networkAdapter as any).on("ingest-remote", () => {
+      dirty = true
+      if (timer) return
+      timer = setTimeout(() => {
+        timer = null
+        if (!dirty) return
+        dirty = false
+        onBefore?.()
+        repo.shareConfigChanged()
+      }, debounceMs)
     })
   }
 
