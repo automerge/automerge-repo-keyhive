@@ -281,9 +281,12 @@ export class KeyhiveStorage {
     // Write the new compacted archive
     await this.saveKeyhiveWithHash(kh);
 
-    // Remove old archives
+    // Remove old archives (skip the one we just wrote)
+    const currentCompactHash = uint8ArrayToHex(this.keyhiveStorageId);
     for (const chunk of keyhiveArchiveChunks) {
-      await this.storage.remove(chunk.key);
+      if (chunk.key[2] !== currentCompactHash) {
+        await this.storage.remove(chunk.key);
+      }
     }
 
     // Remove events that are not pending
@@ -423,8 +426,11 @@ export class KeyhiveStorage {
             "[AMRepoKeyhive] Successfully loaded Keyhive from archive"
           );
           await this.saveKeyhiveWithHash(kh);
+          const currentHash = uint8ArrayToHex(this.keyhiveStorageId);
           for (const chunk of keyhiveArchiveChunks) {
-            await this.storage.remove(chunk.key);
+            if (chunk.key[2] !== currentHash) {
+              await this.storage.remove(chunk.key);
+            }
           }
           for (const chunk of keyhiveEventsChunks) {
             const isPendingKey = pendingKeys.some(
