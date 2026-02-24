@@ -64,6 +64,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     });
 
     networkAdapter.on("peer-candidate", (payload) => {
+      if (this.peerId && payload.peerId == this.peerId) {
+        console.warn(`[AMRepoKeyhive] Received peer-candidate msg with our own peerID`);
+        return;
+      }
       console.debug(`[AMRepoKeyhive] peer-candidate: ${payload.peerId}`);
       this.emit("peer-candidate", payload);
       this.peers.add(payload.peerId);
@@ -261,7 +265,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
       console.debug(`[AMRepoKeyhive] Syncing with ${this.peers.size} peers`);
       for (const targetId of this.peers) {
-        if (targetId == senderId) {
+        if (targetId == senderId || targetId == this.peerId!) {
           continue;
         }
 
