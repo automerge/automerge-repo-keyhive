@@ -24,9 +24,16 @@ import {
 // Map from hash string to hash bytes
 type PeerHashes = Map<string, Uint8Array>;
 
+class Peer {
+  lastKeyhiveRequestRcvd: Date = new Date();
+  lastKeyhiveRequestSent: Date = new Date();
+  constructor() {}
+};
+
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
-  private peers: Set<PeerId> = new Set();
+  // Connected peers and metadata
+  private peers: Map<PeerId, Peer> = new Map();
   private syncIntervalId?: ReturnType<typeof setInterval> | undefined;
   private compactionIntervalId?: ReturnType<typeof setInterval>;
 
@@ -34,6 +41,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private hashesCache: Map<PeerId, PeerHashes> = new Map();
   private pendingOpHashesCache: Uint8Array[] | null = null;
   private lastKnownTotalOps: bigint = 0n;
+
+  private minSyncRequestInterval: number = 1000;
+  private minSyncResponseInterval: number = 1000;
 
   constructor(
     private networkAdapter: NetworkAdapter,
@@ -70,7 +80,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       }
       console.debug(`[AMRepoKeyhive] peer-candidate: ${payload.peerId}`);
       this.emit("peer-candidate", payload);
-      this.peers.add(payload.peerId);
+      this.peers.set(payload.peerId, new Peer());
     });
 
     networkAdapter.on("peer-disconnected", (payload) => {
@@ -264,8 +274,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       }
 
       console.debug(`[AMRepoKeyhive] Syncing with ${this.peers.size} peers`);
-      for (const targetId of this.peers) {
+      for (const targetId of this.peers.keys()) {
         if (targetId == senderId || targetId == this.peerId!) {
+          continue;
+        }
+        if (!this.readyToSendKeyhiveRequest(targetId)) {
           continue;
         }
 
@@ -303,6 +316,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             this.send(message, maybeContactCard);
           }
         }
+        const peer = this.peers.get(targetId);
+        if (peer) {
+          peer.lastKeyhiveRequestSent = new Date();
+        }
       }
     });
   }
@@ -337,6 +354,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     );
 
     await this.keyhiveQueue.run(async () => {
+      if (!this.readyToSendKeyhiveResponse(message.senderId)) {
+        return;
+      }
+
       const localHashes = await this.getHashesForPeerPair(peerId, message.senderId);
       if (localHashes) {
         const pendingOpHashes = await this.getCachedPendingOpHashes();
@@ -413,6 +434,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           };
           this.send(response, this.contactCard);
         }
+      }
+      const peer = this.peers.get(message.senderId);
+      if (peer) {
+        peer.lastKeyhiveRequestRcvd = new Date();
       }
     });
   }
@@ -679,6 +704,24 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     let includeContactCard = false;
     let attemptRecovery = true;
     this.syncKeyhive(this.peerId, includeContactCard, attemptRecovery);
+  }
+
+  private readyToSendKeyhiveRequest(targetId: PeerId): boolean {
+    const now = new Date().getTime();
+    const lastKeyhiveRequestSent: Date | undefined = this.peers.get(targetId)?.lastKeyhiveRequestSent;
+    if (!lastKeyhiveRequestSent) {
+      return true
+    }
+    return (now - lastKeyhiveRequestSent.getTime()) > this.minSyncRequestInterval
+  }
+
+  private readyToSendKeyhiveResponse(senderId: PeerId): boolean {
+    const now = new Date().getTime();
+    const lastKeyhiveRequestRcvd: Date | undefined = this.peers.get(senderId)?.lastKeyhiveRequestRcvd;
+    if (!lastKeyhiveRequestRcvd) {
+      return true
+    }
+    return (now - lastKeyhiveRequestRcvd.getTime()) > this.minSyncResponseInterval
   }
 
   private runCompaction(): void {
