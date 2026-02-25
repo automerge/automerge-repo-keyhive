@@ -279,6 +279,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           continue;
         }
         if (!this.readyToSendKeyhiveRequest(targetId)) {
+          console.debug(`[AMRepoKeyhive] Attempted to send keyhive sync request to ${targetId} too soon. Ignoring.`);
           continue;
         }
 
@@ -355,6 +356,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
     await this.keyhiveQueue.run(async () => {
       if (!this.readyToSendKeyhiveResponse(message.senderId)) {
+        console.debug(`[AMRepoKeyhive] Received next keyhive sync request too soon from ${message.senderId}. Ignoring.`);
         return;
       }
 
