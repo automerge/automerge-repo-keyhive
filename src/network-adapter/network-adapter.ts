@@ -4,7 +4,11 @@ import {
   PeerId,
   PeerMetadata,
 } from "@automerge/automerge-repo/slim";
-import { ContactCard, Keyhive } from "@keyhive/keyhive/slim";
+import {
+  ContactCard,
+  Identifier,
+  Keyhive,
+} from "@keyhive/keyhive/slim";
 import { encode, decode } from "cbor-x";
 
 import {
@@ -14,7 +18,7 @@ import {
   verifyData,
 } from "./messages.js";
 import { PromiseQueue, Pending } from "./pending.js";
-import { getEventsForPeer, getEventHashesForPeer, keyhiveIdentifierFromPeerId } from "../utilities.js";
+import { getEventsForAgent, getEventHashesForAgent, keyhiveIdentifierFromPeerId } from "../utilities.js";
 import {
   getPendingOpHashes,
   KeyhiveStorage,
@@ -23,6 +27,137 @@ import {
 
 // Map from hash string to hash bytes
 type PeerHashes = Map<string, Uint8Array>;
+
+type KeyhiveMessage = {
+  msg: Message;
+  data: KeyhiveMessageData;
+}
+
+class SyncContext {
+  private publicHashes?: Map<string, Uint8Array>;
+  private publicEvents?: Map<Uint8Array, any>;
+  publicHashCount = 0;
+  publicEventCount = 0;
+
+  constructor(private keyhive: Keyhive) {}
+
+  async getPublicHashes(): Promise<Map<string, Uint8Array>> {
+    if (!this.publicHashes) {
+      const agent = await this.keyhive.getAgent(Identifier.publicId());
+      this.publicHashes = agent
+        ? await getEventHashesForAgent(this.keyhive, agent)
+        : new Map();
+      this.publicHashCount = this.publicHashes.size;
+    }
+    return this.publicHashes;
+  }
+
+  async getPublicEvents(): Promise<Map<Uint8Array, any>> {
+    if (!this.publicEvents) {
+      const agent = await this.keyhive.getAgent(Identifier.publicId());
+      this.publicEvents = agent
+        ? await getEventsForAgent(this.keyhive, agent)
+        : new Map();
+      this.publicEventCount = this.publicEvents.size;
+    }
+    return this.publicEvents;
+  }
+}
+
+class Batch {
+  currentBatchMsgs: KeyhiveMessage[] = [];
+  nextBatchMsgs: KeyhiveMessage[] = [];
+  handleKeyhiveMessage: (msg: Message, data: KeyhiveMessageData, ctx: SyncContext) => Promise<void>;
+  isProcessing: boolean = false;
+  private currentNonKeyhiveCount = 0;
+  private nextNonKeyhiveCount = 0;
+  private currentSyncRequestSenders: Set<string> = new Set();
+  private nextSyncRequestSenders: Set<string> = new Set();
+  private currentDroppedSyncRequests = 0;
+  private nextDroppedSyncRequests = 0;
+
+  constructor(handleKeyhiveMessage: (msg: Message, data: KeyhiveMessageData, ctx: SyncContext) => Promise<void>) {
+    this.handleKeyhiveMessage = handleKeyhiveMessage;
+  }
+
+  add(msg: Message, data: KeyhiveMessageData) {
+    if (msg.type === "keyhive-sync-request" && msg.senderId) {
+      const senders = this.isProcessing ? this.nextSyncRequestSenders : this.currentSyncRequestSenders
+      if (senders.has(msg.senderId)) {
+        if (this.isProcessing) {
+          this.nextDroppedSyncRequests++
+        } else {
+          this.currentDroppedSyncRequests++
+        }
+        return
+      }
+      senders.add(msg.senderId)
+    }
+
+    if (this.isProcessing) {
+      this.nextBatchMsgs.push({ msg, data })
+    } else {
+      this.currentBatchMsgs.push({ msg, data })
+    }
+  }
+
+  countNonKeyhive() {
+    if (this.isProcessing) {
+      this.nextNonKeyhiveCount++
+    } else {
+      this.currentNonKeyhiveCount++
+    }
+  }
+
+  private batchStats(msgs: KeyhiveMessage[]): { countsStr: string, totalPayloadBytes: number, uniqueSenders: number } {
+    const msgTypeCounts: Record<string, number> = {}
+    let totalPayloadBytes = 0
+    const uniqueSenders = new Set<string>()
+    for (const { msg, data } of msgs) {
+      const msgType = msg.type ?? "unknown"
+      msgTypeCounts[msgType] = (msgTypeCounts[msgType] ?? 0) + 1
+      totalPayloadBytes += data.signed.payload?.byteLength ?? 0
+      if (msg.senderId) uniqueSenders.add(msg.senderId)
+    }
+    const countsStr = Object.entries(msgTypeCounts)
+      .map(([type, count]) => `${type}=${count}`)
+      .join(", ")
+    return { countsStr, totalPayloadBytes, uniqueSenders: uniqueSenders.size }
+  }
+
+  async process(keyhive: Keyhive) {
+    if (this.isProcessing) return;
+    this.isProcessing = true;
+    const ctx = new SyncContext(keyhive);
+    const startTime = Date.now()
+    const { countsStr, totalPayloadBytes, uniqueSenders } = this.batchStats(this.currentBatchMsgs)
+    const batchSize = this.currentBatchMsgs.length
+    console.log(`Processing next batch of ${batchSize} keyhive messages from ${uniqueSenders} peers at ${new Date().toLocaleTimeString("en-GB")}. ${this.currentDroppedSyncRequests} duplicate sync requests dropped. ${this.currentNonKeyhiveCount} non-keyhive messages received while building batch. Breakdown: ${countsStr}. Total payload: ${totalPayloadBytes} bytes`);
+    try {
+      for (const msg of this.currentBatchMsgs) {
+        await this.handleKeyhiveMessage(msg.msg, msg.data, ctx);
+      }
+    } catch (error) {
+      console.error(`[AMRepoKeyhive] Error processing batch:`, error)
+    } finally {
+      const elapsed = Date.now() - startTime
+      console.log(`Batch processing took ${elapsed}ms for ${batchSize} messages. Public lookups: ${ctx.publicHashCount} hashes, ${ctx.publicEventCount} events`)
+      this.prepareForNextBatch();
+    }
+  }
+
+  prepareForNextBatch() {
+    this.currentBatchMsgs = this.nextBatchMsgs;
+    this.nextBatchMsgs = [];
+    this.currentNonKeyhiveCount = this.nextNonKeyhiveCount;
+    this.nextNonKeyhiveCount = 0;
+    this.currentSyncRequestSenders = this.nextSyncRequestSenders;
+    this.nextSyncRequestSenders = new Set();
+    this.currentDroppedSyncRequests = this.nextDroppedSyncRequests;
+    this.nextDroppedSyncRequests = 0;
+    this.isProcessing = false;
+  }
+}
 
 class Peer {
   lastKeyhiveRequestRcvd: Date = new Date();
@@ -36,6 +171,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private peers: Map<PeerId, Peer> = new Map();
   private syncIntervalId?: ReturnType<typeof setInterval> | undefined;
   private compactionIntervalId?: ReturnType<typeof setInterval>;
+  private processBatchIntervalId?: ReturnType<typeof setInterval>;
 
   private cacheHashes: boolean;
   private hashesCache: Map<PeerId, PeerHashes> = new Map();
@@ -44,6 +180,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
   private minSyncRequestInterval: number = 1000;
   private minSyncResponseInterval: number = 1000;
+
+  private batchInterval: number | undefined;
+  private keyhiveMsgBatch: Batch;
 
   constructor(
     private networkAdapter: NetworkAdapter,
@@ -88,6 +227,17 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       this.peers.delete(payload.peerId);
       this.hashesCache.delete(payload.peerId);
     });
+
+    this.keyhiveMsgBatch = new Batch(this.handleKeyhiveMessage.bind(this));
+
+    // TODO: Make configurable (with `undefined` if batch processing is off)
+    this.batchInterval = 1000;
+    if (this.isBatching()) {
+      this.processBatchIntervalId = setInterval(
+        () => { void this.keyhiveMsgBatch.process(this.keyhive) },
+        this.batchInterval,
+      );
+    }
   }
 
   connect(peerId: PeerId, peerMetadata?: PeerMetadata): void {
@@ -105,6 +255,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     return this.networkAdapter.whenReady();
   }
 
+  isBatching(): boolean {
+    return this.batchInterval !== undefined
+  }
+
   disconnect(): void {
     if (this.syncIntervalId) {
       clearInterval(this.syncIntervalId);
@@ -113,6 +267,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.compactionIntervalId) {
       clearInterval(this.compactionIntervalId);
       this.compactionIntervalId = undefined;
+    }
+    if (this.processBatchIntervalId) {
+      clearInterval(this.processBatchIntervalId);
+      this.processBatchIntervalId = undefined;
     }
     this.networkAdapter.disconnect();
   }
@@ -172,7 +330,16 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       const maybeKeyhiveMessageData = decodeKeyhiveMessageData(message.data);
       if (maybeKeyhiveMessageData) {
         if (verifyData(message.senderId, maybeKeyhiveMessageData)) {
-          void this.handleKeyhiveMessage(message, maybeKeyhiveMessageData);
+          if (!message.type?.startsWith("keyhive-")) {
+            if (this.isBatching()) this.keyhiveMsgBatch.countNonKeyhive()
+            message.data = maybeKeyhiveMessageData.signed.payload;
+            this.emit("message", message);
+          } else if (this.isBatching()) {
+            this.keyhiveMsgBatch.add(message, maybeKeyhiveMessageData);
+          } else {
+            const ctx = new SyncContext(this.keyhive);
+            void this.handleKeyhiveMessage(message, maybeKeyhiveMessageData, ctx);
+          }
         } else {
           console.error(
             `[AMRepoKeyhive] verifyData FAILED for type=${message.type} from=${message.senderId} doc=${(message as any).documentId}`
@@ -189,10 +356,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
   private async handleKeyhiveMessage(
     message: Message,
-    keyhiveMessageData: KeyhiveMessageData
+    keyhiveMessageData: KeyhiveMessageData,
+    ctx: SyncContext,
   ) {
     if (keyhiveMessageData.contactCard) {
-      receiveContactCard(
+      await receiveContactCard(
         this.keyhive,
         keyhiveMessageData.contactCard,
         this.keyhiveStorage
@@ -201,9 +369,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     message.data = keyhiveMessageData.signed.payload;
 
     if (message.type === "keyhive-sync-request") {
-      await this.sendKeyhiveSyncResponse(message);
+      await this.sendKeyhiveSyncResponse(message, ctx);
     } else if (message.type === "keyhive-sync-response") {
-      await this.sendKeyhiveSyncOps(message);
+      await this.sendKeyhiveSyncOps(message, ctx);
     } else if (message.type === "keyhive-sync-request-contact-card") {
       await this.sendKeyhiveSyncMissingContactCard(message);
     } else if (message.type === "keyhive-sync-missing-contact-card") {
@@ -273,6 +441,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         maybeContactCard = this.contactCard;
       }
 
+      const ctx = new SyncContext(this.keyhive);
       console.debug(`[AMRepoKeyhive] Syncing with ${this.peers.size} peers`);
       for (const targetId of this.peers.keys()) {
         if (targetId == senderId || targetId == this.peerId!) {
@@ -283,7 +452,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           continue;
         }
 
-        const hashes = await this.getHashesForPeerPair(senderId, targetId);
+        const hashes = await this.getHashesForPeerPair(senderId, targetId, ctx);
         if (hashes) {
           const opHashes = Array.from(hashes.values());
           const pendingOpHashes = await this.getCachedPendingOpHashes();
@@ -330,7 +499,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   // which ops to send them. Then determine any missing ops to request from the
   // peer.
   // This is the second keyhive op sync protocol message.
-  private async sendKeyhiveSyncResponse(message: Message): Promise<void> {
+  private async sendKeyhiveSyncResponse(message: Message, ctx: SyncContext): Promise<void> {
     if (!("data" in message) || !message.data) {
       console.error("[AMRepoKeyhive] Expected data in keyhive-sync-request");
       return;
@@ -360,7 +529,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         return;
       }
 
-      const localHashes = await this.getHashesForPeerPair(peerId, message.senderId);
+      const localHashes = await this.getHashesForPeerPair(peerId, message.senderId, ctx);
       if (localHashes) {
         const pendingOpHashes = await this.getCachedPendingOpHashes();
         console.debug(
@@ -399,7 +568,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         // Only fetch full events if we have ops to send
         let foundOps: Uint8Array[] = [];
         if (hashStringsToSend.size > 0) {
-          foundOps = await this.getEventBytesForHashes(peerId, hashStringsToSend);
+          foundOps = await this.getEventBytesForHashes(peerId, hashStringsToSend, ctx);
         }
 
         console.debug(
@@ -447,7 +616,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   // Send requested ops in response to a keyhive sync response. Look up ops
   // for the requested hashes and send them to the requesting peer.
   // This is the third (and final) keyhive op sync protocol message.
-  private async sendKeyhiveSyncOps(message: Message): Promise<void> {
+  private async sendKeyhiveSyncOps(message: Message, ctx: SyncContext): Promise<void> {
     if (!("data" in message) || !message.data) {
       console.error("[AMRepoKeyhive] Expected data in keyhive-sync-response");
       return;
@@ -534,7 +703,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         const requestedHashStrings = new Set(
           requestedHashes.map((h) => h.toString())
         );
-        const requestedOps = await this.getEventBytesForHashes(peerId, requestedHashStrings);
+        const requestedOps = await this.getEventBytesForHashes(peerId, requestedHashStrings, ctx);
 
         if (requestedOps.length === 0) {
           console.debug(
@@ -761,8 +930,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     return hashes;
   }
 
-  // Get event hashes for a peer
-  private async getHashesForPeer(peerId: PeerId): Promise<PeerHashes | null> {
+  // Get event hashes for a peer. Returns null if the peer agent is unknown.
+  private async getHashesForPeer(peerId: PeerId, ctx: SyncContext): Promise<PeerHashes | null> {
     if (this.cacheHashes) {
       const cached = this.hashesCache.get(peerId);
       if (cached) {
@@ -770,9 +939,17 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       }
     }
 
-    const hashes = await getEventHashesForPeer(this.keyhive, peerId);
-    if (!hashes) {
+    const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
+    const agent = await this.keyhive.getAgent(keyhiveId);
+    if (!agent) {
       return null;
+    }
+
+    const hashes = await getEventHashesForAgent(this.keyhive, agent);
+
+    const publicHashes = await ctx.getPublicHashes();
+    for (const [key, value] of publicHashes) {
+      hashes.set(key, value);
     }
 
     if (this.cacheHashes) {
@@ -784,10 +961,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   // Returns intersection of hashes both peers can access
   private async getHashesForPeerPair(
     peerA: PeerId,
-    peerB: PeerId
+    peerB: PeerId,
+    ctx: SyncContext,
   ): Promise<PeerHashes | null> {
-    const hashesForA = await this.getHashesForPeer(peerA);
-    const hashesForB = await this.getHashesForPeer(peerB);
+    const hashesForA = await this.getHashesForPeer(peerA, ctx);
+    const hashesForB = await this.getHashesForPeer(peerB, ctx);
 
     if (!hashesForA || !hashesForB) {
       return null;
@@ -806,10 +984,27 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   // Fetch full event bytes for a set of hashes
   private async getEventBytesForHashes(
     peerId: PeerId,
-    hashStrings: Set<string>
+    hashStrings: Set<string>,
+    ctx: SyncContext,
   ): Promise<Uint8Array[]> {
-    const events = await getEventsForPeer(this.keyhive, peerId);
-    if (!events) {
+    const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
+    const agent = await this.keyhive.getAgent(keyhiveId);
+
+    const events = new Map<Uint8Array, any>();
+
+    if (agent) {
+      const peerEvents = await getEventsForAgent(this.keyhive, agent);
+      for (const [hash, event] of peerEvents) {
+        events.set(hash, event);
+      }
+    }
+
+    const publicEvents = await ctx.getPublicEvents();
+    for (const [hash, event] of publicEvents) {
+      events.set(hash, event);
+    }
+
+    if (events.size === 0) {
       return [];
     }
 
