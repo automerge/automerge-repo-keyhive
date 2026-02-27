@@ -64,97 +64,139 @@ class SyncContext {
   }
 }
 
+class Metrics {
+  private msgTypeCounts: Record<string, number> = {};
+  private totalPayloadBytes = 0;
+  private uniqueSenders = new Set<string>();
+  private nonKeyhiveCount = 0;
+  private droppedSyncRequests = 0;
+  private messageCount = 0;
+  private totalProcessingTimeMs = 0;
+  private publicHashCount = 0;
+  private publicEventCount = 0;
+
+  recordMessage(msgType: string | undefined, senderId: string | undefined, payloadBytes: number) {
+    const type = msgType ?? "unknown";
+    this.msgTypeCounts[type] = (this.msgTypeCounts[type] ?? 0) + 1;
+    this.totalPayloadBytes += payloadBytes;
+    if (senderId) this.uniqueSenders.add(senderId);
+    this.messageCount++;
+  }
+
+  recordNonKeyhive() {
+    this.nonKeyhiveCount++;
+  }
+
+  recordDroppedSyncRequest() {
+    this.droppedSyncRequests++;
+  }
+
+  recordProcessingTime(ms: number) {
+    this.totalProcessingTimeMs += ms;
+  }
+
+  recordPublicLookups(hashCount: number, eventCount: number) {
+    this.publicHashCount += hashCount;
+    this.publicEventCount += eventCount;
+  }
+
+  hasActivity(): boolean {
+    return this.messageCount > 0 || this.nonKeyhiveCount > 0;
+  }
+
+  logReport(label: string) {
+    if (!this.hasActivity()) return;
+    const countsStr = Object.entries(this.msgTypeCounts)
+      .map(([type, count]) => `${type}=${count}`)
+      .join(", ");
+    console.log(
+      `[${label}] ${this.messageCount} keyhive messages from ${this.uniqueSenders.size} peers at ${new Date().toLocaleTimeString("en-GB")}. ` +
+      `${this.droppedSyncRequests} duplicate sync requests dropped. ` +
+      `${this.nonKeyhiveCount} non-keyhive messages. ` +
+      `Breakdown: ${countsStr}. Total payload: ${this.totalPayloadBytes} bytes. ` +
+      `Processing: ${this.totalProcessingTimeMs}ms. ` +
+      `Public lookups: ${this.publicHashCount} hashes, ${this.publicEventCount} events`
+    );
+  }
+
+  reset() {
+    this.msgTypeCounts = {};
+    this.totalPayloadBytes = 0;
+    this.uniqueSenders = new Set();
+    this.nonKeyhiveCount = 0;
+    this.droppedSyncRequests = 0;
+    this.messageCount = 0;
+    this.totalProcessingTimeMs = 0;
+    this.publicHashCount = 0;
+    this.publicEventCount = 0;
+  }
+}
+
 class Batch {
   currentBatchMsgs: KeyhiveMessage[] = [];
   nextBatchMsgs: KeyhiveMessage[] = [];
   handleKeyhiveMessage: (msg: Message, data: KeyhiveMessageData, ctx: SyncContext) => Promise<void>;
   isProcessing: boolean = false;
-  private currentNonKeyhiveCount = 0;
-  private nextNonKeyhiveCount = 0;
+  private currentMetrics = new Metrics();
+  private nextMetrics = new Metrics();
   private currentSyncRequestSenders: Set<string> = new Set();
   private nextSyncRequestSenders: Set<string> = new Set();
-  private currentDroppedSyncRequests = 0;
-  private nextDroppedSyncRequests = 0;
 
   constructor(handleKeyhiveMessage: (msg: Message, data: KeyhiveMessageData, ctx: SyncContext) => Promise<void>) {
     this.handleKeyhiveMessage = handleKeyhiveMessage;
   }
 
   add(msg: Message, data: KeyhiveMessageData) {
+    const metrics = this.isProcessing ? this.nextMetrics : this.currentMetrics;
+
     if (msg.type === "keyhive-sync-request" && msg.senderId) {
-      const senders = this.isProcessing ? this.nextSyncRequestSenders : this.currentSyncRequestSenders
+      const senders = this.isProcessing ? this.nextSyncRequestSenders : this.currentSyncRequestSenders;
       if (senders.has(msg.senderId)) {
-        if (this.isProcessing) {
-          this.nextDroppedSyncRequests++
-        } else {
-          this.currentDroppedSyncRequests++
-        }
-        return
+        metrics.recordDroppedSyncRequest();
+        return;
       }
-      senders.add(msg.senderId)
+      senders.add(msg.senderId);
     }
 
+    metrics.recordMessage(msg.type, msg.senderId, data.signed.payload?.byteLength ?? 0);
+
     if (this.isProcessing) {
-      this.nextBatchMsgs.push({ msg, data })
+      this.nextBatchMsgs.push({ msg, data });
     } else {
-      this.currentBatchMsgs.push({ msg, data })
+      this.currentBatchMsgs.push({ msg, data });
     }
   }
 
   countNonKeyhive() {
-    if (this.isProcessing) {
-      this.nextNonKeyhiveCount++
-    } else {
-      this.currentNonKeyhiveCount++
-    }
-  }
-
-  private batchStats(msgs: KeyhiveMessage[]): { countsStr: string, totalPayloadBytes: number, uniqueSenders: number } {
-    const msgTypeCounts: Record<string, number> = {}
-    let totalPayloadBytes = 0
-    const uniqueSenders = new Set<string>()
-    for (const { msg, data } of msgs) {
-      const msgType = msg.type ?? "unknown"
-      msgTypeCounts[msgType] = (msgTypeCounts[msgType] ?? 0) + 1
-      totalPayloadBytes += data.signed.payload?.byteLength ?? 0
-      if (msg.senderId) uniqueSenders.add(msg.senderId)
-    }
-    const countsStr = Object.entries(msgTypeCounts)
-      .map(([type, count]) => `${type}=${count}`)
-      .join(", ")
-    return { countsStr, totalPayloadBytes, uniqueSenders: uniqueSenders.size }
+    const metrics = this.isProcessing ? this.nextMetrics : this.currentMetrics;
+    metrics.recordNonKeyhive();
   }
 
   async process(keyhive: Keyhive) {
     if (this.isProcessing) return;
     this.isProcessing = true;
     const ctx = new SyncContext(keyhive);
-    const startTime = Date.now()
-    const { countsStr, totalPayloadBytes, uniqueSenders } = this.batchStats(this.currentBatchMsgs)
-    const batchSize = this.currentBatchMsgs.length
-    console.log(`Processing next batch of ${batchSize} keyhive messages from ${uniqueSenders} peers at ${new Date().toLocaleTimeString("en-GB")}. ${this.currentDroppedSyncRequests} duplicate sync requests dropped. ${this.currentNonKeyhiveCount} non-keyhive messages received while building batch. Breakdown: ${countsStr}. Total payload: ${totalPayloadBytes} bytes`);
-    try {
-      for (const msg of this.currentBatchMsgs) {
+    const startTime = Date.now();
+    for (const msg of this.currentBatchMsgs) {
+      try {
         await this.handleKeyhiveMessage(msg.msg, msg.data, ctx);
+      } catch (error) {
+        console.error(`[AMRepoKeyhive] Error processing batch message (type=${msg.msg.type}, from=${msg.msg.senderId}):`, error);
       }
-    } catch (error) {
-      console.error(`[AMRepoKeyhive] Error processing batch:`, error)
-    } finally {
-      const elapsed = Date.now() - startTime
-      console.log(`Batch processing took ${elapsed}ms for ${batchSize} messages. Public lookups: ${ctx.publicHashCount} hashes, ${ctx.publicEventCount} events`)
-      this.prepareForNextBatch();
     }
+    this.currentMetrics.recordProcessingTime(Date.now() - startTime);
+    this.currentMetrics.recordPublicLookups(ctx.publicHashCount, ctx.publicEventCount);
+    this.currentMetrics.logReport("Batch");
+    this.prepareForNextBatch();
   }
 
   prepareForNextBatch() {
     this.currentBatchMsgs = this.nextBatchMsgs;
     this.nextBatchMsgs = [];
-    this.currentNonKeyhiveCount = this.nextNonKeyhiveCount;
-    this.nextNonKeyhiveCount = 0;
+    this.currentMetrics = this.nextMetrics;
+    this.nextMetrics = new Metrics();
     this.currentSyncRequestSenders = this.nextSyncRequestSenders;
     this.nextSyncRequestSenders = new Set();
-    this.currentDroppedSyncRequests = this.nextDroppedSyncRequests;
-    this.nextDroppedSyncRequests = 0;
     this.isProcessing = false;
   }
 }
@@ -183,6 +225,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
   private batchInterval: number | undefined;
   private keyhiveMsgBatch: Batch;
+  private streamingMetrics = new Metrics();
+  private metricsIntervalId?: ReturnType<typeof setInterval>;
 
   constructor(
     private networkAdapter: NetworkAdapter,
@@ -230,13 +274,18 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
     this.keyhiveMsgBatch = new Batch(this.handleKeyhiveMessage.bind(this));
 
-    // TODO: Make configurable (with `undefined` if batch processing is off)
-    this.batchInterval = 1000;
+    // TODO: Make configurable
+    this.batchInterval = undefined;
     if (this.isBatching()) {
       this.processBatchIntervalId = setInterval(
         () => { void this.keyhiveMsgBatch.process(this.keyhive) },
         this.batchInterval,
       );
+    } else {
+      this.metricsIntervalId = setInterval(() => {
+        this.streamingMetrics.logReport("Streaming");
+        this.streamingMetrics.reset();
+      }, 1000);
     }
   }
 
@@ -271,6 +320,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.processBatchIntervalId) {
       clearInterval(this.processBatchIntervalId);
       this.processBatchIntervalId = undefined;
+    }
+    if (this.metricsIntervalId) {
+      clearInterval(this.metricsIntervalId);
+      this.metricsIntervalId = undefined;
     }
     this.networkAdapter.disconnect();
   }
@@ -331,14 +384,26 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       if (maybeKeyhiveMessageData) {
         if (verifyData(message.senderId, maybeKeyhiveMessageData)) {
           if (!message.type?.startsWith("keyhive-")) {
-            if (this.isBatching()) this.keyhiveMsgBatch.countNonKeyhive()
+            if (this.isBatching()) {
+              this.keyhiveMsgBatch.countNonKeyhive();
+            } else {
+              this.streamingMetrics.recordNonKeyhive();
+            }
             message.data = maybeKeyhiveMessageData.signed.payload;
             this.emit("message", message);
           } else if (this.isBatching()) {
             this.keyhiveMsgBatch.add(message, maybeKeyhiveMessageData);
           } else {
+            this.streamingMetrics.recordMessage(
+              message.type, message.senderId,
+              maybeKeyhiveMessageData.signed.payload?.byteLength ?? 0,
+            );
             const ctx = new SyncContext(this.keyhive);
-            void this.handleKeyhiveMessage(message, maybeKeyhiveMessageData, ctx);
+            const startTime = Date.now();
+            void this.handleKeyhiveMessage(message, maybeKeyhiveMessageData, ctx).then(() => {
+              this.streamingMetrics.recordProcessingTime(Date.now() - startTime);
+              this.streamingMetrics.recordPublicLookups(ctx.publicHashCount, ctx.publicEventCount);
+            });
           }
         } else {
           console.error(
