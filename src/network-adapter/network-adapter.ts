@@ -996,7 +996,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   }
 
   // Get event hashes for a peer. Returns null if the peer agent is unknown.
-  private async getHashesForPeer(peerId: PeerId, ctx: SyncContext): Promise<PeerHashes | null> {
+  private async getHashesForPeer(peerId: PeerId): Promise<PeerHashes | null> {
     if (this.cacheHashes) {
       const cached = this.hashesCache.get(peerId);
       if (cached) {
@@ -1012,11 +1012,6 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
     const hashes = await getEventHashesForAgent(this.keyhive, agent);
 
-    const publicHashes = await ctx.getPublicHashes();
-    for (const [key, value] of publicHashes) {
-      hashes.set(key, value);
-    }
-
     if (this.cacheHashes) {
       this.hashesCache.set(peerId, hashes);
     }
@@ -1024,19 +1019,22 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   }
 
   // Returns intersection of hashes both peers can access
+  // (A ∪ Public) ∩ (B ∪ Public) = (A ∩ B) ∪ Public
   private async getHashesForPeerPair(
     peerA: PeerId,
     peerB: PeerId,
     ctx: SyncContext,
   ): Promise<PeerHashes | null> {
-    const hashesForA = await this.getHashesForPeer(peerA, ctx);
-    const hashesForB = await this.getHashesForPeer(peerB, ctx);
+    const hashesForA = await this.getHashesForPeer(peerA);
+    const hashesForB = await this.getHashesForPeer(peerB);
 
     if (!hashesForA || !hashesForB) {
       return null;
     }
 
-    const result = new Map<string, Uint8Array>();
+    const publicHashes = await ctx.getPublicHashes();
+
+    const result = new Map<string, Uint8Array>(publicHashes);
     for (const [hashString, hashBytes] of hashesForA.entries()) {
       if (hashesForB.has(hashString)) {
         result.set(hashString, hashBytes);
