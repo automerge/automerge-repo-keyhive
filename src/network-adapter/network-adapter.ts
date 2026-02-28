@@ -132,72 +132,78 @@ class Metrics {
   }
 }
 
-class Batch {
-  currentBatchMsgs: KeyhiveMessage[] = [];
-  nextBatchMsgs: KeyhiveMessage[] = [];
-  handleKeyhiveMessage: (msg: Message, data: KeyhiveMessageData, ctx: SyncContext) => Promise<void>;
-  isProcessing: boolean = false;
-  private currentMetrics = new Metrics();
-  private nextMetrics = new Metrics();
-  private currentSyncRequestSenders: Set<string> = new Set();
-  private nextSyncRequestSenders: Set<string> = new Set();
-
-  constructor(handleKeyhiveMessage: (msg: Message, data: KeyhiveMessageData, ctx: SyncContext) => Promise<void>) {
-    this.handleKeyhiveMessage = handleKeyhiveMessage;
-  }
+class MessageBatch {
+  readonly messages: KeyhiveMessage[] = [];
+  readonly metrics = new Metrics();
+  private readonly syncRequestSenders = new Set<string>();
 
   add(msg: Message, data: KeyhiveMessageData) {
-    const metrics = this.isProcessing ? this.nextMetrics : this.currentMetrics;
-
     if (msg.type === "keyhive-sync-request" && msg.senderId) {
-      const senders = this.isProcessing ? this.nextSyncRequestSenders : this.currentSyncRequestSenders;
-      if (senders.has(msg.senderId)) {
-        metrics.recordDroppedSyncRequest();
+      if (this.syncRequestSenders.has(msg.senderId)) {
+        this.metrics.recordDroppedSyncRequest();
         return;
       }
-      senders.add(msg.senderId);
+      this.syncRequestSenders.add(msg.senderId);
     }
-
-    metrics.recordMessage(msg.type, msg.senderId, data.signed.payload?.byteLength ?? 0);
-
-    if (this.isProcessing) {
-      this.nextBatchMsgs.push({ msg, data });
-    } else {
-      this.currentBatchMsgs.push({ msg, data });
-    }
+    this.metrics.recordMessage(msg.type, msg.senderId, data.signed.payload?.byteLength ?? 0);
+    this.messages.push({ msg, data });
   }
 
   countNonKeyhive() {
-    const metrics = this.isProcessing ? this.nextMetrics : this.currentMetrics;
-    metrics.recordNonKeyhive();
+    this.metrics.recordNonKeyhive();
   }
 
-  async process(keyhive: Keyhive) {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
-    const ctx = new SyncContext(keyhive);
+  get isEmpty(): boolean {
+    return !this.metrics.hasActivity();
+  }
+}
+
+class BatchProcessor {
+  private timeoutId?: ReturnType<typeof setTimeout>;
+
+  constructor(
+    private readonly batchInterval: number,
+    private readonly keyhive: Keyhive,
+    private readonly handleMessage: (msg: Message, data: KeyhiveMessageData, ctx: SyncContext) => Promise<void>,
+    private readonly swapBatch: () => MessageBatch,
+  ) {}
+
+  start() {
+    this.scheduleNext();
+  }
+
+  stop() {
+    if (this.timeoutId !== undefined) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = undefined;
+    }
+  }
+
+  private scheduleNext() {
+    this.timeoutId = setTimeout(() => { void this.processAndReschedule() }, this.batchInterval);
+  }
+
+  private async processAndReschedule() {
+    const batch = this.swapBatch();
+    if (!batch.isEmpty) {
+      await this.processBatch(batch);
+    }
+    this.scheduleNext();
+  }
+
+  private async processBatch(batch: MessageBatch) {
+    const ctx = new SyncContext(this.keyhive);
     const startTime = Date.now();
-    for (const msg of this.currentBatchMsgs) {
+    for (const { msg, data } of batch.messages) {
       try {
-        await this.handleKeyhiveMessage(msg.msg, msg.data, ctx);
+        await this.handleMessage(msg, data, ctx);
       } catch (error) {
-        console.error(`[AMRepoKeyhive] Error processing batch message (type=${msg.msg.type}, from=${msg.msg.senderId}):`, error);
+        console.error(`[AMRepoKeyhive] Error processing batch message (type=${msg.type}, from=${msg.senderId}):`, error);
       }
     }
-    this.currentMetrics.recordProcessingTime(Date.now() - startTime);
-    this.currentMetrics.recordPublicLookups(ctx.publicHashCount, ctx.publicEventCount);
-    this.currentMetrics.logReport("Batch");
-    this.prepareForNextBatch();
-  }
-
-  prepareForNextBatch() {
-    this.currentBatchMsgs = this.nextBatchMsgs;
-    this.nextBatchMsgs = [];
-    this.currentMetrics = this.nextMetrics;
-    this.nextMetrics = new Metrics();
-    this.currentSyncRequestSenders = this.nextSyncRequestSenders;
-    this.nextSyncRequestSenders = new Set();
-    this.isProcessing = false;
+    batch.metrics.recordProcessingTime(Date.now() - startTime);
+    batch.metrics.recordPublicLookups(ctx.publicHashCount, ctx.publicEventCount);
+    batch.metrics.logReport("Batch");
   }
 }
 
@@ -213,7 +219,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private peers: Map<PeerId, Peer> = new Map();
   private syncIntervalId?: ReturnType<typeof setInterval> | undefined;
   private compactionIntervalId?: ReturnType<typeof setInterval>;
-  private processBatchIntervalId?: ReturnType<typeof setInterval>;
+  private batchProcessor?: BatchProcessor;
 
   private cacheHashes: boolean;
   private hashesCache: Map<PeerId, PeerHashes> = new Map();
@@ -224,7 +230,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private minSyncResponseInterval: number = 1000;
 
   private batchInterval: number | undefined;
-  private keyhiveMsgBatch: Batch;
+  private keyhiveMsgBatch: MessageBatch;
   private streamingMetrics = new Metrics();
   private metricsIntervalId?: ReturnType<typeof setInterval>;
 
@@ -273,14 +279,21 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       this.hashesCache.delete(payload.peerId);
     });
 
-    this.keyhiveMsgBatch = new Batch(this.handleKeyhiveMessage.bind(this));
+    this.keyhiveMsgBatch = new MessageBatch();
 
     this.batchInterval = batchInterval;
     if (this.isBatching()) {
-      this.processBatchIntervalId = setInterval(
-        () => { void this.keyhiveMsgBatch.process(this.keyhive) },
-        this.batchInterval,
+      this.batchProcessor = new BatchProcessor(
+        this.batchInterval!,
+        this.keyhive,
+        this.handleKeyhiveMessage.bind(this),
+        () => {
+          const old = this.keyhiveMsgBatch;
+          this.keyhiveMsgBatch = new MessageBatch();
+          return old;
+        },
       );
+      this.batchProcessor.start();
     } else {
       this.metricsIntervalId = setInterval(() => {
         this.streamingMetrics.logReport("Streaming");
@@ -317,9 +330,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       clearInterval(this.compactionIntervalId);
       this.compactionIntervalId = undefined;
     }
-    if (this.processBatchIntervalId) {
-      clearInterval(this.processBatchIntervalId);
-      this.processBatchIntervalId = undefined;
+    if (this.batchProcessor) {
+      this.batchProcessor.stop();
+      this.batchProcessor = undefined;
     }
     if (this.metricsIntervalId) {
       clearInterval(this.metricsIntervalId);
