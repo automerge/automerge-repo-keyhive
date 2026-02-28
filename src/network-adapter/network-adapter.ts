@@ -239,6 +239,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     // TODO: Replace with dynamic configuration
     private hardcodedRemoteId: PeerId | null = null,
     private syncRequestInterval: number,
+    batchInterval?: number,
   ) {
     super();
     this.cacheHashes = cacheHashes;
@@ -274,8 +275,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
     this.keyhiveMsgBatch = new Batch(this.handleKeyhiveMessage.bind(this));
 
-    // TODO: Make configurable
-    this.batchInterval = undefined;
+    this.batchInterval = batchInterval;
     if (this.isBatching()) {
       this.processBatchIntervalId = setInterval(
         () => { void this.keyhiveMsgBatch.process(this.keyhive) },

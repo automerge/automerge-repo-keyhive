@@ -43,6 +43,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
   cacheHashes?: boolean;
   keyPair?: CryptoKeyPair;
   syncRequestInterval?: number;
+  batchInterval?: number;
 }): Promise<AutomergeRepoKeyhive> {
   const {
     automaticArchiveIngestion = true,
@@ -50,6 +51,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
     periodicallyRequestSync = true,
     cacheHashes = false,
     syncRequestInterval = 2000,
+    batchInterval,
   } = options;
   const { keyPair, signer } = await loadOrCreateKeyPairAndSigner(options.storage, options.keyPair)
   const emitter = new KeyhiveEventEmitter();
@@ -82,7 +84,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
 
   const keyhiveQueue = new PromiseQueue();
 
-  const createKeyhiveNetworkAdapter = (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean, periodicallyRequestSync: boolean, syncRequestInterval: number) => {
+  const createKeyhiveNetworkAdapter = (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean, periodicallyRequestSync: boolean, syncRequestInterval: number, batchIntervalOverride?: number) => {
     let hardcodedServerPeerId = null;
     if (onlyShareWithHardcodedServerPeerId) {
       hardcodedServerPeerId = serverPeerId
@@ -98,10 +100,11 @@ export async function initializeAutomergeRepoKeyhive(options: {
       cacheHashes,
       hardcodedServerPeerId,
       syncRequestInterval,
+      batchIntervalOverride,
     )
   };
 
-  const keyhiveNetworkAdapter = createKeyhiveNetworkAdapter(options.networkAdapter, onlyShareWithHardcodedServerPeerId, periodicallyRequestSync, syncRequestInterval);
+  const keyhiveNetworkAdapter = createKeyhiveNetworkAdapter(options.networkAdapter, onlyShareWithHardcodedServerPeerId, periodicallyRequestSync, syncRequestInterval, batchInterval);
 
   if (automaticArchiveIngestion) {
     let syncTimeout: ReturnType<typeof setTimeout> | undefined;
