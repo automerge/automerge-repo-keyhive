@@ -19,7 +19,7 @@ import {
 } from "@keyhive/keyhive/slim";
 import { syncServerFromContactCard } from "../sync-server.js";
 import { createActive, loadOrCreateSigner, storeActiveKeyPair } from "./active.js";
-import { KeyhiveNetworkAdapter, KeyhiveEventProvider } from "../network-adapter/network-adapter.js";
+import { KeyhiveNetworkAdapter } from "../network-adapter/network-adapter.js";
 import { PromiseQueue } from "../network-adapter/pending.js";
 import { KeyhiveEventEmitter } from "./emitter.js";
 import { AutomergeRepoKeyhive, keyhiveIdFactory } from "./automerge-repo-keyhive.js";
@@ -45,7 +45,6 @@ export async function initializeAutomergeRepoKeyhive(options: {
   syncRequestInterval?: number;
   batchInterval?: number;
   retryPendingFromStorage?: boolean;
-  eventProvider?: KeyhiveEventProvider;
   enableCompaction?: boolean;
 }): Promise<AutomergeRepoKeyhive> {
   const {
@@ -56,7 +55,6 @@ export async function initializeAutomergeRepoKeyhive(options: {
     syncRequestInterval = 2000,
     batchInterval,
     retryPendingFromStorage = true,
-    eventProvider,
     enableCompaction = true,
   } = options;
   const { keyPair, signer } = await loadOrCreateKeyPairAndSigner(options.storage, options.keyPair)
@@ -108,7 +106,6 @@ export async function initializeAutomergeRepoKeyhive(options: {
       syncRequestInterval,
       batchIntervalOverride,
       retryPendingFromStorage,
-      eventProvider,
       enableCompaction,
     )
   };
