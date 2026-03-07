@@ -36,7 +36,7 @@ export {
   initializeAutomergeRepoKeyhive,
   KeyhiveStorage,
 } from "./keyhive/keyhive.js";
-export { KeyhiveNetworkAdapter } from "./network-adapter/network-adapter.js";
+export { KeyhiveNetworkAdapter, type KeyhiveEventProvider } from "./network-adapter/network-adapter.js";
 export { SyncServer } from "./sync-server.js";
 export {
   peerIdFromSigner,

@@ -19,7 +19,7 @@ import {
 } from "@keyhive/keyhive/slim";
 import { syncServerFromContactCard } from "../sync-server.js";
 import { createActive, loadOrCreateSigner, storeActiveKeyPair } from "./active.js";
-import { KeyhiveNetworkAdapter } from "../network-adapter/network-adapter.js";
+import { KeyhiveNetworkAdapter, KeyhiveEventProvider } from "../network-adapter/network-adapter.js";
 import { PromiseQueue } from "../network-adapter/pending.js";
 import { KeyhiveEventEmitter } from "./emitter.js";
 import { AutomergeRepoKeyhive, keyhiveIdFactory } from "./automerge-repo-keyhive.js";
@@ -45,6 +45,8 @@ export async function initializeAutomergeRepoKeyhive(options: {
   syncRequestInterval?: number;
   batchInterval?: number;
   retryPendingFromStorage?: boolean;
+  eventProvider?: KeyhiveEventProvider;
+  enableCompaction?: boolean;
 }): Promise<AutomergeRepoKeyhive> {
   const {
     automaticArchiveIngestion = true,
@@ -54,6 +56,8 @@ export async function initializeAutomergeRepoKeyhive(options: {
     syncRequestInterval = 2000,
     batchInterval,
     retryPendingFromStorage = true,
+    eventProvider,
+    enableCompaction = true,
   } = options;
   const { keyPair, signer } = await loadOrCreateKeyPairAndSigner(options.storage, options.keyPair)
   const emitter = new KeyhiveEventEmitter();
@@ -104,12 +108,14 @@ export async function initializeAutomergeRepoKeyhive(options: {
       syncRequestInterval,
       batchIntervalOverride,
       retryPendingFromStorage,
+      eventProvider,
+      enableCompaction,
     )
   };
 
   const keyhiveNetworkAdapter = createKeyhiveNetworkAdapter(options.networkAdapter, onlyShareWithHardcodedServerPeerId, periodicallyRequestSync, syncRequestInterval, batchInterval);
 
-  if (automaticArchiveIngestion) {
+  {
     let syncTimeout: ReturnType<typeof setTimeout> | undefined;
 
     emitter.on("update", (event: KeyhiveEvent) => {
@@ -117,24 +123,28 @@ export async function initializeAutomergeRepoKeyhive(options: {
         console.debug(
           "[AMRepoKeyhive] Keyhive updated. Saving event."
         );
-        // TODO: This is a temporary fix until we have local prekey secret storage implemented in
-        // keyhive.
-        if (
-          event.variant === "PREKEY_ROTATED" ||
-          event.variant === "PREKEYS_EXPANDED"
-        ) {
-          await keyhiveStorage.saveKeyhiveWithHash(keyhive);
-        }
+        // Always save events to ops/ so the sidecar can pick them up.
         await keyhiveStorage.saveEventWithHash(event);
-        // TODO: We are currently filtering out CGKA ops in the sync protocol but
-        // will need to restore them once we add encryption.
-        if (event.variant !== "CGKA_OPERATION") {
-          // If there is a pending sync timeout, we don't need to schedule another.
-          if (!syncTimeout) {
-            syncTimeout = setTimeout(() => {
-              syncTimeout = undefined;
-              keyhiveNetworkAdapter.syncKeyhive();
-            }, 1000);
+
+        if (automaticArchiveIngestion) {
+          // TODO: This is a temporary fix until we have local prekey secret storage implemented in
+          // keyhive.
+          if (
+            event.variant === "PREKEY_ROTATED" ||
+            event.variant === "PREKEYS_EXPANDED"
+          ) {
+            await keyhiveStorage.saveKeyhiveWithHash(keyhive);
+          }
+          // TODO: We are currently filtering out CGKA ops in the sync protocol but
+          // will need to restore them once we add encryption.
+          if (event.variant !== "CGKA_OPERATION") {
+            // If there is a pending sync timeout, we don't need to schedule another.
+            if (!syncTimeout) {
+              syncTimeout = setTimeout(() => {
+                syncTimeout = undefined;
+                keyhiveNetworkAdapter.syncKeyhive();
+              }, 1000);
+            }
           }
         }
       });

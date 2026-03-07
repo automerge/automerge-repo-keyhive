@@ -10,6 +10,12 @@ import {
   Keyhive,
 } from "@keyhive/keyhive/slim";
 import { encode, decode } from "cbor-x";
+import { cborByteString, buildSyncResponseCbor, buildCborByteStringArray } from "./cbor-builder.js";
+
+interface EventBytesResult {
+  events: Uint8Array[];
+  cborEvents: Uint8Array[];
+}
 
 import {
   decodeKeyhiveMessageData,
@@ -28,6 +34,14 @@ import {
 // Map from hash string to hash bytes
 type PeerHashes = Map<string, Uint8Array>;
 
+export interface KeyhiveEventProvider {
+  /** Get event hashes for an agent. Returns Map<hashString, hashBytes> or null if agent unknown. */
+  getEventHashesForAgent(agentId: Uint8Array): Map<string, Uint8Array> | null;
+
+  /** Get event bytes for a set of hashes. Returns matching event bytes. */
+  getEventBytesForHashes(hashStrings: Set<string>): Uint8Array[];
+}
+
 type KeyhiveMessage = {
   msg: Message;
   data: KeyhiveMessageData;
@@ -39,14 +53,19 @@ class SyncContext {
   publicHashCount = 0;
   publicEventCount = 0;
 
-  constructor(private keyhive: Keyhive) {}
+  constructor(private keyhive: Keyhive, private eventProvider?: KeyhiveEventProvider) {}
 
   async getPublicHashes(): Promise<Map<string, Uint8Array>> {
     if (!this.publicHashes) {
-      const agent = await this.keyhive.getAgent(Identifier.publicId());
-      this.publicHashes = agent
-        ? await getEventHashesForAgent(this.keyhive, agent)
-        : new Map();
+      if (this.eventProvider) {
+        const publicIdBytes = Identifier.publicId().toBytes();
+        this.publicHashes = this.eventProvider.getEventHashesForAgent(publicIdBytes) ?? new Map();
+      } else {
+        const agent = await this.keyhive.getAgent(Identifier.publicId());
+        this.publicHashes = agent
+          ? await getEventHashesForAgent(this.keyhive, agent)
+          : new Map();
+      }
       this.publicHashCount = this.publicHashes.size;
     }
     return this.publicHashes;
@@ -258,6 +277,7 @@ class BatchProcessor {
     private readonly keyhive: Keyhive,
     private readonly handleMessage: (msg: Message, data: KeyhiveMessageData, ctx: SyncContext, metrics: Metrics) => Promise<void>,
     private readonly swapBatch: () => MessageBatch,
+    private readonly eventProvider?: KeyhiveEventProvider,
   ) {}
 
   start() {
@@ -284,7 +304,7 @@ class BatchProcessor {
   }
 
   private async processBatch(batch: MessageBatch) {
-    const ctx = new SyncContext(this.keyhive);
+    const ctx = new SyncContext(this.keyhive, this.eventProvider);
     const startTime = Date.now();
     for (const { msg, data } of batch.messages) {
       try {
@@ -330,6 +350,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private streamingMetrics = new Metrics();
   private metricsIntervalId?: ReturnType<typeof setInterval>;
 
+  private eventProvider?: KeyhiveEventProvider;
+  // Persistent maps for immutable event data (keyhive events never change once created)
+  private eventBytes: Map<string, Uint8Array> = new Map();
+  private eventCborBytes: Map<string, Uint8Array> = new Map();
+
   constructor(
     private networkAdapter: NetworkAdapter,
     private contactCard: ContactCard,
@@ -343,18 +368,23 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     private syncRequestInterval: number,
     batchInterval?: number,
     private retryPendingFromStorage: boolean = true,
+    eventProvider?: KeyhiveEventProvider,
+    enableCompaction: boolean = true,
   ) {
     super();
     this.cacheHashes = cacheHashes;
+    this.eventProvider = eventProvider;
 
     if (periodicallyRequestSync) {
         this.syncIntervalId = setInterval(this.requestKeyhiveSync.bind(this), syncRequestInterval);
     }
 
-    this.compactionIntervalId = setInterval(
-      this.runCompaction.bind(this),
-      60000
-    );
+    if (enableCompaction) {
+      this.compactionIntervalId = setInterval(
+        this.runCompaction.bind(this),
+        60000
+      );
+    }
 
     networkAdapter.on("message", (msg) => {
       this.receiveMessage(msg);
@@ -389,6 +419,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           this.keyhiveMsgBatch = new MessageBatch();
           return old;
         },
+        this.eventProvider,
       );
       this.batchProcessor.start();
     } else {
@@ -510,7 +541,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
               message.type, message.senderId,
               maybeKeyhiveMessageData.signed.payload?.byteLength ?? 0,
             );
-            const ctx = new SyncContext(this.keyhive);
+            const ctx = new SyncContext(this.keyhive, this.eventProvider);
             const startTime = Date.now();
             const msgType = message.type ?? "unknown";
             void this.handleKeyhiveMessage(message, maybeKeyhiveMessageData, ctx, this.streamingMetrics).then(() => {
@@ -621,7 +652,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         maybeContactCard = this.contactCard;
       }
 
-      const ctx = new SyncContext(this.keyhive);
+      const ctx = new SyncContext(this.keyhive, this.eventProvider);
       console.debug(`[AMRepoKeyhive] Syncing with ${this.peers.size} peers`);
       for (const targetId of this.peers.keys()) {
         if (targetId == senderId || targetId == this.peerId!) {
@@ -632,8 +663,23 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           continue;
         }
 
-        const hashes = await this.getHashesForPeerPair(senderId, targetId, ctx);
-        if (hashes) {
+        // Check if we know the target agent (WASM keyhive is authoritative)
+        const targetKeyhiveId = keyhiveIdentifierFromPeerId(targetId);
+        const targetAgent = await this.keyhive.getAgent(targetKeyhiveId);
+        if (!targetAgent) {
+          console.debug(`[AMRepoKeyhive] Requesting ContactCard from ${targetId}`);
+          if (!maybeContactCard) {
+            maybeContactCard = this.contactCard;
+          }
+          const message = {
+            type: "keyhive-sync-request-contact-card",
+            senderId: senderId,
+            targetId: targetId,
+          };
+          this.send(message, maybeContactCard);
+        } else {
+          // Agent is known — use cache for hashes (may be empty if cache hasn't caught up)
+          const hashes = await this.getHashesForPeerPair(senderId, targetId, ctx);
           const opHashes = Array.from(hashes.values());
           const pendingOpHashes = await this.getCachedPendingOpHashes();
           const data = encode({
@@ -650,21 +696,6 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             `[AMRepoKeyhive] Sending keyhive sync request to ${targetId} from ${senderId} with ${opHashes.length} local operations and ${pendingOpHashes.length} pending operations.`
           );
           this.send(message, maybeContactCard);
-        } else {
-          const keyhiveId = keyhiveIdentifierFromPeerId(targetId);
-          const agent = await this.keyhive.getAgent(keyhiveId);
-          if (!agent) {
-            console.debug(`[AMRepoKeyhive] Requesting ContactCard from ${targetId}`);
-            if (!maybeContactCard) {
-              maybeContactCard = this.contactCard;
-            }
-            const message = {
-              type: "keyhive-sync-request-contact-card",
-              senderId: senderId,
-              targetId: targetId,
-            };
-            this.send(message, maybeContactCard);
-          }
         }
         const peer = this.peers.get(targetId);
         if (peer) {
@@ -711,23 +742,39 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         return;
       }
 
-      const localHashes = await this.getHashesForPeerPair(peerId, message.senderId, ctx, metrics);
-      if (localHashes) {
+      // Check if we know the sender agent (WASM keyhive is authoritative)
+      const senderKeyhiveId = keyhiveIdentifierFromPeerId(message.senderId);
+      const senderAgent = await this.keyhive.getAgent(senderKeyhiveId);
+      if (!senderAgent) {
+        console.debug(
+          `[AMRepoKeyhive] No agent found for ${message.senderId}, sending keyhive-sync-missing-contact-card`
+        );
+        const response = {
+          type: "keyhive-sync-request-contact-card",
+          senderId: peerId,
+          targetId: message.senderId,
+        };
+        this.send(response, this.contactCard);
+      } else {
+        // Agent is known — use cache for hashes (may be empty if cache hasn't caught up)
+        const localHashes = await this.getHashesForPeerPair(peerId, message.senderId, ctx, metrics);
         const pendingOpHashes = await this.getCachedPendingOpHashes(metrics);
         console.debug(
           `[AMRepoKeyhive] asyncSendKeyhiveSyncResponse: Found ${localHashes.size} total local operation hashes for ${message.senderId} and ${pendingOpHashes.length} total pending hashes`
         );
 
-        // Build map to look up peer hashes by string
+        // Build map to look up peer found hashes by string
         const peerFoundByHashString = new Map<string, Uint8Array>();
         for (const hash of peerFoundHashes) {
           peerFoundByHashString.set(hash.toString(), hash);
         }
 
-        // Build sets for set operations
         const pendingHashStrings = new Set(
           pendingOpHashes.map((h) => h.toString())
         );
+        // Merge peer pending into found for "to send" computation — the peer
+        // already has bytes for pending events, so don't re-send them.
+        // But don't request pending events — peers can't serve them.
         const peerPendingHashStrings = new Set(
           peerPendingHashes.map((h) => h.toString())
         );
@@ -739,7 +786,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           peerFoundHashStrings.union(peerPendingHashStrings)
         );
 
-        // Determine which ops we need to request from the peer
+        // Determine which ops we need to request from the peer (only from found, not pending)
         const hashStringsToRequest = peerFoundHashStrings.difference(
           localHashStrings.union(pendingHashStrings)
         );
@@ -748,24 +795,20 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           .filter((hash) => hash !== undefined);
 
         // Only fetch full events if we have ops to send
-        let foundOps: Uint8Array[] = [];
+        let foundResult: EventBytesResult = { events: [], cborEvents: [] };
         if (hashStringsToSend.size > 0) {
-          foundOps = await this.getEventBytesForHashes(peerId, hashStringsToSend, ctx, metrics);
+          foundResult = await this.getEventBytesForHashes(peerId, hashStringsToSend, ctx, metrics);
         }
 
-        metrics.recordOpsSent(foundOps.length);
+        metrics.recordOpsSent(foundResult.events.length);
         metrics.recordOpsRequested(requested.length);
 
         console.debug(
-          `[AMRepoKeyhive] Found ${foundOps.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`
+          `[AMRepoKeyhive] Found ${foundResult.events.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`
         );
+        console.log(`[TRACE] sync-response: sending=${foundResult.events.length} requesting=${requested.length} peer=${message.senderId.slice(0,20)}`);
 
-        const responseData = {
-          requested,
-          found: foundOps,
-        };
-
-        const data = encode(responseData);
+        const data = buildSyncResponseCbor(requested, foundResult.cborEvents);
         const response = {
           type: "keyhive-sync-response",
           senderId: peerId,
@@ -776,20 +819,6 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           `[AMRepoKeyhive] Sending keyhive sync response to ${message.senderId} from ${peerId}`
         );
         this.send(response);
-      } else {
-        const keyhiveId = keyhiveIdentifierFromPeerId(message.senderId);
-        const agent = await this.keyhive.getAgent(keyhiveId);
-        if (!agent) {
-          console.debug(
-            `[AMRepoKeyhive] No agent found for ${message.senderId}, sending keyhive-sync-missing-contact-card`
-          );
-          const response = {
-            type: "keyhive-sync-request-contact-card",
-            senderId: peerId,
-            targetId: message.senderId,
-          };
-          this.send(response, this.contactCard);
-        }
       }
       const peer = this.peers.get(message.senderId);
       if (peer) {
@@ -884,7 +913,14 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           void this.saveReceivedEvents(foundEvents);
           // Invalidate cache since we ingested events from a peer
           this.invalidateCaches();
-          (this.emit as any)("ingest-remote");
+          const statsAfterIngest = await this.keyhive.stats();
+          if (statsAfterIngest.totalOps !== this.lastKnownTotalOps) {
+            console.log(`[TRACE] ingest-remote EMITTED: totalOps changed ${this.lastKnownTotalOps} → ${statsAfterIngest.totalOps}`);
+            this.lastKnownTotalOps = statsAfterIngest.totalOps;
+            (this.emit as any)("ingest-remote");
+          } else {
+            console.log(`[TRACE] ingest-remote SUPPRESSED: totalOps unchanged at ${this.lastKnownTotalOps}`);
+          }
         } catch (error) {
           await this.handleIngestError(error, foundEvents, message.senderId);
         }
@@ -894,28 +930,28 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         const requestedHashStrings = new Set(
           requestedHashes.map((h) => h.toString())
         );
-        const requestedOps = await this.getEventBytesForHashes(peerId, requestedHashStrings, ctx, metrics);
+        const requestedResult = await this.getEventBytesForHashes(peerId, requestedHashStrings, ctx, metrics);
 
-        if (requestedOps.length === 0) {
+        if (requestedResult.events.length === 0) {
           console.debug(
             `[AMRepoKeyhive] 0 ops requested by ${message.senderId}`
           );
           return;
         }
 
-        if (requestedOps.length < requestedHashes.length) {
+        if (requestedResult.events.length < requestedHashes.length) {
           console.warn(
-            `[AMRepoKeyhive] ${requestedHashes.length} keyhive events requested, ${requestedOps.length} found.`
+            `[AMRepoKeyhive] ${requestedHashes.length} keyhive events requested, ${requestedResult.events.length} found.`
           );
         }
 
-        metrics.recordOpsSent(requestedOps.length);
+        metrics.recordOpsSent(requestedResult.events.length);
 
         console.debug(
-          `[AMRepoKeyhive] Sending ${requestedOps.length} requested ops to ${message.senderId}`
+          `[AMRepoKeyhive] Sending ${requestedResult.events.length} requested ops to ${message.senderId}`
         );
 
-        const data = encode(requestedOps);
+        const data = buildCborByteStringArray(requestedResult.cborEvents);
         const response = {
           type: "keyhive-sync-ops",
           senderId: peerId,
@@ -1026,7 +1062,14 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           void this.saveReceivedEvents(receivedEvents);
           // Invalidate cache since we ingested events from a peer
           this.invalidateCaches();
-          (this.emit as any)("ingest-remote");
+          const statsAfterIngest = await this.keyhive.stats();
+          if (statsAfterIngest.totalOps !== this.lastKnownTotalOps) {
+            console.log(`[TRACE] ingest-remote EMITTED: totalOps changed ${this.lastKnownTotalOps} → ${statsAfterIngest.totalOps}`);
+            this.lastKnownTotalOps = statsAfterIngest.totalOps;
+            (this.emit as any)("ingest-remote");
+          } else {
+            console.log(`[TRACE] ingest-remote SUPPRESSED: totalOps unchanged at ${this.lastKnownTotalOps}`);
+          }
         } catch (error) {
           await this.handleIngestError(error, receivedEvents, message.senderId);
         }
@@ -1144,36 +1187,39 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       metrics?.recordCacheMiss();
     }
 
-    const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
-    const agent = await this.keyhive.getAgent(keyhiveId);
-    if (!agent) {
-      return null;
+    let hashes: PeerHashes | null = null;
+
+    if (this.eventProvider) {
+      const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
+      hashes = this.eventProvider.getEventHashesForAgent(keyhiveId.toBytes());
+    } else {
+      const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
+      const agent = await this.keyhive.getAgent(keyhiveId);
+      if (!agent) {
+        return null;
+      }
+      hashes = await getEventHashesForAgent(this.keyhive, agent);
     }
 
-    const hashes = await getEventHashesForAgent(this.keyhive, agent);
-
-    if (this.cacheHashes) {
+    if (this.cacheHashes && hashes) {
       this.hashesCache.set(peerId, hashes);
     }
     return hashes;
   }
 
-  // Returns intersection of hashes both peers can access
+  // Returns intersection of hashes both peers can access, plus public hashes.
   // (A ∪ Public) ∩ (B ∪ Public) = (A ∩ B) ∪ Public
+  // When the event provider cache doesn't have an entry for a peer, treats
+  // their hash set as empty (public hashes still flow through).
   private async getHashesForPeerPair(
     peerA: PeerId,
     peerB: PeerId,
     ctx: SyncContext,
     metrics?: Metrics,
-  ): Promise<PeerHashes | null> {
+  ): Promise<PeerHashes> {
     const hashLookupStart = Date.now();
-    const hashesForA = await this.getHashesForPeer(peerA, metrics);
-    const hashesForB = await this.getHashesForPeer(peerB, metrics);
-
-    if (!hashesForA || !hashesForB) {
-      metrics?.recordHashLookupTime(Date.now() - hashLookupStart);
-      return null;
-    }
+    const hashesForA = await this.getHashesForPeer(peerA, metrics) ?? new Map<string, Uint8Array>();
+    const hashesForB = await this.getHashesForPeer(peerB, metrics) ?? new Map<string, Uint8Array>();
 
     const publicHashes = await ctx.getPublicHashes();
     metrics?.recordHashLookupTime(Date.now() - hashLookupStart);
@@ -1188,43 +1234,74 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     return result;
   }
 
-  // Fetch full event bytes for a set of hashes
+  // Fetch full event bytes for a set of hashes, with pre-encoded CBOR byte strings
   private async getEventBytesForHashes(
     peerId: PeerId,
     hashStrings: Set<string>,
     ctx: SyncContext,
     metrics?: Metrics,
-  ): Promise<Uint8Array[]> {
+  ): Promise<EventBytesResult> {
     const eventLookupStart = Date.now();
+
+    if (this.eventProvider) {
+      const events = this.eventProvider.getEventBytesForHashes(hashStrings);
+      metrics?.recordEventLookupTime(Date.now() - eventLookupStart);
+      return { events, cborEvents: events.map(cborByteString) };
+    }
+
+    // Check which hashes already have stored bytes and CBOR
+    const events: Uint8Array[] = [];
+    const cborEvents: Uint8Array[] = [];
+    const missingHashes = new Set<string>();
+    for (const hashStr of hashStrings) {
+      const bytes = this.eventBytes.get(hashStr);
+      const cbor = this.eventCborBytes.get(hashStr);
+      if (bytes && cbor) {
+        events.push(bytes);
+        cborEvents.push(cbor);
+      } else {
+        missingHashes.add(hashStr);
+      }
+    }
+
+    // If all requested hashes have stored bytes, skip WASM entirely
+    if (missingHashes.size === 0) {
+      metrics?.recordEventLookupTime(Date.now() - eventLookupStart);
+      return { events, cborEvents };
+    }
+
+    // Fetch from WASM for misses
     const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
     const agent = await this.keyhive.getAgent(keyhiveId);
 
-    const events = new Map<Uint8Array, any>();
+    const wasmEvents = new Map<Uint8Array, any>();
 
     if (agent) {
       const peerEvents = await getEventsForAgent(this.keyhive, agent);
       for (const [hash, event] of peerEvents) {
-        events.set(hash, event);
+        wasmEvents.set(hash, event);
       }
     }
 
     const publicEvents = await ctx.getPublicEvents();
     for (const [hash, event] of publicEvents) {
-      events.set(hash, event);
+      wasmEvents.set(hash, event);
+    }
+
+    // Store all fetched events and collect the ones we need
+    for (const [hash, eventBytes] of wasmEvents.entries()) {
+      const hashStr = hash.toString();
+      if (!this.eventBytes.has(hashStr)) {
+        this.eventBytes.set(hashStr, eventBytes);
+        this.eventCborBytes.set(hashStr, cborByteString(eventBytes));
+      }
+      if (missingHashes.has(hashStr)) {
+        events.push(eventBytes);
+        cborEvents.push(this.eventCborBytes.get(hashStr)!);
+      }
     }
 
     metrics?.recordEventLookupTime(Date.now() - eventLookupStart);
-
-    if (events.size === 0) {
-      return [];
-    }
-
-    const result: Uint8Array[] = [];
-    for (const [hash, eventBytes] of events.entries()) {
-      if (hashStrings.has(hash.toString())) {
-        result.push(eventBytes);
-      }
-    }
-    return result;
+    return { events, cborEvents };
   }
 }
