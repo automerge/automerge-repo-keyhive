@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import { encode, decode } from "cbor-x";
 import {
   cborByteString,
+  cborUint,
   buildSyncResponseCbor,
   buildCborByteStringArray,
+  buildSyncOpsCbor,
 } from "../src/network-adapter/cbor-builder";
 
 // Helper: generate a Uint8Array of given length with pseudo-random content
@@ -172,5 +174,108 @@ describe("buildSyncResponseCbor", () => {
     for (let i = 0; i < allFound.length; i++) {
       expectBytesEqual(decoded.found[i], allFound[i]);
     }
+  });
+
+  it("includes metadata when senderTotal and receiverTotal provided", () => {
+    const requested = [randomBytes(32, 1)];
+    const found = [randomBytes(100, 2)];
+    const cborFound = found.map(cborByteString);
+
+    const manual = buildSyncResponseCbor(requested, cborFound, 42, 99);
+    const decoded = decode(Buffer.from(manual)) as {
+      requested: Uint8Array[];
+      found: Uint8Array[];
+      senderTotal: number;
+      receiverTotal: number;
+    };
+
+    expect(decoded.requested.length).toBe(1);
+    expect(decoded.found.length).toBe(1);
+    expectBytesEqual(decoded.requested[0], requested[0]);
+    expectBytesEqual(decoded.found[0], found[0]);
+    expect(decoded.senderTotal).toBe(42);
+    expect(decoded.receiverTotal).toBe(99);
+  });
+
+  it("omits metadata when senderTotal and receiverTotal not provided", () => {
+    const manual = buildSyncResponseCbor([], []);
+    const decoded = decode(Buffer.from(manual)) as Record<string, unknown>;
+
+    expect(decoded.senderTotal).toBeUndefined();
+    expect(decoded.receiverTotal).toBeUndefined();
+  });
+
+  it("handles large metadata values", () => {
+    const manual = buildSyncResponseCbor([], [], 100000, 200000);
+    const decoded = decode(Buffer.from(manual)) as {
+      senderTotal: number;
+      receiverTotal: number;
+    };
+    expect(decoded.senderTotal).toBe(100000);
+    expect(decoded.receiverTotal).toBe(200000);
+  });
+});
+
+describe("cborUint", () => {
+  const values = [0, 1, 23, 24, 100, 255, 256, 1000, 65535, 65536, 100000];
+
+  for (const value of values) {
+    it(`round-trips correctly for ${value}`, () => {
+      const encoded = cborUint(value);
+      const decoded = decode(Buffer.from(encoded));
+      expect(decoded).toBe(value);
+    });
+  }
+});
+
+describe("buildSyncOpsCbor", () => {
+  it("decodes to map with ops and metadata", () => {
+    const events = [randomBytes(50, 1), randomBytes(100, 2)];
+    const cborEvents = events.map(cborByteString);
+
+    const manual = buildSyncOpsCbor(cborEvents, 150, 200);
+    const decoded = decode(Buffer.from(manual)) as {
+      ops: Uint8Array[];
+      senderTotal: number;
+      receiverTotal: number;
+    };
+
+    expect(decoded.ops.length).toBe(2);
+    expectBytesEqual(decoded.ops[0], events[0]);
+    expectBytesEqual(decoded.ops[1], events[1]);
+    expect(decoded.senderTotal).toBe(150);
+    expect(decoded.receiverTotal).toBe(200);
+  });
+
+  it("handles empty ops array", () => {
+    const manual = buildSyncOpsCbor([], 10, 20);
+    const decoded = decode(Buffer.from(manual)) as {
+      ops: any[];
+      senderTotal: number;
+      receiverTotal: number;
+    };
+
+    expect(decoded.ops).toEqual([]);
+    expect(decoded.senderTotal).toBe(10);
+    expect(decoded.receiverTotal).toBe(20);
+  });
+
+  it("handles many ops (> 24)", () => {
+    const events = Array.from({ length: 30 }, (_, i) => randomBytes(50 + i, i));
+    const cborEvents = events.map(cborByteString);
+
+    const manual = buildSyncOpsCbor(cborEvents, 3000, 2500);
+    const decoded = decode(Buffer.from(manual)) as {
+      ops: Uint8Array[];
+      senderTotal: number;
+      receiverTotal: number;
+    };
+
+    expect(decoded.ops.length).toBe(30);
+    for (let i = 0; i < events.length; i++) {
+      expectBytesEqual(decoded.ops[i], events[i]);
+    }
+    expect(decoded.senderTotal).toBe(3000);
+    expect(decoded.receiverTotal).toBe(2500);
   });
 });

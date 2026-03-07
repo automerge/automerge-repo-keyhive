@@ -1,6 +1,6 @@
 {
   "name": "@automerge/automerge-repo-keyhive",
-  "version": "0.1.0-alpha.17t",
+  "version": "0.1.0-alpha.17v",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -21,7 +21,7 @@
   "dependencies": {
     "@automerge/automerge-repo": "2.5.3",
     "@automerge/automerge-repo-network-websocket": "2.5.3",
-    "@keyhive/keyhive": "file:../keyhive/keyhive_wasm/keyhive-keyhive-0.0.0-alpha.54w.tgz",
+    "@keyhive/keyhive": "0.0.0-alpha.54y",
     "eventemitter3": "^5.0.1",
     "cbor-x": "^1.6.0"
   },

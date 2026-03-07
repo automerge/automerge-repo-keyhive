@@ -55,6 +55,16 @@ function cborTextString(str: string): Uint8Array {
 // Pre-encode the static CBOR text string keys
 const CBOR_KEY_REQUESTED = cborTextString("requested");
 const CBOR_KEY_FOUND = cborTextString("found");
+const CBOR_KEY_SENDER_TOTAL = cborTextString("senderTotal");
+const CBOR_KEY_RECEIVER_TOTAL = cborTextString("receiverTotal");
+const CBOR_KEY_OPS = cborTextString("ops");
+
+export function cborUint(value: number): Uint8Array {
+  if (value < 24) return new Uint8Array([value]);
+  if (value < 0x100) return new Uint8Array([0x18, value]);
+  if (value < 0x10000) return new Uint8Array([0x19, value >> 8, value & 0xff]);
+  return new Uint8Array([0x1a, (value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff]);
+}
 
 function concatParts(parts: Uint8Array[]): Uint8Array {
   let totalLength = 0;
@@ -68,12 +78,17 @@ function concatParts(parts: Uint8Array[]): Uint8Array {
   return result;
 }
 
-// Build CBOR: { "requested": [...byte strings...], "found": [...pre-encoded byte strings...] }
-export function buildSyncResponseCbor(requested: Uint8Array[], cborFoundEvents: Uint8Array[]): Uint8Array {
+// Build CBOR: { "requested": [...], "found": [...], "senderTotal"?: N, "receiverTotal"?: N }
+export function buildSyncResponseCbor(
+  requested: Uint8Array[],
+  cborFoundEvents: Uint8Array[],
+  senderTotal?: number,
+  receiverTotal?: number,
+): Uint8Array {
   const parts: Uint8Array[] = [];
 
-  // Map with 2 entries
-  parts.push(cborMapHeader(2));
+  const hasMetadata = senderTotal !== undefined && receiverTotal !== undefined;
+  parts.push(cborMapHeader(hasMetadata ? 4 : 2));
 
   // "requested": [byte strings]
   parts.push(CBOR_KEY_REQUESTED);
@@ -88,6 +103,37 @@ export function buildSyncResponseCbor(requested: Uint8Array[], cborFoundEvents: 
   for (const item of cborFoundEvents) {
     parts.push(item);
   }
+
+  if (hasMetadata) {
+    parts.push(CBOR_KEY_SENDER_TOTAL);
+    parts.push(cborUint(senderTotal));
+    parts.push(CBOR_KEY_RECEIVER_TOTAL);
+    parts.push(cborUint(receiverTotal));
+  }
+
+  return concatParts(parts);
+}
+
+// Build CBOR: { "ops": [...pre-encoded byte strings...], "senderTotal": N, "receiverTotal": N }
+export function buildSyncOpsCbor(
+  cborItems: Uint8Array[],
+  senderTotal: number,
+  receiverTotal: number,
+): Uint8Array {
+  const parts: Uint8Array[] = [];
+
+  parts.push(cborMapHeader(3));
+
+  parts.push(CBOR_KEY_OPS);
+  parts.push(cborArrayHeader(cborItems.length));
+  for (const item of cborItems) {
+    parts.push(item);
+  }
+
+  parts.push(CBOR_KEY_SENDER_TOTAL);
+  parts.push(cborUint(senderTotal));
+  parts.push(CBOR_KEY_RECEIVER_TOTAL);
+  parts.push(cborUint(receiverTotal));
 
   return concatParts(parts);
 }
