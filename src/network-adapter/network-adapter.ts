@@ -1201,8 +1201,17 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     await this.keyhiveQueue.run(async () => {
       metrics.recordQueueWait(Date.now() - queueEnterTime);
 
-      const peer = this.peers.get(message.senderId);
-      if (!peer) return;
+      let peer = this.peers.get(message.senderId);
+      if (!peer) {
+        // Auto-register the peer if we receive a sync check from an unknown
+        // sender (can happen if the peer-candidate event was missed due to
+        // timing/race conditions, e.g. MessageChannel adapters).
+        console.debug(
+          `[AMRepoKeyhive] Auto-registering peer from sync-check: ${message.senderId}`
+        );
+        peer = new Peer();
+        this.peers.set(message.senderId, peer);
+      }
 
       // Compute our actual total for the sender
       const hashes = await this.getHashesForPeerPair(peerId, message.senderId);
