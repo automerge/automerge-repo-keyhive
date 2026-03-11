@@ -16,6 +16,8 @@
     "lint:fix": "npx prettier --write \"** /*.js\" --write \"**/*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bench": "vitest bench",
+    "bench:extract": "npx tsx bench/extract-data.ts",
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
