@@ -27,6 +27,7 @@ import { AutomergeRepoKeyhive, keyhiveIdFactory } from "./automerge-repo-keyhive
 export const KEYHIVE_DB_KEY = "keyhive-db";
 export const KEYHIVE_ARCHIVES_KEY = "/archives/";
 export const KEYHIVE_EVENTS_KEY = "/ops/";
+export const KEYHIVE_PREKEY_SECRETS_KEY = "/prekey-secrets";
 
 export function docIdFromAutomergeUrl(url: AutomergeUrl): KeyhiveDocumentId {
   const { binaryDocumentId } = parseAutomergeUrl(url);
@@ -124,13 +125,11 @@ export async function initializeAutomergeRepoKeyhive(options: {
         await keyhiveStorage.saveEventWithHash(event);
 
         if (automaticArchiveIngestion) {
-          // TODO: This is a temporary fix until we have local prekey secret storage implemented in
-          // keyhive.
           if (
             event.variant === "PREKEY_ROTATED" ||
             event.variant === "PREKEYS_EXPANDED"
           ) {
-            await keyhiveStorage.saveKeyhiveWithHash(keyhive);
+            await keyhiveStorage.savePrekeySecrets(keyhive);
           }
           // TODO: We are currently filtering out CGKA ops in the sync protocol but
           // will need to restore them once we add encryption.
@@ -229,6 +228,18 @@ export class KeyhiveStorage {
       ],
       eventBytes
     );
+  }
+
+  async savePrekeySecrets(kh: Keyhive): Promise<void> {
+    const bytes = await kh.exportPrekeySecrets();
+    await this.storage.save([KEYHIVE_DB_KEY, KEYHIVE_PREKEY_SECRETS_KEY], bytes);
+  }
+
+  async loadPrekeySecrets(kh: Keyhive): Promise<void> {
+    const data = await this.storage.load([KEYHIVE_DB_KEY, KEYHIVE_PREKEY_SECRETS_KEY]);
+    if (data) {
+      await kh.importPrekeySecrets(data);
+    }
   }
 
   async compact(kh: Keyhive): Promise<void> {
@@ -435,6 +446,7 @@ export class KeyhiveStorage {
               .filter((key): key is StorageKey => key !== undefined);
           }
 
+          await this.loadPrekeySecrets(kh);
           console.log(
             "[AMRepoKeyhive] Successfully loaded Keyhive from archive"
           );
@@ -476,6 +488,7 @@ export class KeyhiveStorage {
     const store = CiphertextStore.newInMemory();
     console.log(`[AMRepoKeyhive] Initializing new Keyhive`);
     const kh = await Keyhive.init(signer, store, event_handler);
+    await this.loadPrekeySecrets(kh);
 
     if (eventsBytes.length > 0) {
       console.log(
