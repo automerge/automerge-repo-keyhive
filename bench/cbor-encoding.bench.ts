@@ -36,7 +36,7 @@ describe("CBOR Encoding", () => {
         cborByteString(hash);
       }
     },
-    { iterations: 50, warmupIterations: 5, time: 0 }
+    { iterations: 50, warmupIterations: 5, time: 0, warmupTime: 0 }
   );
 
   bench(
@@ -45,7 +45,7 @@ describe("CBOR Encoding", () => {
       const cborHashes = hashes.map((h) => cborByteString(h));
       buildCborByteStringArray(cborHashes);
     },
-    { iterations: 50, warmupIterations: 5, time: 0 }
+    { iterations: 50, warmupIterations: 5, time: 0, warmupTime: 0 }
   );
 
   bench(
@@ -54,7 +54,7 @@ describe("CBOR Encoding", () => {
       const cborEvents = allEvents.map((ev) => cborByteString(ev));
       buildSyncResponseCbor(hashes, cborEvents, hashes.length, hashes.length);
     },
-    { iterations: 50, warmupIterations: 5, time: 0 }
+    { iterations: 50, warmupIterations: 5, time: 0, warmupTime: 0 }
   );
 });
 
@@ -66,7 +66,7 @@ describe("OpCache", () => {
       const cache = new OpCache();
       await cache.refresh(kh);
     },
-    { iterations: 3, warmupIterations: 1, time: 0 }
+    { iterations: 3, warmupIterations: 1, time: 0, warmupTime: 0 }
   );
 
   bench(
@@ -80,6 +80,6 @@ describe("OpCache", () => {
         cache.getPublicHashes();
       }
     },
-    { iterations: 3, warmupIterations: 1, time: 0 }
+    { iterations: 3, warmupIterations: 1, time: 0, warmupTime: 0 }
   );
 });

@@ -16,6 +16,6 @@ describe("Event Ingestion on Startup", () => {
       const kh = await createFreshKeyhive();
       await kh.ingestEventsBytes(allEvents);
     },
-    { iterations: 5, warmupIterations: 1, time: 0 }
+    { iterations: 5, warmupIterations: 1, time: 0, warmupTime: 0 }
   );
 });

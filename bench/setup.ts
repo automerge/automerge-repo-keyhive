@@ -73,9 +73,23 @@ export async function createKeyhiveFromArchive(
   return archive.tryToKeyhive(store, signer, () => {});
 }
 
+export async function createKeyhiveFromArchiveWithEvents(
+  archiveBytes: Uint8Array,
+  events: Uint8Array[],
+  keyPair: CryptoKeyPair
+): Promise<Keyhive> {
+  const kh = await createKeyhiveFromArchive(archiveBytes, keyPair);
+  if (events.length > 0) {
+    await kh.ingestEventsBytes(events);
+  }
+  return kh;
+}
+
 export async function getPublicAgent(kh: Keyhive) {
   const publicId = Identifier.publicId();
   const agent = await kh.getAgent(publicId);
   if (!agent) throw new Error("Failed to get public agent");
   return agent;
 }
+
+export { Identifier } from "@keyhive/keyhive/slim";

@@ -32,7 +32,7 @@ describe("Compaction", () => {
       const archive = await kh.toArchive();
       archive.toBytes();
     },
-    { iterations: 3, warmupIterations: 1, time: 0 }
+    { iterations: 3, warmupIterations: 1, time: 0, warmupTime: 0 }
   );
 
   bench(
@@ -40,7 +40,7 @@ describe("Compaction", () => {
     async () => {
       await createKeyhiveFromArchive(archiveBytes, keyPair);
     },
-    { iterations: 3, warmupIterations: 1, time: 0 }
+    { iterations: 3, warmupIterations: 1, time: 0, warmupTime: 0 }
   );
 
   bench(
@@ -50,6 +50,6 @@ describe("Compaction", () => {
       const archive = await kh.toArchive();
       archive.toBytes();
     },
-    { iterations: 3, warmupIterations: 1, time: 0 }
+    { iterations: 3, warmupIterations: 1, time: 0, warmupTime: 0 }
   );
 });
