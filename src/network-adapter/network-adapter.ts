@@ -671,18 +671,6 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
               targetId: targetId,
               data: data,
             };
-            // BUG1 DIAGNOSTIC: check for staleness on every sync check (bypasses all caches)
-            {
-              const pubAgent = await this.keyhive.getAgent(Identifier.publicId());
-              if (pubAgent) {
-                const rawHashes = await this.keyhive.eventHashesForAgent(pubAgent);
-                const rawEvents = await this.keyhive.eventsForAgent(pubAgent);
-                const stats = await this.keyhive.stats();
-                if (rawHashes.length !== rawEvents.size) {
-                  console.error(`[BUG1] STALE at sync-check! eventHashesForAgent=${rawHashes.length} eventsForAgent=${rawEvents.size} totalOps=${stats.totalOps} myTotal=${myTotal}`);
-                }
-              }
-            }
             console.debug(
               `[AMRepoKeyhive] Sending keyhive sync check to ${targetId} from ${senderId}: myTotal=${myTotal}, beliefOfTheirTotal=${peer.beliefCounts.theirTotalForMe}`
             );
@@ -818,8 +806,6 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         console.debug(
           `[AMRepoKeyhive] Found ${foundResult.events.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`
         );
-        console.log(`[TRACE] sync-response: sending=${foundResult.events.length} requesting=${requested.length} peer=${message.senderId.slice(0,20)}`);
-
         // Metadata for belief tracking
         const senderTotal = localHashes.size + pendingOpHashes.length;
         const receiverTotal = peerFoundHashes.length + peerPendingHashes.length;
@@ -931,27 +917,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           // Invalidate hash cache since we ingested events from a peer
           this.invalidateCaches();
           const statsAfterIngest = await this.keyhive.stats();
-          // BUG1 DIAGNOSTIC: check eventHashesForAgent consistency after ingestion
-          {
-            const pubAgent = await this.keyhive.getAgent(Identifier.publicId());
-            if (pubAgent) {
-              const hashes = await this.keyhive.eventHashesForAgent(pubAgent);
-              const events = await this.keyhive.eventsForAgent(pubAgent);
-              if (hashes.length !== events.size) {
-                console.error(`[BUG1] STALE after sync-response ingest! eventHashesForAgent=${hashes.length} but eventsForAgent=${events.size}, totalOps=${statsAfterIngest.totalOps}`);
-              } else {
-                console.log(`[BUG1] OK after sync-response ingest: hashes=${hashes.length}, events=${events.size}, totalOps=${statsAfterIngest.totalOps}`);
-              }
-            }
-          }
           if (statsAfterIngest.totalOps !== this.lastKnownTotalOps) {
-            console.log(`[TRACE] ingest-remote EMITTED: totalOps changed ${this.lastKnownTotalOps} → ${statsAfterIngest.totalOps}`);
             this.lastKnownTotalOps = statsAfterIngest.totalOps;
             // Only clear beliefs when state actually changed
             this.invalidateBeliefs();
             (this.emit as any)("ingest-remote");
-          } else {
-            console.log(`[TRACE] ingest-remote SUPPRESSED: totalOps unchanged at ${this.lastKnownTotalOps}`);
           }
         } catch (error) {
           await this.handleIngestError(error, foundEvents, message.senderId);
@@ -1144,27 +1114,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           // Invalidate hash cache since we ingested events from a peer
           this.invalidateCaches();
           const statsAfterIngest = await this.keyhive.stats();
-          // BUG1 DIAGNOSTIC: check eventHashesForAgent consistency after ingestion
-          {
-            const pubAgent = await this.keyhive.getAgent(Identifier.publicId());
-            if (pubAgent) {
-              const hashes = await this.keyhive.eventHashesForAgent(pubAgent);
-              const events = await this.keyhive.eventsForAgent(pubAgent);
-              if (hashes.length !== events.size) {
-                console.error(`[BUG1] STALE after sync-ops ingest! eventHashesForAgent=${hashes.length} but eventsForAgent=${events.size}, totalOps=${statsAfterIngest.totalOps}`);
-              } else {
-                console.log(`[BUG1] OK after sync-ops ingest: hashes=${hashes.length}, events=${events.size}, totalOps=${statsAfterIngest.totalOps}`);
-              }
-            }
-          }
           if (statsAfterIngest.totalOps !== this.lastKnownTotalOps) {
-            console.log(`[TRACE] ingest-remote EMITTED: totalOps changed ${this.lastKnownTotalOps} → ${statsAfterIngest.totalOps}`);
             this.lastKnownTotalOps = statsAfterIngest.totalOps;
             // Only clear beliefs when state actually changed
             this.invalidateBeliefs();
             (this.emit as any)("ingest-remote");
-          } else {
-            console.log(`[TRACE] ingest-remote SUPPRESSED: totalOps unchanged at ${this.lastKnownTotalOps}`);
           }
 
           // After successful ingestion, send confirmation and establish beliefs
