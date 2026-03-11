@@ -332,6 +332,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
   private minSyncRequestInterval: number = 1000;
   private minSyncResponseInterval: number = 1000;
+  private syncRequestQueued: boolean = false;
 
   private batchInterval: number | undefined;
   private keyhiveMsgBatch: MessageBatch;
@@ -1318,9 +1319,13 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.peerId === undefined) {
       return;
     }
-    let includeContactCard = false;
-    let attemptRecovery = true;
-    this.syncKeyhive(this.peerId, includeContactCard, attemptRecovery);
+    if (this.syncRequestQueued) {
+      return;
+    }
+    this.syncRequestQueued = true;
+    void this.asyncSyncKeyhive(this.peerId, false, true).finally(() => {
+      this.syncRequestQueued = false;
+    });
   }
 
   private readyToSendKeyhiveRequest(targetId: PeerId): boolean {
