@@ -1323,7 +1323,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       return;
     }
     this.syncRequestQueued = true;
-    void this.asyncSyncKeyhive(this.peerId, false, true).finally(() => {
+    void this.asyncSyncKeyhive(this.peerId, false, false).finally(() => {
       this.syncRequestQueued = false;
     });
   }

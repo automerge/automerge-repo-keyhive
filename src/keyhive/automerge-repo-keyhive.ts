@@ -69,8 +69,12 @@ export class AutomergeRepoKeyhive {
         timer = null
         if (!dirty) return
         dirty = false
-        onBefore?.()
-        repo.shareConfigChanged()
+        try {
+          onBefore?.()
+          repo.shareConfigChanged()
+        } catch (e) {
+          console.error(`[AMRepoKeyhive] shareConfigChanged() threw:`, e)
+        }
       }, debounceMs)
     })
   }
