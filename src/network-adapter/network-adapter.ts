@@ -356,6 +356,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     batchInterval?: number,
     private retryPendingFromStorage: boolean = true,
     enableCompaction: boolean = true,
+    private archiveThreshold: number = 200,
   ) {
     super();
     this.cacheHashes = cacheHashes;
@@ -889,11 +890,18 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         );
 
         try {
+          // Suppress emitter event writes during ingestion to avoid duplicate
+          // storage writes.
+          this.keyhiveStorage.suppressEventWrites = true;
           let pendingEvents: any[] | null = null;
           try {
-            pendingEvents = await this.keyhive.ingestEventsBytes(foundEvents);
-          } catch (error) {
-            console.error(`[AMRepoKeyhive] Error ingesting events: ${error}`);
+            try {
+              pendingEvents = await this.keyhive.ingestEventsBytes(foundEvents);
+            } catch (error) {
+              console.error(`[AMRepoKeyhive] Error ingesting events: ${error}`);
+            }
+          } finally {
+            this.keyhiveStorage.suppressEventWrites = false;
           }
 
           if (pendingEvents) {
@@ -916,16 +924,21 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
               metrics.recordStorageRetry();
               try {
                 await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
-                const retryPending =
-                  await this.keyhive.ingestEventsBytes(foundEvents);
-                if (retryPending.length === 0) {
-                  console.log(
-                    `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
-                  );
-                } else {
-                  console.warn(
-                    `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
-                  );
+                this.keyhiveStorage.suppressEventWrites = true;
+                try {
+                  const retryPending =
+                    await this.keyhive.ingestEventsBytes(foundEvents);
+                  if (retryPending.length === 0) {
+                    console.log(
+                      `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
+                    );
+                  } else {
+                    console.warn(
+                      `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
+                    );
+                  }
+                } finally {
+                  this.keyhiveStorage.suppressEventWrites = false;
                 }
               } catch (storageError) {
                 console.error(
@@ -936,7 +949,15 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             }
           }
 
-          void this.saveReceivedEvents(foundEvents);
+          // For large batches, write the full archive instead of individual events.
+          if (foundEvents.length > this.archiveThreshold) {
+            console.log(
+              `[AMRepoKeyhive] Large batch (${foundEvents.length} > ${this.archiveThreshold}): saving full archive instead of individual events`
+            );
+            void this.keyhiveStorage.saveKeyhiveWithHash(this.keyhive);
+          } else {
+            void this.saveReceivedEvents(foundEvents);
+          }
           // Invalidate/refresh cache since we ingested events from a peer
           if (this.opCache) {
             void this.opCache.refresh(this.keyhive);
@@ -1100,8 +1121,16 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         );
 
         try {
-          const pendingEvents =
-            await this.keyhive.ingestEventsBytes(receivedEvents);
+          // Suppress emitter event writes during ingestion to avoid duplicate
+          // storage writes.
+          this.keyhiveStorage.suppressEventWrites = true;
+          let pendingEvents: Uint8Array[];
+          try {
+            pendingEvents =
+              await this.keyhive.ingestEventsBytes(receivedEvents);
+          } finally {
+            this.keyhiveStorage.suppressEventWrites = false;
+          }
           metrics.recordIngestion(receivedEvents.length, pendingEvents.length);
           console.debug(
             `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
@@ -1117,16 +1146,21 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
               metrics.recordStorageRetry();
               try {
                 await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
-                const retryPending =
-                  await this.keyhive.ingestEventsBytes(receivedEvents);
-                if (retryPending.length === 0) {
-                  console.log(
-                    `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
-                  );
-                } else {
-                  console.warn(
-                    `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
-                  );
+                this.keyhiveStorage.suppressEventWrites = true;
+                try {
+                  const retryPending =
+                    await this.keyhive.ingestEventsBytes(receivedEvents);
+                  if (retryPending.length === 0) {
+                    console.log(
+                      `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
+                    );
+                  } else {
+                    console.warn(
+                      `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
+                    );
+                  }
+                } finally {
+                  this.keyhiveStorage.suppressEventWrites = false;
                 }
               } catch (storageError) {
                 console.error(
@@ -1137,7 +1171,15 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             }
           }
 
-          void this.saveReceivedEvents(receivedEvents);
+          // For large batches, write the full archive instead of individual events.
+          if (receivedEvents.length > this.archiveThreshold) {
+            console.log(
+              `[AMRepoKeyhive] Large batch (${receivedEvents.length} > ${this.archiveThreshold}): saving full archive instead of individual events`
+            );
+            void this.keyhiveStorage.saveKeyhiveWithHash(this.keyhive);
+          } else {
+            void this.saveReceivedEvents(receivedEvents);
+          }
           // Invalidate hash cache since we ingested events from a peer
           this.invalidateCaches();
           const statsAfterIngest = await this.keyhive.stats();
