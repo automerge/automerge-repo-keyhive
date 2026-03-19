@@ -14,7 +14,7 @@ import {
   verifyData,
 } from "./messages.js";
 import { PromiseQueue, Pending } from "./pending.js";
-import { getEventsForPeer, getEventHashesForPeer, keyhiveIdentifierFromPeerId } from "../utilities.js";
+import { getEventsForPeer, getEventHashesForPeer, getPublicEventHashes, keyhiveIdentifierFromPeerId } from "../utilities.js";
 import {
   getPendingOpHashes,
   KeyhiveStorage,
@@ -761,7 +761,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     return hashes;
   }
 
-  // Get event hashes for a peer
+  // Get event hashes for a peer. Returns null if the peer agent is unknown.
   private async getHashesForPeer(peerId: PeerId): Promise<PeerHashes | null> {
     if (this.cacheHashes) {
       const cached = this.hashesCache.get(peerId);
@@ -793,7 +793,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       return null;
     }
 
-    const result = new Map<string, Uint8Array>();
+    const publicHashes = await getPublicEventHashes(this.keyhive);
+
+    const result = new Map<string, Uint8Array>(publicHashes);
     for (const [hashString, hashBytes] of hashesForA.entries()) {
       if (hashesForB.has(hashString)) {
         result.set(hashString, hashBytes);
