@@ -37,10 +37,20 @@ export async function initializeAutomergeRepoKeyhive(options: {
   storage: StorageAdapterInterface;
   peerIdSuffix: string;
   networkAdapter: NetworkAdapter;
-  automaticArchiveIngestion: boolean;
-  onlyShareWithHardcodedServerPeerId: boolean;
+  automaticArchiveIngestion?: boolean;
+  onlyShareWithHardcodedServerPeerId?: boolean;
+  periodicallyRequestSync?: boolean;
+  cacheHashes?: boolean;
   keyPair?: CryptoKeyPair;
+  syncRequestInterval?: number;
 }): Promise<AutomergeRepoKeyhive> {
+  const {
+    automaticArchiveIngestion = true,
+    onlyShareWithHardcodedServerPeerId = false,
+    periodicallyRequestSync = true,
+    cacheHashes = false,
+    syncRequestInterval = 2000,
+  } = options;
   const { keyPair, signer } = await loadOrCreateKeyPairAndSigner(options.storage, options.keyPair)
   const emitter = new KeyhiveEventEmitter();
   const uniqueIdHash = new Uint8Array(
@@ -70,27 +80,36 @@ export async function initializeAutomergeRepoKeyhive(options: {
     keyhiveStorage
   );
 
-  let hardcodedServerPeerId = null;
-  if (options.onlyShareWithHardcodedServerPeerId) {
-    hardcodedServerPeerId = serverPeerId
-  }
-
   const keyhiveQueue = new PromiseQueue();
 
-  const keyhiveNetworkAdapter = new KeyhiveNetworkAdapter(
-    options.networkAdapter,
-    active.contactCard,
-    keyhive,
-    keyhiveStorage,
-    keyhiveQueue,
-    hardcodedServerPeerId
-  );
+  const createKeyhiveNetworkAdapter = (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean, periodicallyRequestSync: boolean, syncRequestInterval: number) => {
+    let hardcodedServerPeerId = null;
+    if (onlyShareWithHardcodedServerPeerId) {
+      hardcodedServerPeerId = serverPeerId
+    }
 
-  if (options.automaticArchiveIngestion) {
+    return new KeyhiveNetworkAdapter(
+      networkAdapter,
+      active.contactCard,
+      keyhive,
+      keyhiveStorage,
+      keyhiveQueue,
+      periodicallyRequestSync,
+      cacheHashes,
+      hardcodedServerPeerId,
+      syncRequestInterval,
+    )
+  };
+
+  const keyhiveNetworkAdapter = createKeyhiveNetworkAdapter(options.networkAdapter, onlyShareWithHardcodedServerPeerId, periodicallyRequestSync, syncRequestInterval);
+
+  if (automaticArchiveIngestion) {
+    let syncTimeout: ReturnType<typeof setTimeout> | undefined;
+
     emitter.on("update", (event: KeyhiveEvent) => {
       void keyhiveQueue.run(async () => {
         console.debug(
-          "[AMRepoKeyhive] Keyhive updated. Saving and syncing events."
+          "[AMRepoKeyhive] Keyhive updated. Saving event."
         );
         // TODO: This is a temporary fix until we have local prekey secret storage implemented in
         // keyhive.
@@ -104,7 +123,13 @@ export async function initializeAutomergeRepoKeyhive(options: {
         // TODO: We are currently filtering out CGKA ops in the sync protocol but
         // will need to restore them once we add encryption.
         if (event.variant !== "CGKA_OPERATION") {
-          keyhiveNetworkAdapter.syncKeyhive();
+          // If there is a pending sync timeout, we don't need to schedule another.
+          if (!syncTimeout) {
+            syncTimeout = setTimeout(() => {
+              syncTimeout = undefined;
+              keyhiveNetworkAdapter.syncKeyhive();
+            }, 1000);
+          }
         }
       });
     });
@@ -119,6 +144,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
     keyhiveNetworkAdapter,
     emitter,
     keyhiveIdFactory(keyhiveNetworkAdapter, keyhive),
+    createKeyhiveNetworkAdapter,
   );
 }
 
@@ -129,10 +155,10 @@ export async function receiveContactCard(keyhive: Keyhive, contactCard: ContactC
     return await keyhive.getIndividual(contactCard.individualId);
   } else {
     if (contactCard.op) {
-      console.debug(`Saving Contact Card event: ${contactCard.op}`);
+      console.debug(`[AMRepoKeyhive] Saving Contact Card event: ${contactCard.op}`);
       keyhiveStorage.saveEventWithHash(contactCard.op);
     } else {
-      console.error(`No op found for ${contactCard.toJson()}`);
+      console.error(`[AMRepoKeyhive] No op found for ${contactCard.toJson()}`);
     }
     return await keyhive.receiveContactCard(contactCard);
   }
@@ -189,6 +215,95 @@ export class KeyhiveStorage {
         uint8ArrayToHex(new Uint8Array(hash)),
       ],
       eventBytes
+    );
+  }
+
+  async compact(kh: Keyhive): Promise<void> {
+    const keyhiveArchiveChunks = await this.storage.loadRange([
+      KEYHIVE_DB_KEY,
+      KEYHIVE_ARCHIVES_KEY,
+    ]);
+    const keyhiveEventsChunks = await this.storage.loadRange([
+      KEYHIVE_DB_KEY,
+      KEYHIVE_EVENTS_KEY,
+    ]);
+
+    // Nothing to compact if no events and at most one archive
+    if (keyhiveEventsChunks.length === 0 && keyhiveArchiveChunks.length <= 1) {
+      return;
+    }
+
+    console.debug(
+      `[AMRepoKeyhive] Compacting: ${keyhiveArchiveChunks.length} archives, ${keyhiveEventsChunks.length} events`
+    );
+
+    // Ingest all archives
+    for (const chunk of keyhiveArchiveChunks) {
+      if (chunk.data) {
+        try {
+          await kh.ingestArchive(new Archive(chunk.data));
+        } catch (error) {
+          console.warn(
+            `[AMRepoKeyhive] Failed to ingest archive during compaction:`,
+            error
+          );
+        }
+      }
+    }
+
+    // Build map from event data to key for tracking pending events
+    const dataToKey = new Map<Uint8Array, StorageKey>();
+    for (const chunk of keyhiveEventsChunks) {
+      if (chunk.data) {
+        dataToKey.set(chunk.data, chunk.key);
+      }
+    }
+
+    // Ingest all events
+    const eventsBytes: Array<Uint8Array> = keyhiveEventsChunks
+      .map((chunk) => chunk.data)
+      .filter((data): data is Uint8Array => data !== undefined);
+
+    let pendingKeys: StorageKey[] = [];
+    if (eventsBytes.length > 0) {
+      try {
+        pendingKeys = (await kh.ingestEventsBytes(eventsBytes))
+          .map((bytes: Uint8Array) => dataToKey.get(bytes))
+          .filter((key): key is StorageKey => key !== undefined);
+      } catch (error) {
+        console.warn(
+          `[AMRepoKeyhive] Failed to ingest events during compaction:`,
+          error
+        );
+      }
+    }
+
+    // Write the new compacted archive
+    await this.saveKeyhiveWithHash(kh);
+
+    // Remove old archives (skip the one we just wrote)
+    const currentCompactHash = uint8ArrayToHex(this.keyhiveStorageId);
+    for (const chunk of keyhiveArchiveChunks) {
+      if (chunk.key[2] !== currentCompactHash) {
+        await this.storage.remove(chunk.key);
+      }
+    }
+
+    // Remove events that are not pending
+    for (const chunk of keyhiveEventsChunks) {
+      const isPendingKey = pendingKeys.some(
+        (pendingKey) =>
+          pendingKey.length === chunk.key.length &&
+          pendingKey.every((val, index) => val === chunk.key[index])
+      );
+
+      if (!isPendingKey) {
+        await this.storage.remove(chunk.key);
+      }
+    }
+
+    console.debug(
+      `[AMRepoKeyhive] Compaction complete. ${pendingKeys.length} pending events retained.`
     );
   }
 
@@ -311,8 +426,11 @@ export class KeyhiveStorage {
             "[AMRepoKeyhive] Successfully loaded Keyhive from archive"
           );
           await this.saveKeyhiveWithHash(kh);
+          const currentHash = uint8ArrayToHex(this.keyhiveStorageId);
           for (const chunk of keyhiveArchiveChunks) {
-            await this.storage.remove(chunk.key);
+            if (chunk.key[2] !== currentHash) {
+              await this.storage.remove(chunk.key);
+            }
           }
           for (const chunk of keyhiveEventsChunks) {
             const isPendingKey = pendingKeys.some(

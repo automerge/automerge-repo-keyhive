@@ -1,6 +1,6 @@
 {
   "name": "@automerge/automerge-repo-keyhive",
-  "version": "0.1.0-alpha.10",
+  "version": "0.1.0-alpha.17i",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,9 +19,9 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "@automerge/automerge-repo": "2.5.2-alpha.0",
-    "@automerge/automerge-repo-network-websocket": "2.5.2-alpha.0",
-    "@keyhive/keyhive": "0.0.0-alpha.52b",
+    "@automerge/automerge-repo": "2.5.3",
+    "@automerge/automerge-repo-network-websocket": "2.5.3",
+    "@keyhive/keyhive": "0.0.0-alpha.54i",
     "eventemitter3": "^5.0.1",
     "cbor-x": "^1.6.0"
   },
