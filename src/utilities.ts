@@ -1,7 +1,7 @@
 import { Signer } from "@keyhive/keyhive/slim";
 import { peerIdFromVerifyingKey } from "./network-adapter/messages.js";
 import { PeerId } from "@automerge/automerge-repo/slim";
-import { Identifier, Keyhive } from "@keyhive/keyhive/slim";
+import { Agent, Identifier, Keyhive } from "@keyhive/keyhive/slim";
 
 export function peerIdFromSigner(signer: Signer, suffix: string = ""): PeerId {
   return peerIdFromVerifyingKey(signer.verifyingKey, suffix);
@@ -37,40 +37,21 @@ export function hexToUint8Array(hex: string): Uint8Array {
   return bytes;
 }
 
-export async function getEventsForPeer(
+export async function getEventsForAgent(
   keyhive: Keyhive,
-  peerId: PeerId
-): Promise<Map<Uint8Array, any> | null> {
-  const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
-  const agent = await keyhive.getAgent(keyhiveId);
-  if (!agent) {
-    return null;
-  }
-  const eventsForPeer = await keyhive.eventsForAgent(agent);
-  const publicAgent = await keyhive.getAgent(Identifier.publicId());
-  if (publicAgent) {
-    const eventsForPublic = await keyhive.eventsForAgent(publicAgent);
-    for (const [hash, event] of eventsForPublic.entries()) {
-      eventsForPeer.set(hash, event);
-    }
-  }
-  return eventsForPeer;
+  agent: Agent,
+): Promise<Map<Uint8Array, any>> {
+  return await keyhive.eventsForAgent(agent);
 }
 
-// Returns event hashes for a peer as Map<hashString, hashBytes>
-export async function getEventHashesForPeer(
+// Returns event hashes for an agent as Map<hashString, hashBytes>
+export async function getEventHashesForAgent(
   keyhive: Keyhive,
-  peerId: PeerId
-): Promise<Map<string, Uint8Array> | null> {
-  const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
-  const agent = await keyhive.getAgent(keyhiveId);
-  if (!agent) {
-    return null;
-  }
-
+  agent: Agent,
+): Promise<Map<string, Uint8Array>> {
   const hashMap = new Map<string, Uint8Array>();
 
-  // Get membership + prekey hashes for the peer's agent
+  // Get relevant membership + prekey hashes for the agent
   const eventHashes: Uint8Array[] = await keyhive.eventHashesForAgent(agent);
   for (const hash of eventHashes) {
     hashMap.set(hash.toString(), hash);
@@ -82,20 +63,5 @@ export async function getEventHashesForPeer(
     hashMap.set(hash.toString(), hash);
   }
 
-  return hashMap;
-}
-
-// Returns public event hashes as Map<hashString, hashBytes>
-export async function getPublicEventHashes(
-  keyhive: Keyhive,
-): Promise<Map<string, Uint8Array>> {
-  const hashMap = new Map<string, Uint8Array>();
-  const publicAgent = await keyhive.getAgent(Identifier.publicId());
-  if (publicAgent) {
-    const publicHashes: Uint8Array[] = await keyhive.eventHashesForAgent(publicAgent);
-    for (const hash of publicHashes) {
-      hashMap.set(hash.toString(), hash);
-    }
-  }
   return hashMap;
 }

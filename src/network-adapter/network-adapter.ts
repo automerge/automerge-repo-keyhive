@@ -4,7 +4,7 @@ import {
   PeerId,
   PeerMetadata,
 } from "@automerge/automerge-repo/slim";
-import { ContactCard, Keyhive } from "@keyhive/keyhive/slim";
+import { ContactCard, Identifier, Keyhive } from "@keyhive/keyhive/slim";
 import { encode, decode } from "cbor-x";
 
 import {
@@ -14,7 +14,7 @@ import {
   verifyData,
 } from "./messages.js";
 import { PromiseQueue, Pending } from "./pending.js";
-import { getEventsForPeer, getEventHashesForPeer, getPublicEventHashes, keyhiveIdentifierFromPeerId } from "../utilities.js";
+import { getEventsForAgent, getEventHashesForAgent, keyhiveIdentifierFromPeerId } from "../utilities.js";
 import {
   getPendingOpHashes,
   KeyhiveStorage,
@@ -275,6 +275,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
   private cacheHashes: boolean;
   private hashesCache: Map<PeerId, PeerHashes> = new Map();
+  private publicHashesCache: PeerHashes | null = null;
+  private publicEventsCache: Map<Uint8Array, any> | null = null;
   private pendingOpHashesCache: Uint8Array[] | null = null;
   private lastKnownTotalOps: bigint = 0n;
 
@@ -1083,6 +1085,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
   private invalidateCaches(): void {
     this.hashesCache.clear();
+    this.publicHashesCache = null;
+    this.publicEventsCache = null;
     this.pendingOpHashesCache = null;
   }
 
@@ -1114,6 +1118,41 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     return hashes;
   }
 
+  private async getCachedPublicHashes(metrics?: Metrics): Promise<PeerHashes> {
+    if (this.cacheHashes && this.publicHashesCache !== null) {
+      metrics?.recordCacheHit();
+      return this.publicHashesCache;
+    }
+    if (this.cacheHashes) {
+      metrics?.recordCacheMiss();
+    }
+    const agent = await this.keyhive.getAgent(Identifier.publicId());
+    let hashes: PeerHashes;
+    if (!agent) {
+      hashes = new Map();
+    } else {
+      hashes = await getEventHashesForAgent(this.keyhive, agent);
+    }
+    if (this.cacheHashes) {
+      this.publicHashesCache = hashes;
+    }
+    return hashes;
+  }
+
+  private async getCachedPublicEvents(): Promise<Map<Uint8Array, any>> {
+    if (this.cacheHashes && this.publicEventsCache !== null) {
+      return this.publicEventsCache;
+    }
+    const agent = await this.keyhive.getAgent(Identifier.publicId());
+    const events = agent
+      ? await getEventsForAgent(this.keyhive, agent)
+      : new Map<Uint8Array, any>();
+    if (this.cacheHashes) {
+      this.publicEventsCache = events;
+    }
+    return events;
+  }
+
   // Get event hashes for a peer. Returns null if the peer agent is unknown.
   private async getHashesForPeer(peerId: PeerId, metrics?: Metrics): Promise<PeerHashes | null> {
     if (this.cacheHashes) {
@@ -1125,10 +1164,12 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       metrics?.recordCacheMiss();
     }
 
-    const hashes = await getEventHashesForPeer(this.keyhive, peerId);
-    if (!hashes) {
+    const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
+    const agent = await this.keyhive.getAgent(keyhiveId);
+    if (!agent) {
       return null;
     }
+    const hashes = await getEventHashesForAgent(this.keyhive, agent);
 
     if (this.cacheHashes) {
       this.hashesCache.set(peerId, hashes);
@@ -1150,7 +1191,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       return null;
     }
 
-    const publicHashes = await getPublicEventHashes(this.keyhive);
+    const publicHashes = await this.getCachedPublicHashes(metrics);
     metrics?.recordHashLookupTime(Date.now() - hashLookupStart);
 
     const result = new Map<string, Uint8Array>(publicHashes);
@@ -1170,14 +1211,26 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     metrics?: Metrics,
   ): Promise<Uint8Array[]> {
     const eventLookupStart = Date.now();
-    const events = await getEventsForPeer(this.keyhive, peerId);
-    if (!events) {
-      metrics?.recordEventLookupTime(Date.now() - eventLookupStart);
-      return [];
+
+    const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
+    const agent = await this.keyhive.getAgent(keyhiveId);
+
+    const wasmEvents = new Map<Uint8Array, any>();
+
+    if (agent) {
+      const peerEvents = await getEventsForAgent(this.keyhive, agent);
+      for (const [hash, event] of peerEvents) {
+        wasmEvents.set(hash, event);
+      }
+    }
+
+    const publicEvents = await this.getCachedPublicEvents();
+    for (const [hash, event] of publicEvents) {
+      wasmEvents.set(hash, event);
     }
 
     const result: Uint8Array[] = [];
-    for (const [hash, eventBytes] of events.entries()) {
+    for (const [hash, eventBytes] of wasmEvents.entries()) {
       if (hashStrings.has(hash.toString())) {
         result.push(eventBytes);
       }
