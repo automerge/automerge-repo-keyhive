@@ -41,7 +41,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
   automaticArchiveIngestion?: boolean;
   onlyShareWithHardcodedServerPeerId?: boolean;
   periodicallyRequestSync?: boolean;
-  cacheHashes?: boolean;
+  cachingMode?: "none" | "standard" | "periodic";
   keyPair?: CryptoKeyPair;
   syncRequestInterval?: number;
   batchInterval?: number;
@@ -53,7 +53,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
     automaticArchiveIngestion = true,
     onlyShareWithHardcodedServerPeerId = false,
     periodicallyRequestSync = true,
-    cacheHashes = false,
+    cachingMode = "none" as "none" | "standard" | "periodic",
     syncRequestInterval = 2000,
     batchInterval,
     retryPendingFromStorage = true,
@@ -104,7 +104,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
       keyhiveStorage,
       keyhiveQueue,
       periodicallyRequestSync,
-      cacheHashes,
+      cachingMode,
       hardcodedServerPeerId,
       syncRequestInterval,
       batchIntervalOverride,
