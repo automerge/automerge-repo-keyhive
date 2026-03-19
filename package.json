@@ -21,20 +21,20 @@
   "dependencies": {
     "@automerge/automerge-repo": "2.5.3",
     "@automerge/automerge-repo-network-websocket": "2.5.3",
-    "@keyhive/keyhive": "0.0.0-alpha.54i",
-    "eventemitter3": "^5.0.1",
-    "cbor-x": "^1.6.0"
+    "@keyhive/keyhive": "0.0.0-alpha.54zb",
+    "cbor-x": "^1.6.0",
+    "eventemitter3": "^5.0.1"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.1.0",
     "@noble/ed25519": "^3.0.0",
     "@types/debug": "^4.1.12",
     "@types/uuid": "^10.0.0",
-    "eslint": "^9.5.0",
-    "typescript": "^5.2",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
-    "@eslint/eslintrc": "^3.1.0",
+    "eslint": "^9.5.0",
     "globals": "^15.0.0",
+    "typescript": "^5.2",
     "vitest": "^1.6.0"
   }
 }
