@@ -6,7 +6,7 @@ import {
 } from "@automerge/automerge-repo/slim";
 import { ContactCard, Identifier, Keyhive } from "@keyhive/keyhive/slim";
 import { encode, decode } from "cbor-x";
-import { cborByteString } from "./cbor-builder.js";
+import { cborByteString, buildSyncResponseCbor, buildSyncOpsCbor, buildCborByteStringArray } from "./cbor-builder.js";
 
 interface EventBytesResult {
   events: Uint8Array[];
@@ -60,6 +60,12 @@ class Metrics {
   private storageRetries = 0;
   private opsSent = 0;
   private opsRequested = 0;
+  private syncChecksSent = 0;
+  private syncChecksReceived = 0;
+  private syncChecksShortCircuited = 0;
+  private syncChecksFallback = 0;
+  private syncConfirmationsSent = 0;
+  private syncConfirmationsReceived = 0;
 
   recordMessage(msgType: string | undefined, senderId: string | undefined, payloadBytes: number) {
     const type = msgType ?? "unknown";
@@ -132,6 +138,13 @@ class Metrics {
     this.opsRequested += count;
   }
 
+  recordSyncCheckSent() { this.syncChecksSent++; }
+  recordSyncCheckReceived() { this.syncChecksReceived++; }
+  recordSyncCheckShortCircuited() { this.syncChecksShortCircuited++; }
+  recordSyncCheckFallback() { this.syncChecksFallback++; }
+  recordSyncConfirmationSent() { this.syncConfirmationsSent++; }
+  recordSyncConfirmationReceived() { this.syncConfirmationsReceived++; }
+
   hasActivity(): boolean {
     return this.messageCount > 0 || this.nonKeyhiveCount > 0;
   }
@@ -159,6 +172,8 @@ class Metrics {
       `Queue wait: ${this.totalQueueWaitMs}ms. ` +
       `Ingestion: ${this.ingestCount}x, ${this.eventsIngested} events, ${this.pendingAfterIngest} pending, ${this.storageRetries} retries. ` +
       `Ops: ${this.opsSent} sent, ${this.opsRequested} requested. ` +
+      `Sync checks: ${this.syncChecksSent} sent, ${this.syncChecksReceived} rcvd, ${this.syncChecksShortCircuited} short-circuited, ${this.syncChecksFallback} fallback. ` +
+      `Confirmations: ${this.syncConfirmationsSent} sent, ${this.syncConfirmationsReceived} rcvd. ` +
       `Total ops: ${this.totalOps}`
     );
   }
@@ -186,6 +201,12 @@ class Metrics {
     this.storageRetries = 0;
     this.opsSent = 0;
     this.opsRequested = 0;
+    this.syncChecksSent = 0;
+    this.syncChecksReceived = 0;
+    this.syncChecksShortCircuited = 0;
+    this.syncChecksFallback = 0;
+    this.syncConfirmationsSent = 0;
+    this.syncConfirmationsReceived = 0;
   }
 }
 
@@ -269,12 +290,14 @@ class BatchProcessor {
 class Peer {
   lastKeyhiveRequestRcvd: Date = new Date();
   lastKeyhiveRequestSent: Date = new Date();
+  // The remote peer's hash count (for our shared peer pair) at the last sync.
+  // null before first full sync is completed
+  syncpoint: number | null = null;
   constructor() {}
 };
 
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
-  // Connected peers and metadata
   private peers: Map<PeerId, Peer> = new Map();
   private syncIntervalId?: ReturnType<typeof setInterval> | undefined;
   private compactionIntervalId?: ReturnType<typeof setInterval>;
@@ -548,6 +571,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       await this.syncKeyhive(message.senderId, true);
     } else if (message.type === "keyhive-sync-ops") {
       await this.receiveKeyhiveSyncOps(message, metrics);
+    } else if (message.type === "keyhive-sync-check") {
+      await this.handleKeyhiveSyncCheck(message, metrics);
+    } else if (message.type === "keyhive-sync-confirmation") {
+      await this.handleKeyhiveSyncConfirmation(message, metrics);
     } else {
       this.emit("message", message);
     }
@@ -636,23 +663,47 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           };
           this.send(message, maybeContactCard);
         } else {
-          const hashes = await this.getHashesForPeerPair(senderId, targetId);
-          const opHashes = Array.from(hashes.values());
-          const pendingOpHashes = await this.getCachedPendingOpHashes();
-          const data = encode({
-            found: opHashes,
-            pending: pendingOpHashes,
-          });
-          const message = {
-            type: "keyhive-sync-request",
-            senderId: senderId,
-            targetId: targetId,
-            data: data,
-          };
-          console.debug(
-            `[AMRepoKeyhive] Sending keyhive sync request to ${targetId} from ${senderId} with ${opHashes.length} local operations and ${pendingOpHashes.length} pending operations.`
-          );
-          this.send(message, maybeContactCard);
+          const peer = this.peers.get(targetId);
+          if (peer !== undefined && peer.syncpoint !== null) {
+            // Send lightweight sync check instead of full request
+            const pendingOpHashes = await this.getCachedPendingOpHashes();
+            const hashes = await this.getHashesForPeerPair(senderId, targetId);
+            const senderTotal = hashes.size + pendingOpHashes.length;
+            const data = encode({
+              senderTotal,
+              senderSyncpoint: peer.syncpoint,
+            });
+            const message = {
+              type: "keyhive-sync-check",
+              senderId: senderId,
+              targetId: targetId,
+              data: data,
+            };
+            console.debug(
+              `[AMRepoKeyhive] Sending keyhive sync check to ${targetId} from ${senderId}: senderTotal=${senderTotal}, senderSyncpoint=${peer.syncpoint}`
+            );
+            this.streamingMetrics.recordSyncCheckSent();
+            this.send(message, maybeContactCard);
+          } else {
+            // No syncpoint yet. Send full sync request
+            const hashes = await this.getHashesForPeerPair(senderId, targetId);
+            const opHashes = Array.from(hashes.values());
+            const pendingOpHashes = await this.getCachedPendingOpHashes();
+            const data = encode({
+              found: opHashes,
+              pending: pendingOpHashes,
+            });
+            const message = {
+              type: "keyhive-sync-request",
+              senderId: senderId,
+              targetId: targetId,
+              data: data,
+            };
+            console.debug(
+              `[AMRepoKeyhive] Sending keyhive sync request to ${targetId} from ${senderId} with ${opHashes.length} local operations and ${pendingOpHashes.length} pending operations.`
+            );
+            this.send(message, maybeContactCard);
+          }
         }
         const peer = this.peers.get(targetId);
         if (peer) {
@@ -760,10 +811,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           `[AMRepoKeyhive] Found ${foundResult.events.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`
         );
 
-        const data = encode({
-          requested,
-          found: foundResult.events,
-        });
+        // Metadata for sync shortcut protocol
+        const syncResponderTotal = localHashes.size + pendingOpHashes.length;
+        const syncRequesterTotal = peerFoundHashes.length + peerPendingHashes.length;
+        const data = buildSyncResponseCbor(requested, foundResult.cborEvents, syncResponderTotal, syncRequesterTotal);
         const response = {
           type: "keyhive-sync-response",
           senderId: peerId,
@@ -804,6 +855,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     const responseData = decode(message.data as Uint8Array);
     const requestedHashes: Uint8Array[] = responseData.requested || [];
     const foundEvents: Uint8Array[] = responseData.found || [];
+    const syncResponderTotal: number | undefined = responseData.syncResponderTotal;
+    const syncRequesterTotal: number | undefined = responseData.syncRequesterTotal;
 
     console.debug(
       `[AMRepoKeyhive] Received keyhive sync response from ${message.senderId}: ${foundEvents.length} ops found, ${requestedHashes.length} ops requested`
@@ -886,6 +939,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           const statsAfterIngest = await this.keyhive.stats();
           if (statsAfterIngest.totalOps !== this.lastKnownTotalOps) {
             this.lastKnownTotalOps = statsAfterIngest.totalOps;
+            // Only clear syncpoints when state actually changed
+            this.invalidateSyncpoints();
             (this.emit as any)("ingest-remote");
           }
         } catch (error) {
@@ -903,29 +958,61 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           console.debug(
             `[AMRepoKeyhive] 0 ops requested by ${message.senderId}`
           );
+          // Fall through to confirmation below
+        } else {
+          if (requestedResult.events.length < requestedHashes.length) {
+            console.warn(
+              `[AMRepoKeyhive] ${requestedHashes.length} keyhive events requested, ${requestedResult.events.length} found.`
+            );
+          }
+
+          metrics.recordOpsSent(requestedResult.events.length);
+
+          console.debug(
+            `[AMRepoKeyhive] Sending ${requestedResult.events.length} requested ops to ${message.senderId}`
+          );
+
+          if (syncResponderTotal !== undefined && syncRequesterTotal !== undefined) {
+            const data = buildSyncOpsCbor(requestedResult.cborEvents, syncResponderTotal, syncRequesterTotal);
+            const response = {
+              type: "keyhive-sync-ops",
+              senderId: peerId,
+              targetId: message.senderId,
+              data,
+            };
+            this.send(response);
+          } else {
+            const data = buildCborByteStringArray(requestedResult.cborEvents);
+            const response = {
+              type: "keyhive-sync-ops",
+              senderId: peerId,
+              targetId: message.senderId,
+              data,
+            };
+            this.send(response);
+          }
           return;
         }
+      }
 
-        if (requestedResult.events.length < requestedHashes.length) {
-          console.warn(
-            `[AMRepoKeyhive] ${requestedHashes.length} keyhive events requested, ${requestedResult.events.length} found.`
-          );
+      // No ops exchanged (or 0 found for requested). Send confirmation and establish syncpoint
+      if (syncResponderTotal !== undefined && syncRequesterTotal !== undefined) {
+        const peer = this.peers.get(message.senderId);
+        if (peer) {
+          peer.syncpoint = syncResponderTotal;
         }
 
-        metrics.recordOpsSent(requestedResult.events.length);
-
-        console.debug(
-          `[AMRepoKeyhive] Sending ${requestedResult.events.length} requested ops to ${message.senderId}`
-        );
-
-        const data = encode(requestedResult.events);
-        const response = {
-          type: "keyhive-sync-ops",
+        const confirmData = encode({
+          confirmerTotal: syncRequesterTotal,
+        });
+        const confirmMsg = {
+          type: "keyhive-sync-confirmation",
           senderId: peerId,
           targetId: message.senderId,
-          data,
+          data: confirmData,
         };
-        this.send(response);
+        metrics.recordSyncConfirmationSent();
+        this.send(confirmMsg);
       }
     });
   }
@@ -974,7 +1061,19 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       throw new Error("peerId must be defined!");
     }
 
-    const receivedEvents = decode(message.data as Uint8Array);
+    const decoded = decode(message.data as Uint8Array);
+
+    // Handle both old array format and new map format with metadata
+    let receivedEvents: Uint8Array[];
+    let syncResponderTotal: number | undefined;
+    let syncRequesterTotal: number | undefined;
+    if (Array.isArray(decoded)) {
+      receivedEvents = decoded;
+    } else {
+      receivedEvents = decoded.ops || [];
+      syncResponderTotal = decoded.syncResponderTotal;
+      syncRequesterTotal = decoded.syncRequesterTotal;
+    }
 
     console.debug(
       `[AMRepoKeyhive] Received ${receivedEvents.length} keyhive events`
@@ -1044,13 +1143,135 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           const statsAfterIngest = await this.keyhive.stats();
           if (statsAfterIngest.totalOps !== this.lastKnownTotalOps) {
             this.lastKnownTotalOps = statsAfterIngest.totalOps;
+            // Only clear syncpoints when state actually changed
+            this.invalidateSyncpoints();
             (this.emit as any)("ingest-remote");
+          }
+
+          // After successful ingestion, send confirmation and establish syncpoint
+          if (syncResponderTotal !== undefined && syncRequesterTotal !== undefined) {
+            const peer = this.peers.get(message.senderId);
+            if (peer) {
+              // syncRequesterTotal is the remote peer's total
+              peer.syncpoint = syncRequesterTotal;
+            }
+            const confirmData = encode({
+              confirmerTotal: syncResponderTotal,
+            });
+            const confirmMsg = {
+              type: "keyhive-sync-confirmation",
+              senderId: this.peerId!,
+              targetId: message.senderId,
+              data: confirmData,
+            };
+            metrics.recordSyncConfirmationSent();
+            this.send(confirmMsg);
           }
         } catch (error) {
           await this.handleIngestError(error, receivedEvents, message.senderId);
         }
       }
     });
+  }
+
+  // Handle a lightweight sync check message. If counts match our syncpoints,
+  // no sync is needed. Otherwise, fall back to a full sync request.
+  private async handleKeyhiveSyncCheck(
+    message: Message,
+    metrics: Metrics,
+  ): Promise<void> {
+    if (!("data" in message) || !message.data) {
+      console.error("[AMRepoKeyhive] Expected data in keyhive-sync-check");
+      return;
+    }
+    if (this.peerId === undefined) {
+      throw new Error("peerId must be defined!");
+    }
+    const peerId = this.peerId;
+
+    const checkData = decode(message.data as Uint8Array);
+    const theirTotalForUs: number = checkData.senderTotal;
+    const theirSyncpoint: number = checkData.senderSyncpoint;
+
+    metrics.recordSyncCheckReceived();
+
+    const queueEnterTime = Date.now();
+    await this.keyhiveQueue.run(async () => {
+      metrics.recordQueueWait(Date.now() - queueEnterTime);
+
+      let peer = this.peers.get(message.senderId);
+      if (!peer) {
+        // Auto-register the peer if we receive a sync check from an unknown
+        // sender.
+        console.debug(
+          `[AMRepoKeyhive] Auto-registering peer from sync-check: ${message.senderId}`
+        );
+        peer = new Peer();
+        this.peers.set(message.senderId, peer);
+      }
+
+      // Compute our actual total for the sender
+      const pendingOpHashes = await this.getCachedPendingOpHashes();
+      const hashes = await this.getHashesForPeerPair(peerId, message.senderId);
+      const ourTotalForThem = hashes.size + pendingOpHashes.length;
+
+      // Check both conditions
+      const ourSyncpointMatchesTheirTotal = peer.syncpoint !== null &&
+        peer.syncpoint === theirTotalForUs;
+      const theirSyncpointMatchesOurTotal = theirSyncpoint === ourTotalForThem;
+
+      if (ourSyncpointMatchesTheirTotal && theirSyncpointMatchesOurTotal) {
+        console.debug(
+          `[AMRepoKeyhive] Sync check passed for ${message.senderId}: both totals match (ours=${ourTotalForThem}, theirs=${theirTotalForUs})`
+        );
+        metrics.recordSyncCheckShortCircuited();
+        return;
+      }
+
+      // Totals mismatch. Fall back to full sync request
+      console.debug(
+        `[AMRepoKeyhive] Sync check failed for ${message.senderId}: mismatch (ourActual=${ourTotalForThem}, theirSyncpoint=${theirSyncpoint}, theirTotalForUs=${theirTotalForUs}, ourSyncpoint=${peer.syncpoint ?? "null"}). Falling back to full sync.`
+      );
+      metrics.recordSyncCheckFallback();
+
+      const opHashes = Array.from(hashes.values());
+      const data = encode({
+        found: opHashes,
+        pending: pendingOpHashes,
+      });
+      const request = {
+        type: "keyhive-sync-request",
+        senderId: peerId,
+        targetId: message.senderId,
+        data: data,
+      };
+      this.send(request);
+      peer.lastKeyhiveRequestRcvd = new Date();
+    });
+  }
+
+  // Handle a sync confirmation message. Update our syncpoint for the sender.
+  private async handleKeyhiveSyncConfirmation(
+    message: Message,
+    metrics: Metrics,
+  ): Promise<void> {
+    if (!("data" in message) || !message.data) {
+      console.error("[AMRepoKeyhive] Expected data in keyhive-sync-confirmation");
+      return;
+    }
+
+    const confirmData = decode(message.data as Uint8Array);
+    const confirmerTotal: number = confirmData.confirmerTotal;
+
+    metrics.recordSyncConfirmationReceived();
+
+    const peer = this.peers.get(message.senderId);
+    if (peer) {
+      peer.syncpoint = confirmerTotal;
+      console.debug(
+        `[AMRepoKeyhive] Updated syncpoint for ${message.senderId}: ${confirmerTotal}`
+      );
+    }
   }
 
   private async saveReceivedEvents(events: Uint8Array[]): Promise<void> {
@@ -1128,6 +1349,12 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     this.publicHashesCache = null;
     this.publicEventsCache = null;
     this.pendingOpHashesCache = null;
+  }
+
+  private invalidateSyncpoints(): void {
+    for (const peer of this.peers.values()) {
+      peer.syncpoint = null;
+    }
   }
 
   // Check if keyhive state changed and invalidate/refresh cache if needed
