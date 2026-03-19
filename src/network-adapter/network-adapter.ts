@@ -498,10 +498,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     metrics: Metrics,
   ) {
     if (keyhiveMessageData.contactCard) {
-      await receiveContactCard(
-        this.keyhive,
-        keyhiveMessageData.contactCard,
-        this.keyhiveStorage
+      const contactCard = keyhiveMessageData.contactCard;
+      await this.keyhiveQueue.run(() =>
+        receiveContactCard(this.keyhive, contactCard, this.keyhiveStorage)
       );
     }
     message.data = keyhiveMessageData.signed.payload;
