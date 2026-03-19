@@ -46,53 +46,50 @@ export async function getEventsForPeer(
   if (!agent) {
     return null;
   }
-  return await keyhive.eventsForAgent(agent);
+  const eventsForPeer = await keyhive.eventsForAgent(agent);
+  const publicAgent = await keyhive.getAgent(Identifier.publicId());
+  if (publicAgent) {
+    const eventsForPublic = await keyhive.eventsForAgent(publicAgent);
+    for (const [hash, event] of eventsForPublic.entries()) {
+      eventsForPeer.set(hash, event);
+    }
+  }
+  return eventsForPeer;
 }
 
-// Get the intersection of events that both peers can access, and union
-// with their prekeys
-export async function getEventsForPeerPair(
+// Returns event hashes for a peer as Map<hashString, hashBytes>
+export async function getEventHashesForPeer(
   keyhive: Keyhive,
-  peerA: PeerId,
-  peerB: PeerId
-): Promise<Map<Uint8Array, any> | null> {
-  const eventsForA = await getEventsForPeer(keyhive, peerA);
-  const eventsForB = await getEventsForPeer(keyhive, peerB);
-
-  if (!eventsForA || !eventsForB) {
+  peerId: PeerId
+): Promise<Map<string, Uint8Array> | null> {
+  const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
+  const agent = await keyhive.getAgent(keyhiveId);
+  if (!agent) {
     return null;
   }
 
-  const peerBHashStrings = new Set<string>();
-  for (const hash of eventsForB.keys()) {
-    peerBHashStrings.add(hash.toString());
+  const hashMap = new Map<string, Uint8Array>();
+
+  // Get membership + prekey hashes for the peer's agent
+  const eventHashes: Uint8Array[] = await keyhive.eventHashesForAgent(agent);
+  for (const hash of eventHashes) {
+    hashMap.set(hash.toString(), hash);
   }
 
-  const result = new Map<Uint8Array, any>();
-  const resultStrings = new Set<string>();
+  // Get the agent's own prekey hashes
+  const keyOpHashes: Uint8Array[] = await agent.keyOpHashes();
+  for (const hash of keyOpHashes) {
+    hashMap.set(hash.toString(), hash);
+  }
 
-  // Add the intersection of hashes to results
-  for (const [hash, event] of eventsForA.entries()) {
-    const hashString = hash.toString();
-    if (peerBHashStrings.has(hashString)) {
-      resultStrings.add(hashString);
-      result.set(hash, event);
+  // Get public agent hashes
+  const publicAgent = await keyhive.getAgent(Identifier.publicId());
+  if (publicAgent) {
+    const publicHashes: Uint8Array[] = await keyhive.eventHashesForAgent(publicAgent);
+    for (const hash of publicHashes) {
+      hashMap.set(hash.toString(), hash);
     }
   }
 
-  // Add prekeys for both peers
-  for (const peerId of [peerA, peerB]) {
-    const agent = await keyhive.getAgent(keyhiveIdentifierFromPeerId(peerId));
-    if (agent) {
-      for (const [hash, event] of (await agent.keyOps()).entries()) {
-        const hashString = hash.toString();
-        if (!resultStrings.has(hashString)) {
-          resultStrings.add(hashString);
-          result.set(hash, event);
-        }
-      }
-    }
-  }
-
-  return result;
+  return hashMap;
 }
