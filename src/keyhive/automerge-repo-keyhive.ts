@@ -50,7 +50,7 @@ export class AutomergeRepoKeyhive {
     public networkAdapter: KeyhiveNetworkAdapter,
     public emitter: KeyhiveEventEmitter,
     public idFactory: (heads: Heads) => Promise<Uint8Array>,
-    public createKeyhiveNetworkAdapter: (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean, periodicallyRequestSync: boolean, syncRequestInterval: number, batchInterval?: number) => KeyhiveNetworkAdapter,
+    public createKeyhiveNetworkAdapter: (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean, periodicallyRequestSync: boolean, syncRequestInterval: number, batchInterval?: number, archiveThreshold?: number) => KeyhiveNetworkAdapter,
   ) {}
 
   // Configure `AutomergeRepoKeyhive` to notify the provided `Repo` about
