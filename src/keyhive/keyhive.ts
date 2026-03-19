@@ -46,6 +46,8 @@ export async function initializeAutomergeRepoKeyhive(options: {
   syncRequestInterval?: number;
   batchInterval?: number;
   retryPendingFromStorage?: boolean;
+  enableCompaction?: boolean;
+  archiveThreshold?: number;
 }): Promise<AutomergeRepoKeyhive> {
   const {
     automaticArchiveIngestion = true,
@@ -55,6 +57,8 @@ export async function initializeAutomergeRepoKeyhive(options: {
     syncRequestInterval = 2000,
     batchInterval,
     retryPendingFromStorage = true,
+    enableCompaction = true,
+    archiveThreshold = 200,
   } = options;
   const { keyPair, signer } = await loadOrCreateKeyPairAndSigner(options.storage, options.keyPair)
   const emitter = new KeyhiveEventEmitter();
@@ -87,7 +91,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
 
   const keyhiveQueue = new PromiseQueue();
 
-  const createKeyhiveNetworkAdapter = (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean, periodicallyRequestSync: boolean, syncRequestInterval: number, batchIntervalOverride?: number) => {
+  const createKeyhiveNetworkAdapter = (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean, periodicallyRequestSync: boolean, syncRequestInterval: number, batchIntervalOverride?: number, archiveThresholdOverride?: number) => {
     let hardcodedServerPeerId = null;
     if (onlyShareWithHardcodedServerPeerId) {
       hardcodedServerPeerId = serverPeerId
@@ -105,10 +109,12 @@ export async function initializeAutomergeRepoKeyhive(options: {
       syncRequestInterval,
       batchIntervalOverride,
       retryPendingFromStorage,
+      enableCompaction,
+      archiveThresholdOverride ?? archiveThreshold,
     )
   };
 
-  const keyhiveNetworkAdapter = createKeyhiveNetworkAdapter(options.networkAdapter, onlyShareWithHardcodedServerPeerId, periodicallyRequestSync, syncRequestInterval, batchInterval);
+  const keyhiveNetworkAdapter = createKeyhiveNetworkAdapter(options.networkAdapter, onlyShareWithHardcodedServerPeerId, periodicallyRequestSync, syncRequestInterval, batchInterval, archiveThreshold);
 
   let syncTimeout: ReturnType<typeof setTimeout> | undefined;
   let pendingEventBytes: Uint8Array[] = [];

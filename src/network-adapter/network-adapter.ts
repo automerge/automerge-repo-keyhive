@@ -300,6 +300,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     private syncRequestInterval: number,
     batchInterval?: number,
     private retryPendingFromStorage: boolean = true,
+    enableCompaction: boolean = true,
+    private archiveThreshold: number = 200,
   ) {
     super();
     this.cacheHashes = cacheHashes;
@@ -308,10 +310,12 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         this.syncIntervalId = setInterval(this.requestKeyhiveSync.bind(this), syncRequestInterval);
     }
 
-    this.compactionIntervalId = setInterval(
-      this.runCompaction.bind(this),
-      60000
-    );
+    if (enableCompaction) {
+      this.compactionIntervalId = setInterval(
+        this.runCompaction.bind(this),
+        60000
+      );
+    }
 
     networkAdapter.on("message", (msg) => {
       this.receiveMessage(msg);
@@ -837,7 +841,15 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             }
           }
 
-          void this.saveReceivedEvents(foundEvents);
+          // For large batches, write the full archive instead of individual events.
+          if (foundEvents.length > this.archiveThreshold) {
+            console.log(
+              `[AMRepoKeyhive] Large batch (${foundEvents.length} > ${this.archiveThreshold}): saving full archive instead of individual events`
+            );
+            void this.keyhiveStorage.saveKeyhiveWithHash(this.keyhive);
+          } else {
+            void this.saveReceivedEvents(foundEvents);
+          }
           // Invalidate cache since we ingested events from a peer
           this.invalidateCaches();
           (this.emit as any)("ingest-remote");
@@ -981,7 +993,15 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             }
           }
 
-          void this.saveReceivedEvents(receivedEvents);
+          // For large batches, write the full archive instead of individual events.
+          if (receivedEvents.length > this.archiveThreshold) {
+            console.log(
+              `[AMRepoKeyhive] Large batch (${receivedEvents.length} > ${this.archiveThreshold}): saving full archive instead of individual events`
+            );
+            void this.keyhiveStorage.saveKeyhiveWithHash(this.keyhive);
+          } else {
+            void this.saveReceivedEvents(receivedEvents);
+          }
           // Invalidate cache since we ingested events from a peer
           this.invalidateCaches();
           (this.emit as any)("ingest-remote");
