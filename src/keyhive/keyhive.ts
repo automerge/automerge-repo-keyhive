@@ -43,6 +43,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
   cacheHashes?: boolean;
   keyPair?: CryptoKeyPair;
   syncRequestInterval?: number;
+  retryPendingFromStorage?: boolean;
 }): Promise<AutomergeRepoKeyhive> {
   const {
     automaticArchiveIngestion = true,
@@ -50,6 +51,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
     periodicallyRequestSync = true,
     cacheHashes = false,
     syncRequestInterval = 2000,
+    retryPendingFromStorage = true,
   } = options;
   const { keyPair, signer } = await loadOrCreateKeyPairAndSigner(options.storage, options.keyPair)
   const emitter = new KeyhiveEventEmitter();
@@ -98,6 +100,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
       cacheHashes,
       hardcodedServerPeerId,
       syncRequestInterval,
+      retryPendingFromStorage,
     )
   };
 

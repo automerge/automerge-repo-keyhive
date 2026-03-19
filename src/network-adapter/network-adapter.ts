@@ -56,6 +56,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     // TODO: Replace with dynamic configuration
     private hardcodedRemoteId: PeerId | null = null,
     private syncRequestInterval: number,
+    private retryPendingFromStorage: boolean = true,
   ) {
     super();
     this.cacheHashes = cacheHashes;
@@ -497,27 +498,29 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           if (!pendingEvents || pendingEvents.length > 0) {
             if (pendingEvents) {
               console.warn(
-                `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending. Reading from storage`
+                `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending${this.retryPendingFromStorage ? ". Reading from storage" : ""}`
               );
             }
-            try {
-              await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
-              const retryPending =
-                await this.keyhive.ingestEventsBytes(foundEvents);
-              if (retryPending.length === 0) {
-                console.log(
-                  `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
-                );
-              } else {
-                console.warn(
-                  `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
+            if (this.retryPendingFromStorage) {
+              try {
+                await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
+                const retryPending =
+                  await this.keyhive.ingestEventsBytes(foundEvents);
+                if (retryPending.length === 0) {
+                  console.log(
+                    `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
+                  );
+                } else {
+                  console.warn(
+                    `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
+                  );
+                }
+              } catch (storageError) {
+                console.error(
+                  `[AMRepoKeyhive] Failed while reading from storage:`,
+                  storageError
                 );
               }
-            } catch (storageError) {
-              console.error(
-                `[AMRepoKeyhive] Failed while reading from storage:`,
-                storageError
-              );
             }
           }
 
@@ -632,26 +635,28 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           // they have already been processed by a separate tab in a browser).
           if (pendingEvents.length > 0) {
             console.warn(
-              `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending. Reading from storage`
+              `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending${this.retryPendingFromStorage ? ". Reading from storage" : ""}`
             );
-            try {
-              await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
-              const retryPending =
-                await this.keyhive.ingestEventsBytes(receivedEvents);
-              if (retryPending.length === 0) {
-                console.log(
-                  `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
-                );
-              } else {
-                console.warn(
-                  `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
+            if (this.retryPendingFromStorage) {
+              try {
+                await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
+                const retryPending =
+                  await this.keyhive.ingestEventsBytes(receivedEvents);
+                if (retryPending.length === 0) {
+                  console.log(
+                    `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
+                  );
+                } else {
+                  console.warn(
+                    `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
+                  );
+                }
+              } catch (storageError) {
+                console.error(
+                  `[AMRepoKeyhive] Failed while reading from storage:`,
+                  storageError
                 );
               }
-            } catch (storageError) {
-              console.error(
-                `[AMRepoKeyhive] Failed while reading from storage:`,
-                storageError
-              );
             }
           }
 
