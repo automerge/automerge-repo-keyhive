@@ -789,7 +789,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         try {
           let pendingEvents: any[] | null = null;
           try {
-            pendingEvents = await this.keyhive.ingestEventsBytes(foundEvents);
+            pendingEvents = await this.keyhiveStorage.withSuppressedEventWrites(() =>
+              this.keyhive.ingestEventsBytes(foundEvents)
+            );
           } catch (error) {
             console.error(`[AMRepoKeyhive] Error ingesting events: ${error}`);
           }
@@ -814,8 +816,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
               metrics.recordStorageRetry();
               try {
                 await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
-                const retryPending =
-                  await this.keyhive.ingestEventsBytes(foundEvents);
+                const retryPending = await this.keyhiveStorage.withSuppressedEventWrites(() =>
+                  this.keyhive.ingestEventsBytes(foundEvents)
+                );
                 if (retryPending.length === 0) {
                   console.log(
                     `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
@@ -939,8 +942,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         );
 
         try {
-          const pendingEvents =
-            await this.keyhive.ingestEventsBytes(receivedEvents);
+          const pendingEvents = await this.keyhiveStorage.withSuppressedEventWrites(() =>
+            this.keyhive.ingestEventsBytes(receivedEvents)
+          );
           metrics.recordIngestion(receivedEvents.length, pendingEvents.length);
           console.debug(
             `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
@@ -956,8 +960,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
               metrics.recordStorageRetry();
               try {
                 await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
-                const retryPending =
-                  await this.keyhive.ingestEventsBytes(receivedEvents);
+                const retryPending = await this.keyhiveStorage.withSuppressedEventWrites(() =>
+                  this.keyhive.ingestEventsBytes(receivedEvents)
+                );
                 if (retryPending.length === 0) {
                   console.log(
                     `[AMRepoKeyhive] Successfully ingested all events after reading from storage`

@@ -110,35 +110,67 @@ export async function initializeAutomergeRepoKeyhive(options: {
 
   const keyhiveNetworkAdapter = createKeyhiveNetworkAdapter(options.networkAdapter, onlyShareWithHardcodedServerPeerId, periodicallyRequestSync, syncRequestInterval, batchInterval);
 
-  if (automaticArchiveIngestion) {
-    let syncTimeout: ReturnType<typeof setTimeout> | undefined;
+  let syncTimeout: ReturnType<typeof setTimeout> | undefined;
+  let pendingEventBytes: Uint8Array[] = [];
+  let pendingPrekeySecrets = false;
+  let pendingSync = false;
+  let flushQueued = false;
 
-    emitter.on("update", (event: KeyhiveEvent) => {
+  emitter.on("update", (event: KeyhiveEvent) => {
+    // When event writes are suppressed (during bulk ingestion in the network
+    // adapter), skip capturing bytes to avoid duplicate writes.
+    if (!keyhiveStorage.isEventWriteSuppressed()) {
+      pendingEventBytes.push(event.toBytes());
+    }
+
+    if (automaticArchiveIngestion) {
+      if (
+        event.variant === "PREKEY_ROTATED" ||
+        event.variant === "PREKEYS_EXPANDED"
+      ) {
+        pendingPrekeySecrets = true;
+      }
+      // TODO: We are currently filtering out CGKA ops in the sync protocol but
+      // will need to restore them once we add encryption.
+      if (event.variant !== "CGKA_OPERATION") {
+        pendingSync = true;
+      }
+    }
+
+    // Queue a single flush for all events that accumulate before the queue runs.
+    if (!flushQueued) {
+      flushQueued = true;
       void keyhiveQueue.run(async () => {
-        console.debug(
-          "[AMRepoKeyhive] Keyhive updated. Saving event."
-        );
-        if (
-          event.variant === "PREKEY_ROTATED" ||
-          event.variant === "PREKEYS_EXPANDED"
-        ) {
-          await keyhiveStorage.savePrekeySecrets(keyhive);
-        }
-        await keyhiveStorage.saveEventWithHash(event);
-        // TODO: We are currently filtering out CGKA ops in the sync protocol but
-        // will need to restore them once we add encryption.
-        if (event.variant !== "CGKA_OPERATION") {
-          // If there is a pending sync timeout, we don't need to schedule another.
-          if (!syncTimeout) {
-            syncTimeout = setTimeout(() => {
-              syncTimeout = undefined;
-              keyhiveNetworkAdapter.syncKeyhive();
-            }, 1000);
+        flushQueued = false;
+        const eventsToSave = pendingEventBytes;
+        const needPrekeySecrets = pendingPrekeySecrets;
+        const needSync = pendingSync;
+        pendingEventBytes = [];
+        pendingPrekeySecrets = false;
+        pendingSync = false;
+
+        if (eventsToSave.length > 0) {
+          console.debug(
+            `[AMRepoKeyhive] Keyhive updated. Saving ${eventsToSave.length} events.`
+          );
+          for (const eventBytes of eventsToSave) {
+            await keyhiveStorage.saveEventBytesWithHash(eventBytes);
           }
         }
+
+        if (needPrekeySecrets) {
+          await keyhiveStorage.savePrekeySecrets(keyhive);
+        }
+
+        if (needSync && !syncTimeout) {
+          syncTimeout = setTimeout(() => {
+            syncTimeout = undefined;
+            keyhiveNetworkAdapter.syncKeyhive();
+          }, 1000);
+        }
       });
-    });
-  }
+    }
+  });
 
   return new AutomergeRepoKeyhive(
     active,
@@ -188,6 +220,21 @@ async function loadOrCreateKeyPairAndSigner(storage: StorageAdapterInterface, ke
   }
 }
 export class KeyhiveStorage {
+  private suppressEventWrites = false;
+
+  isEventWriteSuppressed(): boolean {
+    return this.suppressEventWrites;
+  }
+
+  async withSuppressedEventWrites<T>(fn: () => Promise<T>): Promise<T> {
+    this.suppressEventWrites = true;
+    try {
+      return await fn();
+    } finally {
+      this.suppressEventWrites = false;
+    }
+  }
+
   constructor(
     private keyhiveStorageId: Uint8Array,
     private storage: StorageAdapterInterface
