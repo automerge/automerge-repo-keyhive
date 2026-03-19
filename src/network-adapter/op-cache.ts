@@ -14,9 +14,9 @@ interface EventBytesResult {
 // Avoids re-fetching from WASM on every sync message. Pre-encodes event
 // bytes as CBOR byte strings for efficiently constructing responses.
 //
-// Prekey ops use two-tier indirection in the WASM API (agent -> source
-// identifiers -> hashes). Membership ops are flat per-agent. This cache
-// resolves both during refresh into flat per-agent PeerHashes maps.
+// Both prekey and membership ops use two-tier indirection in the WASM API
+// (agent -> source identifiers -> hashes). This cache resolves both during
+// refresh into flat per-agent PeerHashes maps.
 
 export class OpCache {
   // Pre-computed per-agent hash maps (rebuilt on refresh)
@@ -76,17 +76,11 @@ export class OpCache {
       return false;
     }
 
-    // allAgentEvents() returns:
-    //   events: Map<Uint8Array(hash), Uint8Array(eventBytes)>
-    //   prekeySources: Map<Uint8Array(identifierBytes), Uint8Array[](hashes)>
-    //   agentPrekeySources: Map<Uint8Array(agentId), Uint8Array[](identifierBytes)>
-    //   agentMembershipHashes: Map<Uint8Array(agentId), Uint8Array[](hashes)>
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await (keyhive as any).allAgentEvents();
+    const allAgentEvents = await keyhive.allAgentEvents();
 
     // Build hash lookup: hashStr -> hashBytes
     const allHashes = new Map<string, Uint8Array>();
-    result.events.forEach((eventBytesVal: Uint8Array, hash: Uint8Array) => {
+    allAgentEvents.events.forEach((eventBytesVal: Uint8Array, hash: Uint8Array) => {
       const hashStr = hash.toString();
       allHashes.set(hashStr, hash);
       if (!this.eventBytes.has(hashStr)) {
@@ -95,70 +89,25 @@ export class OpCache {
       }
     });
 
-    // Build prekey sources: sourceKey -> Set<hashStr>
-    const prekeySourceHashes = new Map<string, Set<string>>();
-    result.prekeySources.forEach((hashes: Uint8Array[], idBytes: Uint8Array) => {
-      const sourceKey = idBytes.toString();
-      const hashSet = new Set<string>();
-      for (const hash of hashes) {
-        hashSet.add(hash.toString());
-      }
-      prekeySourceHashes.set(sourceKey, hashSet);
-    });
+    // Build source -> hashes indexes
+    const prekeySourceHashes = buildSourceHashes(allAgentEvents.prekeySources);
+    const membershipSourceHashes = buildSourceHashes(allAgentEvents.membershipSources);
 
-    // Build agent prekey source index: agentIdStr -> sourceKey[]
-    const agentPrekeySources = new Map<string, string[]>();
-    result.agentPrekeySources.forEach((sourceIdBytes: Uint8Array[], agentIdBytes: Uint8Array) => {
-      const agentIdStr = agentIdBytes.toString();
-      const sourceKeys: string[] = [];
-      for (const idBytes of sourceIdBytes) {
-        sourceKeys.push(idBytes.toString());
-      }
-      agentPrekeySources.set(agentIdStr, sourceKeys);
-    });
-
-    // Build agent membership hash sets: agentIdStr -> Set<hashStr>
-    const agentMembershipHashSets = new Map<string, Set<string>>();
-    result.agentMembershipHashes.forEach((hashes: Uint8Array[], agentIdBytes: Uint8Array) => {
-      const agentIdStr = agentIdBytes.toString();
-      const hashSet = new Set<string>();
-      for (const hash of hashes) {
-        hashSet.add(hash.toString());
-      }
-      agentMembershipHashSets.set(agentIdStr, hashSet);
-    });
+    // Build agent -> sources indexes
+    const agentPrekeySources = buildAgentSources(allAgentEvents.agentPrekeySources);
+    const agentMembershipSources = buildAgentSources(allAgentEvents.agentMembershipSources);
 
     // Pre-compute per-agent PeerHashes maps
     const newAgentHashes = new Map<string, PeerHashes>();
     const allAgentIds = new Set([
       ...agentPrekeySources.keys(),
-      ...agentMembershipHashSets.keys(),
+      ...agentMembershipSources.keys(),
     ]);
     for (const agentIdStr of allAgentIds) {
       const peerHashes: PeerHashes = new Map();
 
-      // Add prekey hashes (agent -> source keys -> hash sets)
-      const sources = agentPrekeySources.get(agentIdStr);
-      if (sources) {
-        for (const sourceKey of sources) {
-          const sourceHashStrs = prekeySourceHashes.get(sourceKey);
-          if (sourceHashStrs) {
-            for (const hashStr of sourceHashStrs) {
-              const hashBytes = allHashes.get(hashStr);
-              if (hashBytes) peerHashes.set(hashStr, hashBytes);
-            }
-          }
-        }
-      }
-
-      // Add membership hashes (agent -> hash sets)
-      const membershipHashStrs = agentMembershipHashSets.get(agentIdStr);
-      if (membershipHashStrs) {
-        for (const hashStr of membershipHashStrs) {
-          const hashBytes = allHashes.get(hashStr);
-          if (hashBytes) peerHashes.set(hashStr, hashBytes);
-        }
-      }
+      collectSourceHashes(agentPrekeySources.get(agentIdStr), prekeySourceHashes, allHashes, peerHashes);
+      collectSourceHashes(agentMembershipSources.get(agentIdStr), membershipSourceHashes, allHashes, peerHashes);
 
       newAgentHashes.set(agentIdStr, peerHashes);
     }
@@ -172,5 +121,56 @@ export class OpCache {
     this.lastTotalOps = stats.totalOps;
 
     return true;
+  }
+}
+
+// Build source -> Set<hashStr> from a WASM sources map
+function buildSourceHashes(
+  sourcesMap: Map<Uint8Array, Uint8Array[]>,
+): Map<string, Set<string>> {
+  const result = new Map<string, Set<string>>();
+  sourcesMap.forEach((hashes: Uint8Array[], sourceIdBytes: Uint8Array) => {
+    const sourceKey = sourceIdBytes.toString();
+    const hashSet = new Set<string>();
+    for (const hash of hashes) {
+      hashSet.add(hash.toString());
+    }
+    result.set(sourceKey, hashSet);
+  });
+  return result;
+}
+
+// Build agent -> sourceKey[] from a WASM agent-sources map
+function buildAgentSources(
+  agentSourcesMap: Map<Uint8Array, Uint8Array[]>,
+): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+  agentSourcesMap.forEach((sourceIdBytes: Uint8Array[], agentIdBytes: Uint8Array) => {
+    const agentIdStr = agentIdBytes.toString();
+    const sourceKeys: string[] = [];
+    for (const idBytes of sourceIdBytes) {
+      sourceKeys.push(idBytes.toString());
+    }
+    result.set(agentIdStr, sourceKeys);
+  });
+  return result;
+}
+
+// Collect hashes from source keys into a PeerHashes map
+function collectSourceHashes(
+  sourceKeys: string[] | undefined,
+  sourceHashes: Map<string, Set<string>>,
+  allHashes: Map<string, Uint8Array>,
+  peerHashes: PeerHashes,
+): void {
+  if (!sourceKeys) return;
+  for (const sourceKey of sourceKeys) {
+    const hashStrs = sourceHashes.get(sourceKey);
+    if (hashStrs) {
+      for (const hashStr of hashStrs) {
+        const hashBytes = allHashes.get(hashStr);
+        if (hashBytes) peerHashes.set(hashStr, hashBytes);
+      }
+    }
   }
 }

@@ -277,8 +277,12 @@ export class KeyhiveStorage {
   }
 
   async savePrekeySecrets(kh: Keyhive): Promise<void> {
-    const bytes = await kh.exportPrekeySecrets();
-    await this.storage.save([KEYHIVE_DB_KEY, KEYHIVE_PREKEY_SECRETS_KEY], bytes);
+    try {
+      const bytes = await kh.exportPrekeySecrets();
+      await this.storage.save([KEYHIVE_DB_KEY, KEYHIVE_PREKEY_SECRETS_KEY], bytes);
+    } catch (error) {
+      console.error("[AMRepoKeyhive] Failed to export prekey secrets:", error);
+    }
   }
 
   async loadPrekeySecrets(kh: Keyhive): Promise<void> {
