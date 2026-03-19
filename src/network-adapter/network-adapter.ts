@@ -42,6 +42,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pendingOpHashesCache: Uint8Array[] | null = null;
   private lastKnownTotalOps: bigint = 0n;
 
+  private syncRequestQueued: boolean = false;
   private minSyncRequestInterval: number = 1000;
   private minSyncResponseInterval: number = 1000;
 
@@ -708,9 +709,13 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.peerId === undefined) {
       return;
     }
-    let includeContactCard = false;
-    let attemptRecovery = true;
-    this.syncKeyhive(this.peerId, includeContactCard, attemptRecovery);
+    if (this.syncRequestQueued) {
+      return;
+    }
+    this.syncRequestQueued = true;
+    void this.asyncSyncKeyhive(this.peerId, false, false).finally(() => {
+      this.syncRequestQueued = false;
+    });
   }
 
   private readyToSendKeyhiveRequest(targetId: PeerId): boolean {
