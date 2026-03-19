@@ -82,7 +82,14 @@ export async function getEventHashesForPeer(
     hashMap.set(hash.toString(), hash);
   }
 
-  // Get public agent hashes
+  return hashMap;
+}
+
+// Returns public event hashes as Map<hashString, hashBytes>
+export async function getPublicEventHashes(
+  keyhive: Keyhive,
+): Promise<Map<string, Uint8Array>> {
+  const hashMap = new Map<string, Uint8Array>();
   const publicAgent = await keyhive.getAgent(Identifier.publicId());
   if (publicAgent) {
     const publicHashes: Uint8Array[] = await keyhive.eventHashesForAgent(publicAgent);
@@ -90,6 +97,5 @@ export async function getEventHashesForPeer(
       hashMap.set(hash.toString(), hash);
     }
   }
-
   return hashMap;
 }
