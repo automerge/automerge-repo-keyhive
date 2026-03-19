@@ -279,6 +279,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private publicEventsCache: Map<Uint8Array, any> | null = null;
   private pendingOpHashesCache: Uint8Array[] | null = null;
   private lastKnownTotalOps: bigint = 0n;
+  // Persistent cache for immutable event data (events never change once created)
+  private eventBytesCache: Map<string, Uint8Array> = new Map();
+  private static readonly MAX_CACHED_EVENTS = 10000;
 
   private syncRequestQueued: boolean = false;
   private minSyncRequestInterval: number = 1000;
@@ -1204,7 +1207,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     return result;
   }
 
-  // Fetch full event bytes for a set of hashes
+  // Fetch full event bytes for a set of hashes, using a persistent FIFO cache
+  // for immutable event data to avoid redundant WASM lookups.
   private async getEventBytesForHashes(
     peerId: PeerId,
     hashStrings: Set<string>,
@@ -1212,6 +1216,25 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   ): Promise<Uint8Array[]> {
     const eventLookupStart = Date.now();
 
+    // Check which hashes are already cached
+    const result: Uint8Array[] = [];
+    const missingHashes = new Set<string>();
+    for (const hashStr of hashStrings) {
+      const cached = this.eventBytesCache.get(hashStr);
+      if (cached) {
+        result.push(cached);
+      } else {
+        missingHashes.add(hashStr);
+      }
+    }
+
+    // If all requested hashes were cached, skip WASM entirely
+    if (missingHashes.size === 0) {
+      metrics?.recordEventLookupTime(Date.now() - eventLookupStart);
+      return result;
+    }
+
+    // Fetch from WASM for cache misses
     const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
     const agent = await this.keyhive.getAgent(keyhiveId);
 
@@ -1229,12 +1252,22 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       wasmEvents.set(hash, event);
     }
 
-    const result: Uint8Array[] = [];
+    // Store fetched events in cache and collect the ones we need
     for (const [hash, eventBytes] of wasmEvents.entries()) {
-      if (hashStrings.has(hash.toString())) {
+      const hashStr = hash.toString();
+      if (!this.eventBytesCache.has(hashStr)) {
+        this.eventBytesCache.set(hashStr, eventBytes);
+        // FIFO eviction: remove oldest entries when over capacity
+        while (this.eventBytesCache.size > KeyhiveNetworkAdapter.MAX_CACHED_EVENTS) {
+          const oldest = this.eventBytesCache.keys().next().value;
+          if (oldest !== undefined) this.eventBytesCache.delete(oldest);
+        }
+      }
+      if (missingHashes.has(hashStr)) {
         result.push(eventBytes);
       }
     }
+
     metrics?.recordEventLookupTime(Date.now() - eventLookupStart);
     return result;
   }
