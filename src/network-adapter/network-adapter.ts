@@ -87,10 +87,14 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       this.opCache = new OpCache();
       // Periodic refresh at the same interval as sync requests
       this.opCacheRefreshId = setInterval(() => {
-        void this.keyhiveQueue.run(() => this.opCache!.refresh(this.keyhive));
+        void this.keyhiveQueue.run(() => this.opCache!.refresh(this.keyhive)).catch((error) =>
+          console.error("[AMRepoKeyhive] OpCache refresh failed:", error)
+        );
       }, syncRequestInterval);
       // Initial refresh
-      void this.keyhiveQueue.run(() => this.opCache!.refresh(this.keyhive));
+      void this.keyhiveQueue.run(() => this.opCache!.refresh(this.keyhive)).catch((error) =>
+        console.error("[AMRepoKeyhive] Initial OpCache refresh failed:", error)
+      );
     }
 
     if (periodicallyRequestSync) {
@@ -198,7 +202,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
-    void this.signAndSend(message, contactCard);
+    void this.signAndSend(message, contactCard).catch((error) =>
+      console.error(`[AMRepoKeyhive] Failed to sign and send (type=${message.type}):`, error)
+    );
   }
 
   async signAndSend(
@@ -269,7 +275,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             void this.handleKeyhiveMessage(message, maybeKeyhiveMessageData, this.streamingMetrics).then(() => {
               this.streamingMetrics.recordProcessingTime(Date.now() - startTime);
               this.streamingMetrics.recordProcessingTimeByType(msgType, Date.now() - startTime);
-            });
+            }).catch((error) =>
+              console.error(`[AMRepoKeyhive] Error handling message (type=${message.type}, from=${message.senderId}):`, error)
+            );
           }
         } else {
           console.error(
@@ -326,6 +334,8 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       maybeSenderId,
       includeContactCard,
       attemptRecovery
+    ).catch((error) =>
+      console.error("[AMRepoKeyhive] Sync initiation failed:", error)
     );
   }
 
@@ -919,9 +929,13 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         console.log(
           `[AMRepoKeyhive] Large batch (${events.length} > ${this.archiveThreshold}): saving full archive instead of individual events`
         );
-        void this.keyhiveStorage.saveKeyhiveWithHash(this.keyhive);
+        void this.keyhiveStorage.saveKeyhiveWithHash(this.keyhive).catch((error) =>
+          console.error("[AMRepoKeyhive] Failed to save archive after large batch:", error)
+        );
       } else {
-        void this.saveReceivedEvents(events);
+        void this.saveReceivedEvents(events).catch((error) =>
+          console.error("[AMRepoKeyhive] Failed to save received events:", error)
+        );
       }
       // Invalidate/refresh cache since we ingested events from a peer
       // (OpCache relies on periodic interval refresh so no need to explicitly invalidate)
@@ -976,7 +990,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       return;
     }
     this.syncRequestQueued = true;
-    void this.initiateKeyhiveSync(this.peerId, false, false).finally(() => {
+    void this.initiateKeyhiveSync(this.peerId, false, false).catch((error) =>
+      console.error("[AMRepoKeyhive] Periodic sync failed:", error)
+    ).finally(() => {
       this.syncRequestQueued = false;
     });
   }
@@ -996,7 +1012,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private runCompaction(): void {
     void this.keyhiveQueue.run(async () => {
       await this.keyhiveStorage.compact(this.keyhive);
-    });
+    }).catch((error) =>
+      console.error("[AMRepoKeyhive] Compaction failed:", error)
+    );
   }
 
   private invalidateCaches(): void {

@@ -174,7 +174,9 @@ export async function initializeAutomergeRepoKeyhive(options: {
             keyhiveNetworkAdapter.syncKeyhive();
           }, 1000);
         }
-      });
+      }).catch((error) =>
+        console.error("[AMRepoKeyhive] Event flush failed:", error)
+      );
     }
   });
 
