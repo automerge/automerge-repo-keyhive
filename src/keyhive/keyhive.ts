@@ -335,11 +335,13 @@ export class KeyhiveStorage {
       }
     }
 
-    // Build map from event data to key for tracking pending events
-    const dataToKey = new Map<Uint8Array, StorageKey>();
+    // Build map from event data to key for tracking pending events.
+    // Uses string keys because ingestEventsBytes returns new Uint8Array
+    // instances (copied across the WASM boundary), not the same references.
+    const dataToKey = new Map<string, StorageKey>();
     for (const chunk of keyhiveEventsChunks) {
       if (chunk.data) {
-        dataToKey.set(chunk.data, chunk.key);
+        dataToKey.set(chunk.data.toString(), chunk.key);
       }
     }
 
@@ -352,7 +354,7 @@ export class KeyhiveStorage {
     if (eventsBytes.length > 0) {
       try {
         pendingKeys = (await kh.ingestEventsBytes(eventsBytes))
-          .map((bytes: Uint8Array) => dataToKey.get(bytes))
+          .map((bytes: Uint8Array) => dataToKey.get(bytes.toString()))
           .filter((key): key is StorageKey => key !== undefined);
       } catch (error) {
         console.warn(
@@ -444,11 +446,13 @@ export class KeyhiveStorage {
       KEYHIVE_EVENTS_KEY,
     ]);
 
-    // Collect any individual events first
-    const data_to_key: Map<Uint8Array, string[]> = new Map();
+    // Collect any individual events first.
+    // Uses string keys because ingestEventsBytes returns new Uint8Array
+    // instances (copied across the WASM boundary), not the same references.
+    const dataToKey = new Map<string, string[]>();
     for (const chunk of keyhiveEventsChunks) {
       if (chunk.data) {
-        data_to_key.set(chunk.data, chunk.key);
+        dataToKey.set(chunk.data.toString(), chunk.key);
       }
     }
     const eventsBytes: Array<Uint8Array> = keyhiveEventsChunks
@@ -492,7 +496,7 @@ export class KeyhiveStorage {
           let pendingKeys: StorageKey[] = [];
           if (eventsBytes.length > 0) {
             pendingKeys = (await kh.ingestEventsBytes(eventsBytes))
-              .map((bytes: Uint8Array) => data_to_key.get(bytes))
+              .map((bytes: Uint8Array) => dataToKey.get(bytes.toString()))
               .filter((key): key is StorageKey => key !== undefined);
           }
 
@@ -536,7 +540,7 @@ export class KeyhiveStorage {
       );
       try {
         const pendingKeys = (await kh.ingestEventsBytes(eventsBytes))
-          .map((bytes: Uint8Array) => data_to_key.get(bytes))
+          .map((bytes: Uint8Array) => dataToKey.get(bytes.toString()))
           .filter((key): key is StorageKey => key !== undefined);
 
         await this.saveKeyhiveWithHash(kh);
