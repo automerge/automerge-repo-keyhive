@@ -199,7 +199,7 @@ export async function receiveContactCard(keyhive: Keyhive, contactCard: ContactC
   } else {
     if (contactCard.op) {
       console.debug(`[AMRepoKeyhive] Saving Contact Card event: ${contactCard.op}`);
-      keyhiveStorage.saveEventWithHash(contactCard.op);
+      await keyhiveStorage.saveEventWithHash(contactCard.op);
     } else {
       console.error(`[AMRepoKeyhive] No op found for ${contactCard.toJson()}`);
     }
@@ -208,12 +208,8 @@ export async function receiveContactCard(keyhive: Keyhive, contactCard: ContactC
 }
 
 export async function getPendingOpHashes(keyhive: Keyhive): Promise<Uint8Array[]> {
-  let pendingOpHashes: Uint8Array[] = new Array();
   const pendingOps = await keyhive.pendingEventHashes();
-  if (pendingOps) {
-    pendingOpHashes = Array.from(pendingOps.keys()) as Uint8Array[];
-  }
-  return pendingOpHashes;
+  return pendingOps ? Array.from(pendingOps.keys()) as Uint8Array[] : [];
 }
 
 async function loadOrCreateKeyPairAndSigner(storage: StorageAdapterInterface, keyPair?: CryptoKeyPair): Promise<{keyPair: CryptoKeyPair, signer: Signer}> {
@@ -246,6 +242,20 @@ export class KeyhiveStorage {
     private storage: StorageAdapterInterface
   ) {}
 
+  private async removeNonPendingEvents(
+    eventChunks: { key: StorageKey; data: Uint8Array | undefined }[],
+    pendingKeys: StorageKey[],
+  ): Promise<void> {
+    for (const chunk of eventChunks) {
+      const isPending = pendingKeys.some(
+        (pk) => pk.length === chunk.key.length && pk.every((v, i) => v === chunk.key[i])
+      );
+      if (!isPending) {
+        await this.storage.remove(chunk.key);
+      }
+    }
+  }
+
   async saveKeyhiveWithHash(kh: Keyhive) {
     const khBytes = (await kh.toArchive()).toBytes();
     const hash = uint8ArrayToHex(this.keyhiveStorageId);
@@ -264,7 +274,7 @@ export class KeyhiveStorage {
   async saveEventBytesWithHash(eventBytes: Uint8Array) {
     const hash = await crypto.subtle.digest(
       "SHA-256",
-      new Uint8Array(eventBytes)
+      eventBytes as Uint8Array<ArrayBuffer>
     );
     await this.storage.save(
       [
@@ -364,17 +374,7 @@ export class KeyhiveStorage {
     }
 
     // Remove events that are not pending
-    for (const chunk of keyhiveEventsChunks) {
-      const isPendingKey = pendingKeys.some(
-        (pendingKey) =>
-          pendingKey.length === chunk.key.length &&
-          pendingKey.every((val, index) => val === chunk.key[index])
-      );
-
-      if (!isPendingKey) {
-        await this.storage.remove(chunk.key);
-      }
-    }
+    await this.removeNonPendingEvents(keyhiveEventsChunks, pendingKeys);
 
     console.debug(
       `[AMRepoKeyhive] Compaction complete. ${pendingKeys.length} pending events retained.`
@@ -507,17 +507,7 @@ export class KeyhiveStorage {
               await this.storage.remove(chunk.key);
             }
           }
-          for (const chunk of keyhiveEventsChunks) {
-            const isPendingKey = pendingKeys.some(
-              (pendingKey) =>
-                pendingKey.length === chunk.key.length &&
-                pendingKey.every((val, index) => val === chunk.key[index])
-            );
-
-            if (!isPendingKey) {
-              await this.storage.remove(chunk.key);
-            }
-          }
+          await this.removeNonPendingEvents(keyhiveEventsChunks, pendingKeys);
           return kh;
         } catch (error: unknown) {
           // @ts-ignore
@@ -550,17 +540,7 @@ export class KeyhiveStorage {
           .filter((key): key is StorageKey => key !== undefined);
 
         await this.saveKeyhiveWithHash(kh);
-        for (const chunk of keyhiveEventsChunks) {
-          const isPendingKey = pendingKeys.some(
-            (pendingKey) =>
-              pendingKey.length === chunk.key.length &&
-              pendingKey.every((val, index) => val === chunk.key[index])
-          );
-
-          if (!isPendingKey) {
-            await this.storage.remove(chunk.key);
-          }
-        }
+        await this.removeNonPendingEvents(keyhiveEventsChunks, pendingKeys);
         return kh;
       } catch (e: unknown) {
         // @ts-ignore

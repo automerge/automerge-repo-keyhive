@@ -40,8 +40,9 @@ export function hexToUint8Array(hex: string): Uint8Array {
 export async function getEventsForAgent(
   keyhive: Keyhive,
   agent: Agent,
-): Promise<Map<Uint8Array, any>> {
-  return await keyhive.eventsForAgent(agent);
+): Promise<Map<Uint8Array, Uint8Array>> {
+  // WASM binding types this as Map<Uint8Array, any>; values are always event bytes
+  return await keyhive.eventsForAgent(agent) as Map<Uint8Array, Uint8Array>;
 }
 
 // Returns event hashes for an agent as Map<hashString, hashBytes>
