@@ -26,8 +26,8 @@ import {
 } from "../keyhive/keyhive.js";
 
 class Peer {
-  lastKeyhiveRequestRcvd: Date = new Date();
-  lastKeyhiveRequestSent: Date = new Date();
+  lastKeyhiveRequestRcvd = Date.now();
+  lastKeyhiveRequestSent = Date.now();
   // The remote peer's hash count (for our shared peer pair) at the last sync.
   // null before first full sync is completed
   syncpoint: number | null = null;
@@ -444,7 +444,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         }
         const peer = this.peers.get(targetId);
         if (peer) {
-          peer.lastKeyhiveRequestSent = new Date();
+          peer.lastKeyhiveRequestSent = Date.now();
         }
       }
     });
@@ -565,7 +565,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       }
       const peer = this.peers.get(message.senderId);
       if (peer) {
-        peer.lastKeyhiveRequestRcvd = new Date();
+        peer.lastKeyhiveRequestRcvd = Date.now();
       }
     });
   }
@@ -828,7 +828,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         data: data,
       };
       this.send(request);
-      peer.lastKeyhiveRequestRcvd = new Date();
+      peer.lastKeyhiveRequestRcvd = Date.now();
     });
   }
 
@@ -988,21 +988,15 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   }
 
   private readyToSendKeyhiveRequest(targetId: PeerId): boolean {
-    const now = new Date().getTime();
-    const lastKeyhiveRequestSent: Date | undefined = this.peers.get(targetId)?.lastKeyhiveRequestSent;
-    if (!lastKeyhiveRequestSent) {
-      return true
-    }
-    return (now - lastKeyhiveRequestSent.getTime()) > this.minSyncRequestInterval
+    const last = this.peers.get(targetId)?.lastKeyhiveRequestSent;
+    if (!last) return true;
+    return (Date.now() - last) > this.minSyncRequestInterval;
   }
 
   private readyToSendKeyhiveResponse(senderId: PeerId): boolean {
-    const now = new Date().getTime();
-    const lastKeyhiveRequestRcvd: Date | undefined = this.peers.get(senderId)?.lastKeyhiveRequestRcvd;
-    if (!lastKeyhiveRequestRcvd) {
-      return true
-    }
-    return (now - lastKeyhiveRequestRcvd.getTime()) > this.minSyncResponseInterval
+    const last = this.peers.get(senderId)?.lastKeyhiveRequestRcvd;
+    if (!last) return true;
+    return (Date.now() - last) > this.minSyncResponseInterval;
   }
 
   private runCompaction(): void {
