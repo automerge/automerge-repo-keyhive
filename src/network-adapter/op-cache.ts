@@ -1,14 +1,7 @@
 import { Keyhive, Identifier } from "@keyhive/keyhive/slim";
 import { cborByteString } from "./cbor-builder.js";
 import { getPendingOpHashes } from "../keyhive/keyhive.js";
-
-// Map from hash string to hash bytes
-type PeerHashes = Map<string, Uint8Array>;
-
-interface EventBytesResult {
-  events: Uint8Array[];
-  cborEvents: Uint8Array[];
-}
+import type { PeerHashes, EventBytesResult } from "./sync-data.js";
 
 // Periodically-refreshed cache of all agent event hashes and event bytes.
 // Avoids re-fetching from WASM on every sync message. Pre-encodes event

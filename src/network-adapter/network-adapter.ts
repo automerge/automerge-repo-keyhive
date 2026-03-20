@@ -7,12 +7,6 @@ import {
 import { ContactCard, Identifier, Keyhive } from "@keyhive/keyhive/slim";
 import { encode, decode } from "cbor-x";
 import { cborByteString, buildSyncResponseCbor, buildSyncOpsCbor, buildCborByteStringArray } from "./cbor-builder.js";
-
-interface EventBytesResult {
-  events: Uint8Array[];
-  cborEvents: Uint8Array[];
-}
-
 import {
   decodeKeyhiveMessageData,
   KeyhiveMessageData,
@@ -21,6 +15,9 @@ import {
 } from "./messages.js";
 import { PromiseQueue, Pending } from "./pending.js";
 import { OpCache } from "./op-cache.js";
+import { Metrics } from "./metrics.js";
+import { MessageBatch, BatchProcessor } from "./batch.js";
+import type { PeerHashes, EventBytesResult } from "./sync-data.js";
 import { getEventsForAgent, getEventHashesForAgent, keyhiveIdentifierFromPeerId } from "../utilities.js";
 import {
   getPendingOpHashes,
@@ -28,273 +25,13 @@ import {
   receiveContactCard,
 } from "../keyhive/keyhive.js";
 
-// Map from hash string to hash bytes
-type PeerHashes = Map<string, Uint8Array>;
-
-type KeyhiveMessage = {
-  msg: Message;
-  data: KeyhiveMessageData;
-}
-
-class Metrics {
-  private msgTypeCounts: Record<string, number> = {};
-  private totalPayloadBytes = 0;
-  private uniqueSenders = new Set<string>();
-  private nonKeyhiveCount = 0;
-  private droppedSyncRequests = 0;
-  private messageCount = 0;
-  private totalProcessingTimeMs = 0;
-  private publicHashCount = 0;
-  private publicEventCount = 0;
-
-  private processingTimeByType: Record<string, number> = {};
-  private totalOps: bigint = 0n;
-  private hashLookupTimeMs = 0;
-  private eventLookupTimeMs = 0;
-  private cacheHits = 0;
-  private cacheMisses = 0;
-  private totalQueueWaitMs = 0;
-  private ingestCount = 0;
-  private eventsIngested = 0;
-  private pendingAfterIngest = 0;
-  private storageRetries = 0;
-  private opsSent = 0;
-  private opsRequested = 0;
-  private syncChecksSent = 0;
-  private syncChecksReceived = 0;
-  private syncChecksShortCircuited = 0;
-  private syncChecksFallback = 0;
-  private syncConfirmationsSent = 0;
-  private syncConfirmationsReceived = 0;
-
-  recordMessage(msgType: string | undefined, senderId: string | undefined, payloadBytes: number) {
-    const type = msgType ?? "unknown";
-    this.msgTypeCounts[type] = (this.msgTypeCounts[type] ?? 0) + 1;
-    this.totalPayloadBytes += payloadBytes;
-    if (senderId) this.uniqueSenders.add(senderId);
-    this.messageCount++;
-  }
-
-  recordNonKeyhive() {
-    this.nonKeyhiveCount++;
-  }
-
-  recordDroppedSyncRequest() {
-    this.droppedSyncRequests++;
-  }
-
-  recordProcessingTime(ms: number) {
-    this.totalProcessingTimeMs += ms;
-  }
-
-  recordPublicLookups(hashCount: number, eventCount: number) {
-    this.publicHashCount += hashCount;
-    this.publicEventCount += eventCount;
-  }
-
-  recordProcessingTimeByType(msgType: string, ms: number) {
-    this.processingTimeByType[msgType] = (this.processingTimeByType[msgType] ?? 0) + ms;
-  }
-
-  recordTotalOps(ops: bigint) {
-    this.totalOps = ops;
-  }
-
-  recordHashLookupTime(ms: number) {
-    this.hashLookupTimeMs += ms;
-  }
-
-  recordEventLookupTime(ms: number) {
-    this.eventLookupTimeMs += ms;
-  }
-
-  recordCacheHit() {
-    this.cacheHits++;
-  }
-
-  recordCacheMiss() {
-    this.cacheMisses++;
-  }
-
-  recordQueueWait(ms: number) {
-    this.totalQueueWaitMs += ms;
-  }
-
-  recordIngestion(eventsCount: number, pendingCount: number) {
-    this.ingestCount++;
-    this.eventsIngested += eventsCount;
-    this.pendingAfterIngest += pendingCount;
-  }
-
-  recordStorageRetry() {
-    this.storageRetries++;
-  }
-
-  recordOpsSent(count: number) {
-    this.opsSent += count;
-  }
-
-  recordOpsRequested(count: number) {
-    this.opsRequested += count;
-  }
-
-  recordSyncCheckSent() { this.syncChecksSent++; }
-  recordSyncCheckReceived() { this.syncChecksReceived++; }
-  recordSyncCheckShortCircuited() { this.syncChecksShortCircuited++; }
-  recordSyncCheckFallback() { this.syncChecksFallback++; }
-  recordSyncConfirmationSent() { this.syncConfirmationsSent++; }
-  recordSyncConfirmationReceived() { this.syncConfirmationsReceived++; }
-
-  hasActivity(): boolean {
-    return this.messageCount > 0 || this.nonKeyhiveCount > 0;
-  }
-
-  logReport(label: string) {
-    if (!this.hasActivity()) return;
-    const countsStr = Object.entries(this.msgTypeCounts)
-      .map(([type, count]) => `${type}=${count}`)
-      .join(", ");
-    console.debug(
-      `[${label}] ${this.messageCount} keyhive messages from ${this.uniqueSenders.size} peers at ${new Date().toLocaleTimeString("en-GB")}. ` +
-      `${this.droppedSyncRequests} duplicate sync requests dropped. ` +
-      `${this.nonKeyhiveCount} non-keyhive messages. ` +
-      `Breakdown: ${countsStr}. Total payload: ${this.totalPayloadBytes} bytes. ` +
-      `Processing: ${this.totalProcessingTimeMs}ms. ` +
-      `Public lookups: ${this.publicHashCount} hashes, ${this.publicEventCount} events`
-    );
-    const perTypeStr = Object.entries(this.processingTimeByType)
-      .map(([type, ms]) => `${type}=${ms}ms`)
-      .join(", ");
-    console.debug(
-      `[${label}+] Per-type: ${perTypeStr}. ` +
-      `Lookups: hash=${this.hashLookupTimeMs}ms, event=${this.eventLookupTimeMs}ms. ` +
-      `Cache: ${this.cacheHits}/${this.cacheMisses} hit/miss. ` +
-      `Queue wait: ${this.totalQueueWaitMs}ms. ` +
-      `Ingestion: ${this.ingestCount}x, ${this.eventsIngested} events, ${this.pendingAfterIngest} pending, ${this.storageRetries} retries. ` +
-      `Ops: ${this.opsSent} sent, ${this.opsRequested} requested. ` +
-      `Sync checks: ${this.syncChecksSent} sent, ${this.syncChecksReceived} rcvd, ${this.syncChecksShortCircuited} short-circuited, ${this.syncChecksFallback} fallback. ` +
-      `Confirmations: ${this.syncConfirmationsSent} sent, ${this.syncConfirmationsReceived} rcvd. ` +
-      `Total ops: ${this.totalOps}`
-    );
-  }
-
-  reset() {
-    this.msgTypeCounts = {};
-    this.totalPayloadBytes = 0;
-    this.uniqueSenders = new Set();
-    this.nonKeyhiveCount = 0;
-    this.droppedSyncRequests = 0;
-    this.messageCount = 0;
-    this.totalProcessingTimeMs = 0;
-    this.publicHashCount = 0;
-    this.publicEventCount = 0;
-    this.processingTimeByType = {};
-    this.totalOps = 0n;
-    this.hashLookupTimeMs = 0;
-    this.eventLookupTimeMs = 0;
-    this.cacheHits = 0;
-    this.cacheMisses = 0;
-    this.totalQueueWaitMs = 0;
-    this.ingestCount = 0;
-    this.eventsIngested = 0;
-    this.pendingAfterIngest = 0;
-    this.storageRetries = 0;
-    this.opsSent = 0;
-    this.opsRequested = 0;
-    this.syncChecksSent = 0;
-    this.syncChecksReceived = 0;
-    this.syncChecksShortCircuited = 0;
-    this.syncChecksFallback = 0;
-    this.syncConfirmationsSent = 0;
-    this.syncConfirmationsReceived = 0;
-  }
-}
-
-class MessageBatch {
-  readonly messages: KeyhiveMessage[] = [];
-  readonly metrics = new Metrics();
-  private readonly syncRequestSenders = new Set<string>();
-
-  add(msg: Message, data: KeyhiveMessageData) {
-    if (msg.type === "keyhive-sync-request" && msg.senderId) {
-      if (this.syncRequestSenders.has(msg.senderId)) {
-        this.metrics.recordDroppedSyncRequest();
-        return;
-      }
-      this.syncRequestSenders.add(msg.senderId);
-    }
-    this.metrics.recordMessage(msg.type, msg.senderId, data.signed.payload?.byteLength ?? 0);
-    this.messages.push({ msg, data });
-  }
-
-  countNonKeyhive() {
-    this.metrics.recordNonKeyhive();
-  }
-
-  get isEmpty(): boolean {
-    return !this.metrics.hasActivity();
-  }
-}
-
-class BatchProcessor {
-  private timeoutId?: ReturnType<typeof setTimeout>;
-
-  constructor(
-    private readonly batchInterval: number,
-    private readonly keyhive: Keyhive,
-    private readonly handleMessage: (msg: Message, data: KeyhiveMessageData, metrics: Metrics) => Promise<void>,
-    private readonly swapBatch: () => MessageBatch,
-  ) {}
-
-  start() {
-    this.scheduleNext();
-  }
-
-  stop() {
-    if (this.timeoutId !== undefined) {
-      clearTimeout(this.timeoutId);
-      this.timeoutId = undefined;
-    }
-  }
-
-  private scheduleNext() {
-    this.timeoutId = setTimeout(() => { void this.processAndReschedule() }, this.batchInterval);
-  }
-
-  private async processAndReschedule() {
-    const batch = this.swapBatch();
-    if (!batch.isEmpty) {
-      await this.processBatch(batch);
-    }
-    this.scheduleNext();
-  }
-
-  private async processBatch(batch: MessageBatch) {
-    const startTime = Date.now();
-    for (const { msg, data } of batch.messages) {
-      try {
-        const msgStart = Date.now();
-        await this.handleMessage(msg, data, batch.metrics);
-        batch.metrics.recordProcessingTimeByType(msg.type ?? "unknown", Date.now() - msgStart);
-      } catch (error) {
-        console.error(`[AMRepoKeyhive] Error processing batch message (type=${msg.type}, from=${msg.senderId}):`, error);
-      }
-    }
-    batch.metrics.recordProcessingTime(Date.now() - startTime);
-    const stats = await this.keyhive.stats();
-    batch.metrics.recordTotalOps(stats.totalOps);
-    batch.metrics.logReport("Batch");
-  }
-}
-
 class Peer {
   lastKeyhiveRequestRcvd: Date = new Date();
   lastKeyhiveRequestSent: Date = new Date();
   // The remote peer's hash count (for our shared peer pair) at the last sync.
   // null before first full sync is completed
   syncpoint: number | null = null;
-  constructor() {}
-};
+}
 
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
@@ -306,7 +43,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private cachingMode: "none" | "standard" | "periodic";
   private hashesCache: Map<PeerId, PeerHashes> = new Map();
   private publicHashesCache: PeerHashes | null = null;
-  private publicEventsCache: Map<Uint8Array, any> | null = null;
+  private publicEventsCache: Map<Uint8Array, Uint8Array> | null = null;
   private pendingOpHashesCache: Uint8Array[] | null = null;
   private lastKnownTotalOps: bigint = 0n;
   // Persistent cache for immutable event data (events never change once created)
@@ -409,7 +146,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         const stats = await this.keyhive.stats();
         this.streamingMetrics.recordTotalOps(stats.totalOps);
         this.streamingMetrics.logReport("Streaming");
-        this.streamingMetrics.reset();
+        this.streamingMetrics = new Metrics();
       }, 1000);
     }
   }
@@ -461,10 +198,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
-    void this.asyncSignAndSend(message, contactCard);
+    void this.signAndSend(message, contactCard);
   }
 
-  async asyncSignAndSend(
+  async signAndSend(
     message: Message,
     contactCard?: ContactCard
   ): Promise<void> {
@@ -585,7 +322,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     includeContactCard: boolean = false,
     attemptRecovery: boolean = false
   ): void {
-    void this.asyncSyncKeyhive(
+    void this.initiateKeyhiveSync(
       maybeSenderId,
       includeContactCard,
       attemptRecovery
@@ -597,7 +334,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   // keyhive (any pending hash might be relevant). Then send a request to the
   // peer to begin the sync protocol.
   // This is the first keyhive op sync protocol message.
-  private async asyncSyncKeyhive(
+  private async initiateKeyhiveSync(
     maybeSenderId: PeerId | undefined,
     includeContactCard: boolean,
     attemptRecovery: boolean = false
@@ -866,86 +603,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     await this.keyhiveQueue.run(async () => {
       metrics.recordQueueWait(Date.now() - queueEnterTime);
       if (foundEvents.length > 0) {
-        console.debug(
-          `[AMRepoKeyhive] Ingesting ${foundEvents.length} keyhive events from ${message.senderId}`
-        );
-
-        try {
-          let pendingEvents: any[] | null = null;
-          try {
-            pendingEvents = await this.keyhiveStorage.withSuppressedEventWrites(() =>
-              this.keyhive.ingestEventsBytes(foundEvents)
-            );
-          } catch (error) {
-            console.error(`[AMRepoKeyhive] Error ingesting events: ${error}`);
-          }
-
-          if (pendingEvents) {
-            metrics.recordIngestion(foundEvents.length, pendingEvents.length);
-            console.debug(
-              `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
-            );
-          }
-
-          // If there are pending events or something went wrong ingesting, try reading from
-          // storage (e.g., in case they have already been processed by a separate tab in a
-          // browser).
-          if (!pendingEvents || pendingEvents.length > 0) {
-            if (pendingEvents) {
-              console.warn(
-                `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending${this.retryPendingFromStorage ? ". Reading from storage" : ""}`
-              );
-            }
-            if (this.retryPendingFromStorage) {
-              metrics.recordStorageRetry();
-              try {
-                await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
-                const retryPending = await this.keyhiveStorage.withSuppressedEventWrites(() =>
-                  this.keyhive.ingestEventsBytes(foundEvents)
-                );
-                if (retryPending.length === 0) {
-                  console.log(
-                    `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
-                  );
-                } else {
-                  console.warn(
-                    `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
-                  );
-                }
-              } catch (storageError) {
-                console.error(
-                  `[AMRepoKeyhive] Failed while reading from storage:`,
-                  storageError
-                );
-              }
-            }
-          }
-
-          // For large batches, write the full archive instead of individual events.
-          if (foundEvents.length > this.archiveThreshold) {
-            console.log(
-              `[AMRepoKeyhive] Large batch (${foundEvents.length} > ${this.archiveThreshold}): saving full archive instead of individual events`
-            );
-            void this.keyhiveStorage.saveKeyhiveWithHash(this.keyhive);
-          } else {
-            void this.saveReceivedEvents(foundEvents);
-          }
-          // Invalidate/refresh cache since we ingested events from a peer
-          // (OpCache relies on periodic interval refresh so no need to explicitly
-          // invalidate)
-          if (!this.opCache) {
-            this.invalidateCaches();
-          }
-          const statsAfterIngest = await this.keyhive.stats();
-          if (statsAfterIngest.totalOps !== this.lastKnownTotalOps) {
-            this.lastKnownTotalOps = statsAfterIngest.totalOps;
-            // Only clear syncpoints when state actually changed
-            this.invalidateSyncpoints();
-            (this.emit as any)("ingest-remote");
-          }
-        } catch (error) {
-          await this.handleIngestError(error, foundEvents, message.senderId);
-        }
+        await this.ingestAndRetry(foundEvents, message.senderId, metrics);
       }
 
       if (requestedHashes.length > 0) {
@@ -972,25 +630,15 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             `[AMRepoKeyhive] Sending ${requestedResult.events.length} requested ops to ${message.senderId}`
           );
 
-          if (syncResponderTotal !== undefined && syncRequesterTotal !== undefined) {
-            const data = buildSyncOpsCbor(requestedResult.cborEvents, syncResponderTotal, syncRequesterTotal);
-            const response = {
-              type: "keyhive-sync-ops",
-              senderId: peerId,
-              targetId: message.senderId,
-              data,
-            };
-            this.send(response);
-          } else {
-            const data = buildCborByteStringArray(requestedResult.cborEvents);
-            const response = {
-              type: "keyhive-sync-ops",
-              senderId: peerId,
-              targetId: message.senderId,
-              data,
-            };
-            this.send(response);
-          }
+          const data = (syncResponderTotal !== undefined && syncRequesterTotal !== undefined)
+            ? buildSyncOpsCbor(requestedResult.cborEvents, syncResponderTotal, syncRequesterTotal)
+            : buildCborByteStringArray(requestedResult.cborEvents);
+          this.send({
+            type: "keyhive-sync-ops",
+            senderId: peerId,
+            targetId: message.senderId,
+            data,
+          });
           return;
         }
       }
@@ -1083,92 +731,26 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     await this.keyhiveQueue.run(async () => {
       metrics.recordQueueWait(Date.now() - queueEnterTime);
       if (receivedEvents.length > 0) {
-        console.debug(
-          `[AMRepoKeyhive] Ingesting ${receivedEvents.length} keyhive events from ${message.senderId}`
-        );
+        const ingestionSucceeded = await this.ingestAndRetry(receivedEvents, message.senderId, metrics);
 
-        try {
-          const pendingEvents = await this.keyhiveStorage.withSuppressedEventWrites(() =>
-            this.keyhive.ingestEventsBytes(receivedEvents)
-          );
-          metrics.recordIngestion(receivedEvents.length, pendingEvents.length);
-          console.debug(
-            `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
-          );
-
-          // If there are pending events, try reading from storage (e.g., in case
-          // they have already been processed by a separate tab in a browser).
-          if (pendingEvents.length > 0) {
-            console.warn(
-              `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending${this.retryPendingFromStorage ? ". Reading from storage" : ""}`
-            );
-            if (this.retryPendingFromStorage) {
-              metrics.recordStorageRetry();
-              try {
-                await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
-                const retryPending = await this.keyhiveStorage.withSuppressedEventWrites(() =>
-                  this.keyhive.ingestEventsBytes(receivedEvents)
-                );
-                if (retryPending.length === 0) {
-                  console.log(
-                    `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
-                  );
-                } else {
-                  console.warn(
-                    `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
-                  );
-                }
-              } catch (storageError) {
-                console.error(
-                  `[AMRepoKeyhive] Failed while reading from storage:`,
-                  storageError
-                );
-              }
-            }
+        // After successful ingestion, send confirmation and establish syncpoint
+        if (ingestionSucceeded && syncResponderTotal !== undefined && syncRequesterTotal !== undefined) {
+          const peer = this.peers.get(message.senderId);
+          if (peer) {
+            // syncRequesterTotal is the remote peer's total
+            peer.syncpoint = syncRequesterTotal;
           }
-
-          // For large batches, write the full archive instead of individual events.
-          if (receivedEvents.length > this.archiveThreshold) {
-            console.log(
-              `[AMRepoKeyhive] Large batch (${receivedEvents.length} > ${this.archiveThreshold}): saving full archive instead of individual events`
-            );
-            void this.keyhiveStorage.saveKeyhiveWithHash(this.keyhive);
-          } else {
-            void this.saveReceivedEvents(receivedEvents);
-          }
-          // Invalidate/refresh cache since we ingested events from a peer
-          if (!this.opCache) {
-            this.invalidateCaches();
-          }
-          const statsAfterIngest = await this.keyhive.stats();
-          if (statsAfterIngest.totalOps !== this.lastKnownTotalOps) {
-            this.lastKnownTotalOps = statsAfterIngest.totalOps;
-            // Only clear syncpoints when state actually changed
-            this.invalidateSyncpoints();
-            (this.emit as any)("ingest-remote");
-          }
-
-          // After successful ingestion, send confirmation and establish syncpoint
-          if (syncResponderTotal !== undefined && syncRequesterTotal !== undefined) {
-            const peer = this.peers.get(message.senderId);
-            if (peer) {
-              // syncRequesterTotal is the remote peer's total
-              peer.syncpoint = syncRequesterTotal;
-            }
-            const confirmData = encode({
-              confirmerTotal: syncResponderTotal,
-            });
-            const confirmMsg = {
-              type: "keyhive-sync-confirmation",
-              senderId: this.peerId!,
-              targetId: message.senderId,
-              data: confirmData,
-            };
-            metrics.recordSyncConfirmationSent();
-            this.send(confirmMsg);
-          }
-        } catch (error) {
-          await this.handleIngestError(error, receivedEvents, message.senderId);
+          const confirmData = encode({
+            confirmerTotal: syncResponderTotal,
+          });
+          const confirmMsg = {
+            type: "keyhive-sync-confirmation",
+            senderId: this.peerId!,
+            targetId: message.senderId,
+            data: confirmData,
+          };
+          metrics.recordSyncConfirmationSent();
+          this.send(confirmMsg);
         }
       }
     });
@@ -1274,6 +856,91 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
   }
 
+  // Returns true if ingestion succeeded (even if some events are still pending).
+  // Returns false if ingestion threw an unrecoverable error.
+  private async ingestAndRetry(events: Uint8Array[], senderId: PeerId, metrics: Metrics): Promise<boolean> {
+    console.debug(
+      `[AMRepoKeyhive] Ingesting ${events.length} keyhive events from ${senderId}`
+    );
+
+    try {
+      let pendingEvents: Uint8Array[] | null = null;
+      try {
+        pendingEvents = await this.keyhiveStorage.withSuppressedEventWrites(() =>
+          this.keyhive.ingestEventsBytes(events)
+        );
+      } catch (error) {
+        console.error(`[AMRepoKeyhive] Error ingesting events: ${error}`);
+      }
+
+      if (pendingEvents) {
+        metrics.recordIngestion(events.length, pendingEvents.length);
+        console.debug(
+          `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
+        );
+      }
+
+      // If there are pending events or something went wrong ingesting, try
+      // reading from storage (e.g., in case they have already been processed
+      // by a separate tab in a browser).
+      if (!pendingEvents || pendingEvents.length > 0) {
+        if (pendingEvents) {
+          console.warn(
+            `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending${this.retryPendingFromStorage ? ". Reading from storage" : ""}`
+          );
+        }
+        if (this.retryPendingFromStorage) {
+          metrics.recordStorageRetry();
+          try {
+            await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
+            const retryPending = await this.keyhiveStorage.withSuppressedEventWrites(() =>
+              this.keyhive.ingestEventsBytes(events)
+            );
+            if (retryPending.length === 0) {
+              console.log(
+                `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
+              );
+            } else {
+              console.warn(
+                `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
+              );
+            }
+          } catch (storageError) {
+            console.error(
+              `[AMRepoKeyhive] Failed while reading from storage:`,
+              storageError
+            );
+          }
+        }
+      }
+
+      // For large batches, write the full archive instead of individual events.
+      if (events.length > this.archiveThreshold) {
+        console.log(
+          `[AMRepoKeyhive] Large batch (${events.length} > ${this.archiveThreshold}): saving full archive instead of individual events`
+        );
+        void this.keyhiveStorage.saveKeyhiveWithHash(this.keyhive);
+      } else {
+        void this.saveReceivedEvents(events);
+      }
+      // Invalidate/refresh cache since we ingested events from a peer
+      // (OpCache relies on periodic interval refresh so no need to explicitly invalidate)
+      if (!this.opCache) {
+        this.invalidateCaches();
+      }
+      const statsAfterIngest = await this.keyhive.stats();
+      if (statsAfterIngest.totalOps !== this.lastKnownTotalOps) {
+        this.lastKnownTotalOps = statsAfterIngest.totalOps;
+        this.invalidateSyncpoints();
+        (this.emit as any)("ingest-remote");
+      }
+      return true;
+    } catch (error) {
+      await this.handleIngestError(error, events, senderId);
+      return false;
+    }
+  }
+
   private async saveReceivedEvents(events: Uint8Array[]): Promise<void> {
     for (const event of events) {
       try {
@@ -1315,7 +982,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       return;
     }
     this.syncRequestQueued = true;
-    void this.asyncSyncKeyhive(this.peerId, false, false).finally(() => {
+    void this.initiateKeyhiveSync(this.peerId, false, false).finally(() => {
       this.syncRequestQueued = false;
     });
   }
@@ -1420,14 +1087,14 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     return hashes;
   }
 
-  private async getCachedPublicEvents(): Promise<Map<Uint8Array, any>> {
+  private async getCachedPublicEvents(): Promise<Map<Uint8Array, Uint8Array>> {
     if (this.cachingMode === "standard" && this.publicEventsCache !== null) {
       return this.publicEventsCache;
     }
     const agent = await this.keyhive.getAgent(Identifier.publicId());
     const events = agent
       ? await getEventsForAgent(this.keyhive, agent)
-      : new Map<Uint8Array, any>();
+      : new Map<Uint8Array, Uint8Array>();
     if (this.cachingMode === "standard") {
       this.publicEventsCache = events;
     }
@@ -1537,7 +1204,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
     const agent = await this.keyhive.getAgent(keyhiveId);
 
-    const wasmEvents = new Map<Uint8Array, any>();
+    const wasmEvents = new Map<Uint8Array, Uint8Array>();
 
     if (agent) {
       const peerEvents = await getEventsForAgent(this.keyhive, agent);
