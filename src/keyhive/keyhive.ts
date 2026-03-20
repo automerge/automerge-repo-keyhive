@@ -6,7 +6,7 @@ import {
   StorageAdapterInterface,
   StorageKey,
 } from "@automerge/automerge-repo/slim";
-import { peerIdFromSigner, uint8ArrayToHex } from "../utilities.js";
+import { peerIdFromSigner, uint8ArrayToHex, unwrapWasmError } from "../utilities.js";
 import {
   Archive,
   CiphertextStore,
@@ -514,15 +514,9 @@ export class KeyhiveStorage {
           await this.removeNonPendingEvents(keyhiveEventsChunks, pendingKeys);
           return kh;
         } catch (error: unknown) {
-          // @ts-ignore
-          const jsError =
-            error && typeof error == "object" && "toError" in error
-              ? // @ts-ignore
-                error.toError()
-              : error;
           console.error(
             "[AMRepoKeyhive] Failed to load Keyhive archive:",
-            jsError
+            unwrapWasmError(error)
           );
         }
       }
@@ -547,12 +541,9 @@ export class KeyhiveStorage {
         await this.removeNonPendingEvents(keyhiveEventsChunks, pendingKeys);
         return kh;
       } catch (e: unknown) {
-        // @ts-ignore
-        const jsError =
-          // @ts-ignore
-          e && typeof e == "object" && "toError" in e ? e.toError() : e;
         console.error(
-          `[AMRepoKeyhive] Failed to ingest keyhive events from storage: ${jsError}`
+          `[AMRepoKeyhive] Failed to ingest keyhive events from storage:`,
+          unwrapWasmError(e)
         );
       }
     }

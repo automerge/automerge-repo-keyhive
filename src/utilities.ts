@@ -29,6 +29,15 @@ export function uint8ArrayToHex(arr: Uint8Array): string {
     .join("");
 }
 
+// WASM errors have a toError() method that returns a proper JS Error.
+// This unwraps them if present, otherwise returns the original error.
+export function unwrapWasmError(error: unknown): unknown {
+  if (error && typeof error === "object" && "toError" in error && typeof (error as any).toError === "function") {
+    return (error as any).toError();
+  }
+  return error;
+}
+
 export function hexToUint8Array(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) {

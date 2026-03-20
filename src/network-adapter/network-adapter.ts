@@ -18,7 +18,7 @@ import { OpCache } from "./op-cache.js";
 import { Metrics } from "./metrics.js";
 import { MessageBatch, BatchProcessor } from "./batch.js";
 import type { PeerHashes, EventBytesResult } from "./sync-data.js";
-import { getEventsForAgent, getEventHashesForAgent, keyhiveIdentifierFromPeerId } from "../utilities.js";
+import { getEventsForAgent, getEventHashesForAgent, keyhiveIdentifierFromPeerId, unwrapWasmError } from "../utilities.js";
 import {
   getPendingOpHashes,
   KeyhiveStorage,
@@ -959,13 +959,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     events: Uint8Array[],
     senderId: PeerId
   ): Promise<void> {
-    // @ts-ignore
-    const jsError =
-      error && typeof error == "object" && "toError" in error
-        ? // @ts-ignore
-          error.toError()
-        : error;
-
+    const jsError = unwrapWasmError(error);
     const errorMessage =
       jsError instanceof Error ? jsError.message : String(jsError);
 

@@ -24,11 +24,7 @@ import { Active } from "./active.js";
 import { KeyhiveNetworkAdapter } from "../network-adapter/network-adapter.js";
 import { KeyhiveEventEmitter } from "./emitter.js";
 import { docIdFromAutomergeUrl, KeyhiveStorage, receiveContactCard } from "./keyhive.js";
-import { encodeKeyhiveMessageData } from "../network-adapter/messages.js";
-
-export const KEYHIVE_DB_KEY = "keyhive-db";
-export const KEYHIVE_ARCHIVES_KEY = "/archives/";
-export const KEYHIVE_EVENTS_KEY = "/ops/";
+import { signData } from "../network-adapter/messages.js";
 
 // TODO: This is temporarily for calculating "best access". Move this and
 // the best access method to WASM API.
@@ -212,16 +208,7 @@ export class AutomergeRepoKeyhive {
     data: Uint8Array,
     contactCard?: ContactCard
   ): Promise<Uint8Array> {
-    try {
-      const signed = await this.keyhive.trySign(data);
-      return encodeKeyhiveMessageData({
-        contactCard,
-        signed,
-      });
-    } catch (error) {
-      console.error("[AMRepoKeyhive] Error during signing:", error);
-      throw error;
-    }
+    return signData(this.keyhive, data, contactCard);
   }
 
   keyhiveIdFactory(): (heads: Heads) => Promise<Uint8Array> {
