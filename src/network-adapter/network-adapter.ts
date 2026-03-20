@@ -1017,7 +1017,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     );
   }
 
-  private invalidateCaches(): void {
+  invalidateCaches(): void {
     this.hashesCache.clear();
     this.publicHashesCache = null;
     this.publicEventsCache = null;

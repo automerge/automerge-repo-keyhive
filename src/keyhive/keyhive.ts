@@ -168,6 +168,12 @@ export async function initializeAutomergeRepoKeyhive(options: {
           await keyhiveStorage.savePrekeySecrets(keyhive);
         }
 
+        if (eventsToSave.length > 0) {
+          // Invalidate caches so the next sync computes fresh totals
+          // (otherwise sync-check uses stale senderTotal from cached hashes)
+          keyhiveNetworkAdapter.invalidateCaches();
+        }
+
         if (needSync && !syncTimeout) {
           syncTimeout = setTimeout(() => {
             syncTimeout = undefined;
