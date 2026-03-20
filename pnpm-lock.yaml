@@ -15,8 +15,8 @@ importers:
         specifier: 2.5.3
         version: 2.5.3
       '@keyhive/keyhive':
-        specifier: 0.0.0-alpha.55
-        version: 0.0.0-alpha.55
+        specifier: 0.0.0-alpha.55b
+        version: 0.0.0-alpha.55b
       cbor-x:
         specifier: ^1.6.0
         version: 1.6.0
@@ -295,8 +295,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@keyhive/keyhive@0.0.0-alpha.55':
-    resolution: {integrity: sha512-X1jhPDoX5iY+0d5I8ccsHlFOsb6HngZ2ul2vYZz5b0OtXJHSVfDMABRfmQoNfaS4MboChp0nJ7tFypbO555qSA==}
+  '@keyhive/keyhive@0.0.0-alpha.55b':
+    resolution: {integrity: sha512-+BeybXrw/9lswPsVHV2zI/XLvMpo7dUE/ZYpaSAfRDRIDNzbasVULvfRcuf7IukTEwFSmIN3yVTOYR7x78bBCw==}
 
   '@noble/ed25519@3.0.0':
     resolution: {integrity: sha512-QyteqMNm0GLqfa5SoYbSC3+Pvykwpn95Zgth4MFVSMKBB75ELl9tX1LAVsN4c3HXOrakHsF2gL4zWDAYCcsnzg==}
@@ -1314,7 +1314,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@keyhive/keyhive@0.0.0-alpha.55': {}
+  '@keyhive/keyhive@0.0.0-alpha.55b': {}
 
   '@noble/ed25519@3.0.0': {}
 
