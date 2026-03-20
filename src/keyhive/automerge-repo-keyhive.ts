@@ -222,9 +222,7 @@ export class AutomergeRepoKeyhive {
 
 async function generateDoc(kh: Keyhive): Promise<KeyhiveDocument> {
   // For now, randomly generate a ChangeId
-  const changeIdArray = Uint8Array.from({ length: 10 }, () =>
-    Math.floor(Math.random() * 256)
-  );
+  const changeIdArray = crypto.getRandomValues(new Uint8Array(10));
   const changeId = new ChangeId(changeIdArray);
   const g = await kh.generateGroup([]);
   const doc = await kh.generateDocument([g.toPeer()], changeId, []);

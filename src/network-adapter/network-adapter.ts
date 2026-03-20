@@ -156,7 +156,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   }
 
   connect(peerId: PeerId, peerMetadata?: PeerMetadata): void {
-    console.log(`[AMRepoKeyhive] this.peerId: ${peerId}`);
+    console.log(`[AMRepoKeyhive] connect: peerId=${peerId}`);
     this.peerId = peerId;
     this.peerMetadata = peerMetadata;
     this.networkAdapter.connect(peerId, peerMetadata);
@@ -243,7 +243,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         this.hardcodedRemoteId &&
         message.senderId !== this.hardcodedRemoteId
       ) {
-        console.log(
+        console.debug(
           `[AMRepoKeyhive] Unknown remote peer ${message.senderId}. Ignoring message!`
         );
         return;
@@ -907,7 +907,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
               this.keyhive.ingestEventsBytes(events)
             );
             if (retryPending.length === 0) {
-              console.log(
+              console.debug(
                 `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
               );
             } else {
@@ -926,7 +926,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
       // For large batches, write the full archive instead of individual events.
       if (events.length > this.archiveThreshold) {
-        console.log(
+        console.debug(
           `[AMRepoKeyhive] Large batch (${events.length} > ${this.archiveThreshold}): saving full archive instead of individual events`
         );
         void this.keyhiveStorage.saveKeyhiveWithHash(this.keyhive).catch((error) =>

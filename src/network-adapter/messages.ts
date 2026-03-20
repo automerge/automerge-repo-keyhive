@@ -79,7 +79,7 @@ export function verifyData(peerId: PeerId, data: KeyhiveMessageData): boolean {
   try {
     const verifyingKeyPeerId = verifyingKeyPeerIdWithoutSuffix(peerId);
     if (peerIdFromSigned(data.signed) !== verifyingKeyPeerId) {
-      console.log(
+      console.debug(
         "[AMRepoKeyhive] Peer id on Signed does not match provided peer id"
       );
       console.debug("[AMRepoKeyhive] Expected: " + peerId);
