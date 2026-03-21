@@ -191,11 +191,11 @@ export class AutomergeRepoKeyhive {
     console.debug(`[AMRepoKeyhive] bestAccessForDoc: docId=${docId}`)
     const idAccess = await this.accessForDoc(id, docId);
     const idStr = idAccess ? idAccess.toString() : "None";
-    const idAccessLevel = accessLevels[idAccess ? idAccess.toString() : "None"];
+    const idAccessLevel = accessLevels[idStr];
     const publicId = Identifier.publicId();
     const publicAccess = await this.keyhive.accessForDoc(publicId, docId);
     const publicStr = publicAccess ? publicAccess.toString() : "None";
-    const publicAccessLevel = accessLevels[publicAccess ? publicAccess.toString() : "None"];
+    const publicAccessLevel = accessLevels[publicStr];
     console.debug(`[AMRepoKeyhive] bestAccessForDoc: docId=${docId}, idStr=${idStr}, publicStr=${publicStr}, idAccessLevel=${idAccessLevel}, publicAccessLevel=${publicAccessLevel}`);
     return (idAccessLevel > publicAccessLevel) ? idAccess : publicAccess;
   }

@@ -4,22 +4,20 @@ import {
 } from "@automerge/automerge-repo/slim";
 import { ContactCard, Identifier, Keyhive } from "@keyhive/keyhive/slim";
 import { encode, decode } from "cbor-x";
-import { cborByteString, buildSyncResponseCbor, buildSyncOpsCbor, buildCborByteStringArray } from "./cbor-builder.js";
+import { buildSyncResponseCbor, buildSyncOpsCbor, buildCborByteStringArray } from "./cbor-builder.js";
 import { PromiseQueue } from "./pending.js";
-import { OpCache } from "./op-cache.js";
 import { Metrics } from "./metrics.js";
 import type { PeerHashes, EventBytesResult } from "./sync-data.js";
-import { getEventsForAgent, getEventHashesForAgent, keyhiveIdentifierFromPeerId, unwrapWasmError } from "../utilities.js";
+import { keyhiveIdentifierFromPeerId, unwrapWasmError } from "../utilities.js";
 import {
-  getPendingOpHashes,
-  KeyhiveStorage,
   receiveContactCard,
+  KeyhiveStorage,
 } from "../keyhive/keyhive.js";
 import type { KeyhiveMessageData } from "./messages.js";
 import { Peer } from "./peer.js";
+import type { EventCache } from "./event-cache.js";
 
 export interface SyncProtocolConfig {
-  cachingMode: "none" | "standard" | "periodic";
   archiveThreshold: number;
   retryPendingFromStorage: boolean;
   minSyncRequestInterval: number;
@@ -32,7 +30,7 @@ export interface SyncProtocolDeps {
   keyhiveQueue: PromiseQueue;
   peers: Map<PeerId, Peer>;
   contactCard: ContactCard;
-  opCache: OpCache | null;
+  cache: EventCache;
   getPeerId: () => PeerId | undefined;
   getMetrics: () => Metrics;
   send: (message: Message, contactCard?: ContactCard) => void;
@@ -40,16 +38,7 @@ export interface SyncProtocolDeps {
 }
 
 export class SyncProtocol {
-  private cachingMode: "none" | "standard" | "periodic";
-  private hashesCache: Map<PeerId, PeerHashes> = new Map();
-  private publicHashesCache: PeerHashes | null = null;
-  private publicEventsCache: Map<Uint8Array, Uint8Array> | null = null;
-  private pendingOpHashesCache: Uint8Array[] | null = null;
-  private lastKnownTotalOps: bigint = 0n;
-  private eventBytesCache: Map<string, Uint8Array> = new Map();
-  private eventCborBytesCache: Map<string, Uint8Array> = new Map();
-  private static readonly MAX_CACHED_EVENTS = 10000;
-
+  private lastEmittedTotalOps: bigint = 0n;
   private syncRequestQueued: boolean = false;
 
   private readonly keyhive: Keyhive;
@@ -57,7 +46,7 @@ export class SyncProtocol {
   private readonly keyhiveQueue: PromiseQueue;
   private readonly peers: Map<PeerId, Peer>;
   private readonly contactCard: ContactCard;
-  private readonly opCache: OpCache | null;
+  private readonly cache: EventCache;
   private readonly getPeerId: () => PeerId | undefined;
   private readonly sendMessage: (message: Message, contactCard?: ContactCard) => void;
   private readonly emitEvent: (...args: any[]) => void;
@@ -73,13 +62,12 @@ export class SyncProtocol {
     this.keyhiveQueue = deps.keyhiveQueue;
     this.peers = deps.peers;
     this.contactCard = deps.contactCard;
-    this.opCache = deps.opCache;
+    this.cache = deps.cache;
     this.getPeerId = deps.getPeerId;
     this.sendMessage = deps.send;
     this.emitEvent = deps.emit;
     this.getMetrics = deps.getMetrics;
 
-    this.cachingMode = config.cachingMode;
     this.archiveThreshold = config.archiveThreshold;
     this.retryPendingFromStorage = config.retryPendingFromStorage;
     this.minSyncRequestInterval = config.minSyncRequestInterval;
@@ -163,23 +151,17 @@ export class SyncProtocol {
   }
 
   invalidateCaches(): void {
-    this.hashesCache.clear();
-    this.publicHashesCache = null;
-    this.publicEventsCache = null;
-    this.pendingOpHashesCache = null;
+    this.cache.onKeyhiveChanged();
   }
 
   onPeerDisconnected(peerId: PeerId): void {
-    if (!this.opCache) {
-      this.hashesCache.delete(peerId);
-    }
+    this.cache.onPeerDisconnected(peerId);
   }
 
   // Trigger the keyhive op set reconciliation sync protocol. Determine the hashes
   // that are relevant for the given peer as well as any pending hashes on this
-  // keyhive (any pending hash might be relevant). Then send a request to the
+  // keyhive (any pending hash might be relevant). Then send a message to the
   // peer to begin the sync protocol.
-  // This is the first keyhive op sync protocol message.
   private async initiateKeyhiveSync(
     maybeSenderId: PeerId | undefined,
     includeContactCard: boolean,
@@ -195,8 +177,7 @@ export class SyncProtocol {
         try {
           const statsBefore = await this.keyhive.stats();
           await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
-          // Check if ingestion changed state and invalidate cache if needed
-          await this.checkAndInvalidateCache();
+          await this.cache.onMaybeChanged(this.keyhive);
           // Emit ingest-remote if new ops were added from storage
           const statsAfter = await this.keyhive.stats();
           if (statsAfter.totalOps !== statsBefore.totalOps) {
@@ -213,7 +194,6 @@ export class SyncProtocol {
         senderId = peerId;
       }
 
-      // Get contact card once for all peers if needed, to avoid multiple rotations
       let maybeContactCard: ContactCard | undefined;
       if (includeContactCard) {
         console.debug("[AMRepoKeyhive] Including Contact Card in sync message.")
@@ -248,7 +228,7 @@ export class SyncProtocol {
           const peer = this.peers.get(targetId);
           if (peer !== undefined && peer.syncpoint !== null) {
             // Send lightweight sync check instead of full request
-            const pendingOpHashes = await this.getCachedPendingOpHashes();
+            const pendingOpHashes = await this.cache.getPendingOpHashes(this.keyhive);
             const hashes = await this.getHashesForPeerPair(senderId, targetId);
             const senderTotal = hashes.size + pendingOpHashes.length;
             const data = encode({
@@ -270,7 +250,7 @@ export class SyncProtocol {
             // No syncpoint yet. Send full sync request
             const hashes = await this.getHashesForPeerPair(senderId, targetId);
             const opHashes = Array.from(hashes.values());
-            const pendingOpHashes = await this.getCachedPendingOpHashes();
+            const pendingOpHashes = await this.cache.getPendingOpHashes(this.keyhive);
             const data = encode({
               found: opHashes,
               pending: pendingOpHashes,
@@ -299,7 +279,6 @@ export class SyncProtocol {
   // reconciliation sync protocol. Given the hashes sent by the peer, determine
   // which ops to send them. Then determine any missing ops to request from the
   // peer.
-  // This is the second keyhive op sync protocol message.
   private async sendKeyhiveSyncResponse(message: Message, metrics: Metrics): Promise<void> {
     if (!("data" in message) || !message.data) {
       console.error("[AMRepoKeyhive] Expected data in keyhive-sync-request");
@@ -344,7 +323,7 @@ export class SyncProtocol {
         this.sendMessage(response, this.contactCard);
       } else {
         const localHashes = await this.getHashesForPeerPair(peerId, message.senderId, metrics);
-        const pendingOpHashes = await this.getCachedPendingOpHashes(metrics);
+        const pendingOpHashes = await this.cache.getPendingOpHashes(this.keyhive, metrics);
         console.debug(
           `[AMRepoKeyhive] asyncSendKeyhiveSyncResponse: Found ${localHashes.size} total local operation hashes for ${message.senderId} and ${pendingOpHashes.length} total pending hashes`
         );
@@ -380,7 +359,7 @@ export class SyncProtocol {
 
         let foundResult: EventBytesResult = { events: [], cborEvents: [] };
         if (hashStringsToSend.size > 0) {
-          foundResult = await this.getEventBytesForHashes(peerId, hashStringsToSend, metrics);
+          foundResult = await this.cache.getEventBytesForPeer(this.keyhive, peerId, hashStringsToSend, metrics);
         }
 
         metrics.recordOpsSent(foundResult.events.length);
@@ -414,7 +393,6 @@ export class SyncProtocol {
 
   // Send requested ops in response to a keyhive sync response. Look up ops
   // for the requested hashes and send them to the requesting peer.
-  // This is the third (and final) keyhive op sync protocol message.
   private async sendKeyhiveSyncOps(message: Message, metrics: Metrics): Promise<void> {
     if (!("data" in message) || !message.data) {
       console.error("[AMRepoKeyhive] Expected data in keyhive-sync-response");
@@ -449,7 +427,7 @@ export class SyncProtocol {
         const requestedHashStrings = new Set(
           requestedHashes.map((h) => h.toString())
         );
-        const requestedResult = await this.getEventBytesForHashes(peerId, requestedHashStrings, metrics);
+        const requestedResult = await this.cache.getEventBytesForPeer(this.keyhive, peerId, requestedHashStrings, metrics);
 
         if (requestedResult.events.length === 0) {
           console.debug(
@@ -529,8 +507,7 @@ export class SyncProtocol {
     this.sendMessage(response, this.contactCard);
   }
 
-  // Receive ops sent by a peer as part of the third (and final) keyhive ops
-  // sync protocol message.
+  // Receive ops sent by a peer.
   private async receiveKeyhiveSyncOps(message: Message, metrics: Metrics): Promise<void> {
     if (!("data" in message) || !message.data) {
       console.error("[AMRepoKeyhive] Expected data in keyhive-sync-ops");
@@ -625,11 +602,11 @@ export class SyncProtocol {
       }
 
       // Compute our actual total for the sender
-      const pendingOpHashes = await this.getCachedPendingOpHashes();
+      const pendingOpHashes = await this.cache.getPendingOpHashes(this.keyhive);
       const hashes = await this.getHashesForPeerPair(peerId, message.senderId);
       const ourTotalForThem = hashes.size + pendingOpHashes.length;
 
-      // Check both conditions
+      // Sync check conditions
       const ourSyncpointMatchesTheirTotal = peer.syncpoint !== null &&
         peer.syncpoint === theirTotalForUs;
       const theirSyncpointMatchesOurTotal = theirSyncpoint === ourTotalForThem;
@@ -642,7 +619,7 @@ export class SyncProtocol {
         return;
       }
 
-      // Totals mismatch. Fall back to full sync request
+      // Totals mismatch. Start full sync request
       console.debug(
         `[AMRepoKeyhive] Sync check failed for ${message.senderId}: mismatch (ourActual=${ourTotalForThem}, theirSyncpoint=${theirSyncpoint}, theirTotalForUs=${theirTotalForUs}, ourSyncpoint=${peer.syncpoint ?? "null"}). Falling back to full sync.`
       );
@@ -759,14 +736,10 @@ export class SyncProtocol {
           console.error("[AMRepoKeyhive] Failed to save received events:", error)
         );
       }
-      // Invalidate/refresh cache since we ingested events from a peer
-      // (OpCache relies on periodic interval refresh so no need to explicitly invalidate)
-      if (!this.opCache) {
-        this.invalidateCaches();
-      }
+      this.cache.onKeyhiveChanged();
       const statsAfterIngest = await this.keyhive.stats();
-      if (statsAfterIngest.totalOps !== this.lastKnownTotalOps) {
-        this.lastKnownTotalOps = statsAfterIngest.totalOps;
+      if (statsAfterIngest.totalOps !== this.lastEmittedTotalOps) {
+        this.lastEmittedTotalOps = statsAfterIngest.totalOps;
         this.invalidateSyncpoints();
         this.emitEvent("ingest-remote");
       }
@@ -822,120 +795,6 @@ export class SyncProtocol {
     }
   }
 
-  // Check if keyhive state changed and invalidate/refresh cache if needed
-  private async checkAndInvalidateCache(): Promise<void> {
-    if (this.opCache) {
-      await this.opCache.refresh(this.keyhive);
-      return;
-    }
-    const stats = await this.keyhive.stats();
-    const currentTotalOps = stats.totalOps;
-    if (currentTotalOps !== this.lastKnownTotalOps) {
-      console.debug(
-        `[AMRepoKeyhive] Total ops changed from ${this.lastKnownTotalOps} to ${currentTotalOps}, invalidating cache`
-      );
-      this.lastKnownTotalOps = currentTotalOps;
-      this.invalidateCaches();
-    }
-  }
-
-  private async getCachedPendingOpHashes(metrics?: Metrics): Promise<Uint8Array[]> {
-    if (this.opCache) {
-      metrics?.recordCacheHit();
-      return this.opCache.getPendingOpHashes();
-    }
-
-    if (this.cachingMode === "standard" && this.pendingOpHashesCache !== null) {
-      metrics?.recordCacheHit();
-      return this.pendingOpHashesCache;
-    }
-    if (this.cachingMode === "standard") {
-      metrics?.recordCacheMiss();
-    }
-    const hashes = await getPendingOpHashes(this.keyhive);
-    if (this.cachingMode === "standard") {
-      this.pendingOpHashesCache = hashes;
-    }
-    return hashes;
-  }
-
-  private async getCachedPublicHashes(metrics?: Metrics): Promise<PeerHashes> {
-    if (this.opCache) {
-      metrics?.recordCacheHit();
-      return this.opCache.getPublicHashes();
-    }
-
-    if (this.cachingMode === "standard" && this.publicHashesCache !== null) {
-      metrics?.recordCacheHit();
-      return this.publicHashesCache;
-    }
-    if (this.cachingMode === "standard") {
-      metrics?.recordCacheMiss();
-    }
-    const agent = await this.keyhive.getAgent(Identifier.publicId());
-    let hashes: PeerHashes;
-    if (!agent) {
-      hashes = new Map();
-    } else {
-      hashes = await getEventHashesForAgent(this.keyhive, agent);
-    }
-    if (this.cachingMode === "standard") {
-      this.publicHashesCache = hashes;
-    }
-    return hashes;
-  }
-
-  private async getCachedPublicEvents(): Promise<Map<Uint8Array, Uint8Array>> {
-    if (this.cachingMode === "standard" && this.publicEventsCache !== null) {
-      return this.publicEventsCache;
-    }
-    const agent = await this.keyhive.getAgent(Identifier.publicId());
-    const events = agent
-      ? await getEventsForAgent(this.keyhive, agent)
-      : new Map<Uint8Array, Uint8Array>();
-    if (this.cachingMode === "standard") {
-      this.publicEventsCache = events;
-    }
-    return events;
-  }
-
-  // Get event hashes for a peer. Returns null if the peer agent is unknown.
-  private async getHashesForPeer(peerId: PeerId, metrics?: Metrics): Promise<PeerHashes | null> {
-    if (this.opCache) {
-      const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
-      const agentIdStr = keyhiveId.toBytes().toString();
-      const cached = this.opCache.getHashesForAgent(agentIdStr);
-      if (cached) {
-        metrics?.recordCacheHit();
-        return cached;
-      }
-      // Agent not in cache
-      metrics?.recordCacheMiss();
-      return null;
-    }
-
-    if (this.cachingMode === "standard") {
-      const cached = this.hashesCache.get(peerId);
-      if (cached) {
-        metrics?.recordCacheHit();
-        return cached;
-      }
-      metrics?.recordCacheMiss();
-    }
-
-    const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
-    const agent = await this.keyhive.getAgent(keyhiveId);
-    if (!agent) {
-      return null;
-    }
-    const hashes = await getEventHashesForAgent(this.keyhive, agent);
-
-    if (this.cachingMode === "standard") {
-      this.hashesCache.set(peerId, hashes);
-    }
-    return hashes;
-  }
-
   // Returns intersection of hashes both peers can access, plus public hashes.
   private async getHashesForPeerPair(
     peerA: PeerId,
@@ -943,10 +802,10 @@ export class SyncProtocol {
     metrics?: Metrics,
   ): Promise<PeerHashes> {
     const hashLookupStart = Date.now();
-    const hashesForA = await this.getHashesForPeer(peerA, metrics) ?? new Map<string, Uint8Array>();
-    const hashesForB = await this.getHashesForPeer(peerB, metrics) ?? new Map<string, Uint8Array>();
+    const hashesForA = await this.cache.getHashesForPeer(this.keyhive, peerA, metrics) ?? new Map<string, Uint8Array>();
+    const hashesForB = await this.cache.getHashesForPeer(this.keyhive, peerB, metrics) ?? new Map<string, Uint8Array>();
 
-    const publicHashes = await this.getCachedPublicHashes(metrics);
+    const publicHashes = await this.cache.getPublicHashes(this.keyhive, metrics);
     metrics?.recordHashLookupTime(Date.now() - hashLookupStart);
 
     const result = new Map<string, Uint8Array>(publicHashes);
@@ -957,87 +816,5 @@ export class SyncProtocol {
     }
 
     return result;
-  }
-
-  // Fetch full event bytes for a set of hashes, with pre-encoded CBOR byte strings.
-  // for immutable event data to avoid redundant WASM lookups.
-  private async getEventBytesForHashes(
-    peerId: PeerId,
-    hashStrings: Set<string>,
-    metrics?: Metrics,
-  ): Promise<EventBytesResult> {
-    const eventLookupStart = Date.now();
-
-    if (this.opCache) {
-      const cached = this.opCache.getEventBytesForHashes(hashStrings);
-      if (cached) {
-        metrics?.recordEventLookupTime(Date.now() - eventLookupStart);
-        return cached;
-      }
-      console.debug(`[AMRepoKeyhive] OpCache miss for ${hashStrings.size} hashes, falling back to WASM`);
-    }
-
-    // Check which hashes already have stored bytes and CBOR
-    const events: Uint8Array[] = [];
-    const cborEvents: Uint8Array[] = [];
-    const missingHashes = new Set<string>();
-    for (const hashStr of hashStrings) {
-      const bytes = this.eventBytesCache.get(hashStr);
-      const cbor = this.eventCborBytesCache.get(hashStr);
-      if (bytes && cbor) {
-        events.push(bytes);
-        cborEvents.push(cbor);
-      } else {
-        missingHashes.add(hashStr);
-      }
-    }
-
-    // If all requested hashes have stored bytes, skip WASM entirely
-    if (missingHashes.size === 0) {
-      metrics?.recordEventLookupTime(Date.now() - eventLookupStart);
-      return { events, cborEvents };
-    }
-
-    // Fetch from WASM for misses
-    const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
-    const agent = await this.keyhive.getAgent(keyhiveId);
-
-    const wasmEvents = new Map<Uint8Array, Uint8Array>();
-
-    if (agent) {
-      const peerEvents = await getEventsForAgent(this.keyhive, agent);
-      for (const [hash, event] of peerEvents) {
-        wasmEvents.set(hash, event);
-      }
-    }
-
-    const publicEvents = await this.getCachedPublicEvents();
-    for (const [hash, event] of publicEvents) {
-      wasmEvents.set(hash, event);
-    }
-
-    // Store all fetched events and collect the ones we need
-    for (const [hash, eventBytes] of wasmEvents.entries()) {
-      const hashStr = hash.toString();
-      if (!this.eventBytesCache.has(hashStr)) {
-        this.eventBytesCache.set(hashStr, eventBytes);
-        this.eventCborBytesCache.set(hashStr, cborByteString(eventBytes));
-        // FIFO eviction: remove oldest entries when over capacity
-        while (this.eventBytesCache.size > SyncProtocol.MAX_CACHED_EVENTS) {
-          const oldest = this.eventBytesCache.keys().next().value;
-          if (oldest !== undefined) {
-            this.eventBytesCache.delete(oldest);
-            this.eventCborBytesCache.delete(oldest);
-          }
-        }
-      }
-      if (missingHashes.has(hashStr)) {
-        events.push(eventBytes);
-        cborEvents.push(this.eventCborBytesCache.get(hashStr)!);
-      }
-    }
-
-    metrics?.recordEventLookupTime(Date.now() - eventLookupStart);
-    return { events, cborEvents };
   }
 }
