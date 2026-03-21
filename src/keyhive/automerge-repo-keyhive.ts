@@ -98,10 +98,6 @@ export class AutomergeRepoKeyhive {
     console.debug(
       `[AMRepoKeyhive] addMemberToDoc: From url ${docUrl} derived Doc Id ${docId.toBytes()}`
     );
-    if (!docId) {
-      console.error(`[AMRepoKeyhive] Failed to parse docId from AutomergeUrl`);
-      return;
-    }
     const doc = await this.keyhive.getDocument(docId);
     if (!doc) {
       console.error(`[AMRepoKeyhive] Failed to add member: doc not found for id ${docId}`);

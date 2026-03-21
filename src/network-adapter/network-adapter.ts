@@ -43,7 +43,7 @@ export interface KeyhiveNetworkAdapterOptions {
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
   private peers: Map<PeerId, Peer> = new Map();
-  private syncIntervalId?: ReturnType<typeof setInterval> | undefined;
+  private syncIntervalId?: ReturnType<typeof setInterval>;
   private compactionIntervalId?: ReturnType<typeof setInterval>;
   private batchProcessor?: BatchProcessor;
 
@@ -150,7 +150,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     });
 
     networkAdapter.on("peer-candidate", (payload) => {
-      if (this.peerId && payload.peerId == this.peerId) {
+      if (this.peerId && payload.peerId === this.peerId) {
         console.warn(`[AMRepoKeyhive] Received peer-candidate msg with our own peerID`);
         return;
       }
@@ -313,8 +313,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             const startTime = Date.now();
             const msgType = message.type ?? "unknown";
             void this.syncProtocol.handleKeyhiveMessage(message, maybeKeyhiveMessageData, this.streamingMetrics).then((handled) => {
-              this.streamingMetrics.recordProcessingTime(Date.now() - startTime);
-              this.streamingMetrics.recordProcessingTimeByType(msgType, Date.now() - startTime);
+              const elapsed = Date.now() - startTime;
+              this.streamingMetrics.recordProcessingTime(elapsed);
+              this.streamingMetrics.recordProcessingTimeByType(msgType, elapsed);
               if (!handled) {
                 this.emit("message", message);
               }

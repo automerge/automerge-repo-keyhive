@@ -313,7 +313,7 @@ export class SyncProtocol {
       const senderAgent = await this.keyhive.getAgent(senderKeyhiveId);
       if (!senderAgent) {
         console.debug(
-          `[AMRepoKeyhive] No agent found for ${message.senderId}, sending keyhive-sync-missing-contact-card`
+          `[AMRepoKeyhive] No agent found for ${message.senderId}, sending keyhive-sync-request-contact-card`
         );
         const response = {
           type: "keyhive-sync-request-contact-card",
@@ -637,7 +637,7 @@ export class SyncProtocol {
         data: data,
       };
       this.sendMessage(request);
-      peer.lastKeyhiveRequestRcvd = Date.now();
+      peer.lastKeyhiveRequestSent = Date.now();
     });
   }
 

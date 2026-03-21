@@ -84,7 +84,7 @@ export class PeriodicEventCache implements EventCache {
       return periodicResult;
     }
 
-    console.debug(`[AMRepoKeyhive] PeriodicEventCache miss for ${hashStrings.size} hashes, falling back to EventBytesCache/WASM`);
+    console.debug(`[AMRepoKeyhive] PeriodicEventCache miss for ${hashStrings.size} hashes, falling back to EventBytesCache/WASM API`);
 
     // Fall back to event bytes cache and keyhive WASM API
     const { events, cborEvents, missingHashes } = this.eventBytesCache.getBytesFor(hashStrings);
