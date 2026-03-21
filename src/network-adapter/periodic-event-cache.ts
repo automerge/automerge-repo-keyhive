@@ -1,6 +1,11 @@
-import { Keyhive, Identifier } from "@keyhive/keyhive/slim";
+import { Identifier, Keyhive } from "@keyhive/keyhive/slim";
+import { PeerId } from "@automerge/automerge-repo/slim";
 import { cborByteString } from "./cbor-builder.js";
 import { getPendingOpHashes } from "../keyhive/keyhive.js";
+import { keyhiveIdentifierFromPeerId } from "../utilities.js";
+import { Metrics } from "./metrics.js";
+import { EventBytesCache, fetchAgentAndPublicEvents } from "./event-bytes-cache.js";
+import type { EventCache } from "./event-cache.js";
 import type { PeerHashes, EventBytesResult } from "./sync-data.js";
 
 // Periodically-refreshed cache of all agent event hashes and event bytes.
@@ -11,7 +16,7 @@ import type { PeerHashes, EventBytesResult } from "./sync-data.js";
 // (agent -> source identifiers -> hashes). This cache resolves both during
 // refresh into flat per-agent PeerHashes maps.
 
-export class OpCache {
+export class PeriodicEventCache implements EventCache {
   // Pre-computed per-agent hash maps (rebuilt on refresh)
   private agentHashes: Map<string, PeerHashes> = new Map();
   private publicHashes: PeerHashes = new Map();
@@ -27,38 +32,89 @@ export class OpCache {
   // totalOps at last refresh (for change detection)
   private lastTotalOps: bigint = 0n;
 
+  // Fallback cache for event bytes misses
+  private eventBytesCache = new EventBytesCache();
+
   private publicIdStr: string = Identifier.publicId().toBytes().toString();
+  // Cache PeerId -> agentIdStr to avoid repeated hex decode and WASM call
+  private peerIdToAgentIdStr: Map<PeerId, string> = new Map();
 
-  getHashesForAgent(agentIdStr: string): PeerHashes | null {
-    return this.agentHashes.get(agentIdStr) ?? null;
-  }
-
-  getPublicHashes(): PeerHashes {
-    return this.publicHashes;
-  }
-
-  agentHasHash(agentIdStr: string, hashStr: string): boolean {
-    return this.agentHashes.get(agentIdStr)?.has(hashStr) ?? false;
-  }
-
-  getPendingOpHashes(): Uint8Array[] {
-    return this.pendingOpHashes;
-  }
-
-  getEventBytesForHashes(hashStrings: Set<string>): EventBytesResult | null {
-    const events: Uint8Array[] = [];
-    const cborEvents: Uint8Array[] = [];
-    for (const hashStr of hashStrings) {
-      const bytes = this.eventBytes.get(hashStr);
-      const cbor = this.eventCborBytes.get(hashStr);
-      if (bytes && cbor) {
-        events.push(bytes);
-        cborEvents.push(cbor);
-      } else {
-        return null;
-      }
+  private agentIdStrForPeer(peerId: PeerId): string {
+    let agentIdStr = this.peerIdToAgentIdStr.get(peerId);
+    if (agentIdStr === undefined) {
+      agentIdStr = keyhiveIdentifierFromPeerId(peerId).toBytes().toString();
+      this.peerIdToAgentIdStr.set(peerId, agentIdStr);
     }
+    return agentIdStr;
+  }
+
+  getPendingOpHashes(_keyhive: Keyhive, metrics?: Metrics): Promise<Uint8Array[]> {
+    metrics?.recordCacheHit();
+    return Promise.resolve(this.pendingOpHashes);
+  }
+
+  getPublicHashes(_keyhive: Keyhive, metrics?: Metrics): Promise<PeerHashes> {
+    metrics?.recordCacheHit();
+    return Promise.resolve(this.publicHashes);
+  }
+
+  getHashesForPeer(_keyhive: Keyhive, peerId: PeerId, metrics?: Metrics): Promise<PeerHashes | null> {
+    const cached = this.agentHashes.get(this.agentIdStrForPeer(peerId));
+    if (cached) {
+      metrics?.recordCacheHit();
+      return Promise.resolve(cached);
+    }
+    // Agent not in cache
+    metrics?.recordCacheMiss();
+    return Promise.resolve(null);
+  }
+
+  async getEventBytesForPeer(
+    keyhive: Keyhive,
+    peerId: PeerId,
+    hashStrings: Set<string>,
+    metrics?: Metrics,
+  ): Promise<EventBytesResult> {
+    const eventLookupStart = Date.now();
+
+    // Try periodic cache first
+    const periodicResult = this.getEventBytesFromPeriodicCache(hashStrings);
+    if (periodicResult) {
+      metrics?.recordEventLookupTime(Date.now() - eventLookupStart);
+      return periodicResult;
+    }
+
+    console.debug(`[AMRepoKeyhive] PeriodicEventCache miss for ${hashStrings.size} hashes, falling back to EventBytesCache/WASM API`);
+
+    // Fall back to event bytes cache and keyhive WASM API
+    const { events, cborEvents, missingHashes } = this.eventBytesCache.getBytesFor(hashStrings);
+
+    if (missingHashes.size === 0) {
+      metrics?.recordEventLookupTime(Date.now() - eventLookupStart);
+      return { events, cborEvents };
+    }
+
+    const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
+    const fetchedEvents = await fetchAgentAndPublicEvents(keyhive, keyhiveId);
+    this.eventBytesCache.storeAndCollect(fetchedEvents, missingHashes, events, cborEvents);
+
+    metrics?.recordEventLookupTime(Date.now() - eventLookupStart);
     return { events, cborEvents };
+  }
+
+  onKeyhiveChanged(): void {
+    // no-op: refreshes on its own timer
+  }
+
+  // TODO: This is called when attempting recovery from storage before
+  // intiating sync protocol. Refreshing here is playing it safe but we
+  // might want to just wait until the next scheduled refresh.
+  async onMaybeChanged(keyhive: Keyhive): Promise<void> {
+    await this.refresh(keyhive);
+  }
+
+  onPeerDisconnected(_peerId: PeerId): void {
+    // no-op: data rebuilt on next refresh
   }
 
   async refresh(keyhive: Keyhive): Promise<boolean> {
@@ -115,36 +171,42 @@ export class OpCache {
 
     return true;
   }
+
+  private getEventBytesFromPeriodicCache(hashStrings: Set<string>): EventBytesResult | null {
+    const events: Uint8Array[] = [];
+    const cborEvents: Uint8Array[] = [];
+    for (const hashStr of hashStrings) {
+      const bytes = this.eventBytes.get(hashStr);
+      const cbor = this.eventCborBytes.get(hashStr);
+      if (bytes && cbor) {
+        events.push(bytes);
+        cborEvents.push(cbor);
+      } else {
+        return null;
+      }
+    }
+    return { events, cborEvents };
+  }
 }
 
-// Build source -> Set<hashStr> from a WASM sources map
+// Build source -> Set<hashStr> from a sources map
 function buildSourceHashes(
   sourcesMap: Map<Uint8Array, Uint8Array[]>,
 ): Map<string, Set<string>> {
   const result = new Map<string, Set<string>>();
   sourcesMap.forEach((hashes: Uint8Array[], sourceIdBytes: Uint8Array) => {
-    const sourceKey = sourceIdBytes.toString();
-    const hashSet = new Set<string>();
-    for (const hash of hashes) {
-      hashSet.add(hash.toString());
-    }
-    result.set(sourceKey, hashSet);
+    result.set(sourceIdBytes.toString(), new Set(hashes.map(h => h.toString())));
   });
   return result;
 }
 
-// Build agent -> sourceKey[] from a WASM agent-sources map
+// Build agent -> sourceKey[] from an agent-sources map
 function buildAgentSources(
   agentSourcesMap: Map<Uint8Array, Uint8Array[]>,
 ): Map<string, string[]> {
   const result = new Map<string, string[]>();
   agentSourcesMap.forEach((sourceIdBytes: Uint8Array[], agentIdBytes: Uint8Array) => {
-    const agentIdStr = agentIdBytes.toString();
-    const sourceKeys: string[] = [];
-    for (const idBytes of sourceIdBytes) {
-      sourceKeys.push(idBytes.toString());
-    }
-    result.set(agentIdStr, sourceKeys);
+    result.set(agentIdBytes.toString(), sourceIdBytes.map(id => id.toString()));
   });
   return result;
 }

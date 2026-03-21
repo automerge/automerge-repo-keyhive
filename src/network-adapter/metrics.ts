@@ -78,7 +78,7 @@ export class Metrics {
   recordIngestion(eventsCount: number, pendingCount: number) {
     this.ingestCount++;
     this.eventsIngested += eventsCount;
-    this.pendingAfterIngest += pendingCount;
+    this.pendingAfterIngest = pendingCount;
   }
 
   recordStorageRetry() {

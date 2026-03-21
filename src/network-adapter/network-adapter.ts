@@ -11,8 +11,11 @@ import {
   verifyData,
 } from "./messages.js";
 import { PromiseQueue, Pending } from "./pending.js";
-import { OpCache } from "./op-cache.js";
 import { Metrics } from "./metrics.js";
+import type { EventCache } from "./event-cache.js";
+import { StandardEventCache } from "./standard-event-cache.js";
+import { EventBytesOnlyEventCache } from "./event-bytes-only-event-cache.js";
+import { PeriodicEventCache } from "./periodic-event-cache.js";
 import { MessageBatch, BatchProcessor } from "./batch.js";
 import {
   KeyhiveStorage,
@@ -20,14 +23,39 @@ import {
 import { SyncProtocol } from "./sync-protocol.js";
 import { Peer } from "./peer.js";
 
+export interface KeyhiveNetworkAdapterOptions {
+  networkAdapter: NetworkAdapter;
+  contactCard: ContactCard;
+  keyhive: Keyhive;
+  keyhiveStorage: KeyhiveStorage;
+  keyhiveQueue: PromiseQueue;
+  periodicallyRequestSync: boolean;
+  cachingMode?: "none" | "standard" | "periodic";
+  // TODO: Replace with dynamic configuration
+  hardcodedRemoteId?: PeerId | null;
+  syncRequestInterval: number;
+  batchInterval?: number;
+  retryPendingFromStorage?: boolean;
+  enableCompaction?: boolean;
+  archiveThreshold?: number;
+}
+
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
   private peers: Map<PeerId, Peer> = new Map();
-  private syncIntervalId?: ReturnType<typeof setInterval> | undefined;
+  private syncIntervalId?: ReturnType<typeof setInterval>;
   private compactionIntervalId?: ReturnType<typeof setInterval>;
   private batchProcessor?: BatchProcessor;
 
-  private opCacheRefreshId?: ReturnType<typeof setInterval>;
+  private periodicCacheRefreshId?: ReturnType<typeof setInterval>;
+
+  private networkAdapter: NetworkAdapter;
+  private contactCard: ContactCard;
+  private keyhive: Keyhive;
+  private keyhiveStorage: KeyhiveStorage;
+  private keyhiveQueue: PromiseQueue;
+  // TODO: Replace with dynamic configuration
+  private hardcodedRemoteId: PeerId | null;
 
   private batchInterval: number | undefined;
   private keyhiveMsgBatch: MessageBatch;
@@ -36,37 +64,50 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
   private syncProtocol: SyncProtocol;
 
-  constructor(
-    private networkAdapter: NetworkAdapter,
-    private contactCard: ContactCard,
-    private keyhive: Keyhive,
-    private keyhiveStorage: KeyhiveStorage,
-    private keyhiveQueue: PromiseQueue,
-    periodicallyRequestSync: boolean,
-    cachingMode: "none" | "standard" | "periodic" = "none",
-    // TODO: Replace with dynamic configuration
-    private hardcodedRemoteId: PeerId | null = null,
-    private syncRequestInterval: number,
-    batchInterval?: number,
-    retryPendingFromStorage: boolean = true,
-    enableCompaction: boolean = true,
-    archiveThreshold: number = 200,
-  ) {
+  constructor(options: KeyhiveNetworkAdapterOptions) {
     super();
 
-    let opCache: OpCache | null = null;
+    const {
+      networkAdapter,
+      contactCard,
+      keyhive,
+      keyhiveStorage,
+      keyhiveQueue,
+      periodicallyRequestSync,
+      cachingMode = "none",
+      hardcodedRemoteId = null,
+      syncRequestInterval,
+      batchInterval,
+      retryPendingFromStorage = true,
+      enableCompaction = true,
+      archiveThreshold = 200,
+    } = options;
+
+    this.networkAdapter = networkAdapter;
+    this.contactCard = contactCard;
+    this.keyhive = keyhive;
+    this.keyhiveStorage = keyhiveStorage;
+    this.keyhiveQueue = keyhiveQueue;
+    this.hardcodedRemoteId = hardcodedRemoteId;
+
+    let cache: EventCache;
     if (cachingMode === "periodic") {
-      opCache = new OpCache();
+      const periodicCache = new PeriodicEventCache();
+      cache = periodicCache;
       // Periodic refresh at the same interval as sync requests
-      this.opCacheRefreshId = setInterval(() => {
-        void this.keyhiveQueue.run(() => opCache!.refresh(this.keyhive)).catch((error) =>
-          console.error("[AMRepoKeyhive] OpCache refresh failed:", error)
+      this.periodicCacheRefreshId = setInterval(() => {
+        void this.keyhiveQueue.run(() => periodicCache.refresh(this.keyhive)).catch((error) =>
+          console.error("[AMRepoKeyhive] PeriodicEventCache refresh failed:", error)
         );
       }, syncRequestInterval);
       // Initial refresh
-      void this.keyhiveQueue.run(() => opCache!.refresh(this.keyhive)).catch((error) =>
-        console.error("[AMRepoKeyhive] Initial OpCache refresh failed:", error)
+      void this.keyhiveQueue.run(() => periodicCache.refresh(this.keyhive)).catch((error) =>
+        console.error("[AMRepoKeyhive] Initial PeriodicEventCache refresh failed:", error)
       );
+    } else if (cachingMode === "standard") {
+      cache = new StandardEventCache();
+    } else {
+      cache = new EventBytesOnlyEventCache();
     }
 
     this.syncProtocol = new SyncProtocol(
@@ -76,14 +117,13 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         keyhiveQueue,
         peers: this.peers,
         contactCard,
-        opCache,
+        cache,
         getPeerId: () => this.peerId,
         getMetrics: () => this.streamingMetrics,
         send: (message, contactCard?) => this.send(message, contactCard),
         emit: (event) => (this.emit as any)(event),
       },
       {
-        cachingMode,
         archiveThreshold,
         retryPendingFromStorage,
         minSyncRequestInterval: 1000,
@@ -110,7 +150,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     });
 
     networkAdapter.on("peer-candidate", (payload) => {
-      if (this.peerId && payload.peerId == this.peerId) {
+      if (this.peerId && payload.peerId === this.peerId) {
         console.warn(`[AMRepoKeyhive] Received peer-candidate msg with our own peerID`);
         return;
       }
@@ -187,9 +227,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       this.batchProcessor.stop();
       this.batchProcessor = undefined;
     }
-    if (this.opCacheRefreshId) {
-      clearInterval(this.opCacheRefreshId);
-      this.opCacheRefreshId = undefined;
+    if (this.periodicCacheRefreshId) {
+      clearInterval(this.periodicCacheRefreshId);
+      this.periodicCacheRefreshId = undefined;
     }
     if (this.metricsIntervalId) {
       clearInterval(this.metricsIntervalId);
@@ -273,8 +313,9 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             const startTime = Date.now();
             const msgType = message.type ?? "unknown";
             void this.syncProtocol.handleKeyhiveMessage(message, maybeKeyhiveMessageData, this.streamingMetrics).then((handled) => {
-              this.streamingMetrics.recordProcessingTime(Date.now() - startTime);
-              this.streamingMetrics.recordProcessingTimeByType(msgType, Date.now() - startTime);
+              const elapsed = Date.now() - startTime;
+              this.streamingMetrics.recordProcessingTime(elapsed);
+              this.streamingMetrics.recordProcessingTimeByType(msgType, elapsed);
               if (!handled) {
                 this.emit("message", message);
               }

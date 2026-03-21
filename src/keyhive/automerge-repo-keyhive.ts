@@ -98,10 +98,6 @@ export class AutomergeRepoKeyhive {
     console.debug(
       `[AMRepoKeyhive] addMemberToDoc: From url ${docUrl} derived Doc Id ${docId.toBytes()}`
     );
-    if (!docId) {
-      console.error(`[AMRepoKeyhive] Failed to parse docId from AutomergeUrl`);
-      return;
-    }
     const doc = await this.keyhive.getDocument(docId);
     if (!doc) {
       console.error(`[AMRepoKeyhive] Failed to add member: doc not found for id ${docId}`);
@@ -191,11 +187,11 @@ export class AutomergeRepoKeyhive {
     console.debug(`[AMRepoKeyhive] bestAccessForDoc: docId=${docId}`)
     const idAccess = await this.accessForDoc(id, docId);
     const idStr = idAccess ? idAccess.toString() : "None";
-    const idAccessLevel = accessLevels[idAccess ? idAccess.toString() : "None"];
+    const idAccessLevel = accessLevels[idStr];
     const publicId = Identifier.publicId();
     const publicAccess = await this.keyhive.accessForDoc(publicId, docId);
     const publicStr = publicAccess ? publicAccess.toString() : "None";
-    const publicAccessLevel = accessLevels[publicAccess ? publicAccess.toString() : "None"];
+    const publicAccessLevel = accessLevels[publicStr];
     console.debug(`[AMRepoKeyhive] bestAccessForDoc: docId=${docId}, idStr=${idStr}, publicStr=${publicStr}, idAccessLevel=${idAccessLevel}, publicAccessLevel=${publicAccessLevel}`);
     return (idAccessLevel > publicAccessLevel) ? idAccess : publicAccess;
   }
