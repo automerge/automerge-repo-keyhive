@@ -97,21 +97,21 @@ export async function initializeAutomergeRepoKeyhive(options: {
       hardcodedServerPeerId = serverPeerId
     }
 
-    return new KeyhiveNetworkAdapter(
+    return new KeyhiveNetworkAdapter({
       networkAdapter,
-      active.contactCard,
+      contactCard: active.contactCard,
       keyhive,
       keyhiveStorage,
       keyhiveQueue,
       periodicallyRequestSync,
       cachingMode,
-      hardcodedServerPeerId,
+      hardcodedRemoteId: hardcodedServerPeerId,
       syncRequestInterval,
-      batchIntervalOverride,
+      batchInterval: batchIntervalOverride,
       retryPendingFromStorage,
       enableCompaction,
-      archiveThresholdOverride ?? archiveThreshold,
-    )
+      archiveThreshold: archiveThresholdOverride ?? archiveThreshold,
+    })
   };
 
   const keyhiveNetworkAdapter = createKeyhiveNetworkAdapter(options.networkAdapter, onlyShareWithHardcodedServerPeerId, periodicallyRequestSync, syncRequestInterval, batchInterval, archiveThreshold);
