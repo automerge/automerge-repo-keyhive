@@ -38,15 +38,15 @@ const accessLevels: Record<string, number> = {
 
 export class AutomergeRepoKeyhive {
   constructor(
-    public active: Active,
-    public keyhive: Keyhive,
-    public keyhiveStorage: KeyhiveStorage,
-    public peerId: PeerId,
-    public syncServer: SyncServer,
-    public networkAdapter: KeyhiveNetworkAdapter,
-    public emitter: KeyhiveEventEmitter,
-    public idFactory: (heads: Heads) => Promise<Uint8Array>,
-    public createKeyhiveNetworkAdapter: (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean, periodicallyRequestSync: boolean, syncRequestInterval: number, batchInterval?: number, archiveThreshold?: number) => KeyhiveNetworkAdapter,
+    public readonly active: Active,
+    public readonly keyhive: Keyhive,
+    public readonly keyhiveStorage: KeyhiveStorage,
+    public readonly peerId: PeerId,
+    public readonly syncServer: SyncServer,
+    public readonly networkAdapter: KeyhiveNetworkAdapter,
+    public readonly emitter: KeyhiveEventEmitter,
+    public readonly idFactory: (heads: Heads) => Promise<Uint8Array>,
+    public readonly createKeyhiveNetworkAdapter: (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean, periodicallyRequestSync: boolean, syncRequestInterval: number, batchInterval?: number, archiveThreshold?: number) => KeyhiveNetworkAdapter,
   ) {}
 
   // Configure `AutomergeRepoKeyhive` to notify the provided `Repo` about
