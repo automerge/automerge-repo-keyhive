@@ -14,8 +14,6 @@
     "watch": "tsc --watch",
     "lint": "npx prettier --check \"** /*.js\" --check \"**/*.ts\"; echo \"Run pnpm lint:fix to fix\"",
     "lint:fix": "npx prettier --write \"** /*.js\" --write \"**/*.ts\"",
-    "bench": "vitest bench",
-    "bench:extract": "npx tsx bench/extract-data.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "pnpm build"
