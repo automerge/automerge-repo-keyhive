@@ -136,11 +136,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
       ) {
         pendingPrekeySecrets = true;
       }
-      // TODO: We are currently filtering out CGKA ops in the sync protocol but
-      // will need to restore them once we add encryption.
-      if (event.variant !== "CGKA_OPERATION") {
-        pendingSync = true;
-      }
+      pendingSync = true;
     }
 
     // Queue a single flush for all events that accumulate before the queue runs.
