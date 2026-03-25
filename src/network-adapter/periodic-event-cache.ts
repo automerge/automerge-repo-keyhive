@@ -141,22 +141,26 @@ export class PeriodicEventCache implements EventCache {
     // Build source -> hashes indexes
     const prekeySourceHashes = buildSourceHashes(allAgentEvents.prekeySources);
     const membershipSourceHashes = buildSourceHashes(allAgentEvents.membershipSources);
+    const cgkaSourceHashes = buildSourceHashes(allAgentEvents.cgkaSources);
 
     // Build agent -> sources indexes
     const agentPrekeySources = buildAgentSources(allAgentEvents.agentPrekeySources);
     const agentMembershipSources = buildAgentSources(allAgentEvents.agentMembershipSources);
+    const agentCgkaSources = buildAgentSources(allAgentEvents.agentCgkaSources);
 
     // Pre-compute per-agent PeerHashes maps
     const newAgentHashes = new Map<string, PeerHashes>();
     const allAgentIds = new Set([
       ...agentPrekeySources.keys(),
       ...agentMembershipSources.keys(),
+      ...agentCgkaSources.keys(),
     ]);
     for (const agentIdStr of allAgentIds) {
       const peerHashes: PeerHashes = new Map();
 
       collectSourceHashes(agentPrekeySources.get(agentIdStr), prekeySourceHashes, allHashes, peerHashes);
       collectSourceHashes(agentMembershipSources.get(agentIdStr), membershipSourceHashes, allHashes, peerHashes);
+      collectSourceHashes(agentCgkaSources.get(agentIdStr), cgkaSourceHashes, allHashes, peerHashes);
 
       newAgentHashes.set(agentIdStr, peerHashes);
     }

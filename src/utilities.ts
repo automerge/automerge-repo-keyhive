@@ -61,7 +61,7 @@ export async function getEventHashesForAgent(
 ): Promise<Map<string, Uint8Array>> {
   const hashMap = new Map<string, Uint8Array>();
 
-  // Get relevant membership + prekey hashes for the agent
+  // Get relevant membership + prekey + CGKA hashes for the agent
   const eventHashes: Uint8Array[] = await keyhive.eventHashesForAgent(agent);
   for (const hash of eventHashes) {
     hashMap.set(hash.toString(), hash);
