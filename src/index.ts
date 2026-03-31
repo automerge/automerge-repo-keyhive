@@ -44,5 +44,23 @@ export {
   verifyingKeyPeerIdWithoutSuffix,
 } from "./utilities.js";
 
-// Re-export all keyhive types
+// Re-export all keyhive types, with a compatibility shim for Access
+// that maps old access level names ("pull"/"write") to new ones ("relay"/"edit").
 export * from "@keyhive/keyhive/slim";
+
+import { Access as _Access } from "@keyhive/keyhive/slim";
+
+const ACCESS_COMPAT: Record<string, string> = {
+  pull: "relay",
+  write: "edit",
+};
+
+/** Wraps the WASM Access class to accept old access level names. */
+export const Access = new Proxy(_Access, {
+  get(target, prop, receiver) {
+    if (prop === "tryFromString") {
+      return (s: string) => target.tryFromString(ACCESS_COMPAT[s] ?? s);
+    }
+    return Reflect.get(target, prop, receiver);
+  },
+});

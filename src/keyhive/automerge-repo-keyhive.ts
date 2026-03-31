@@ -4,6 +4,7 @@ import {
   NetworkAdapter,
   PeerId,
   Repo,
+  type SubductionPolicy,
 } from "@automerge/automerge-repo/slim";
 import { hexToUint8Array } from "../utilities.js";
 import {
@@ -75,6 +76,83 @@ export class AutomergeRepoKeyhive {
     })
   }
 
+  buildServerSubductionPolicy(): SubductionPolicy {
+    const keyhive = this.keyhive;
+
+    // Legacy (non-keyhive) doc IDs are 16 bytes padded to 32 with zeros.
+    const isLegacyDocId = (bytes: Uint8Array): boolean => {
+      for (let i = 16; i < 32; i++) {
+        if (bytes[i] !== 0) return false;
+      }
+      return true;
+    };
+
+    const hasAccess = async (id: Identifier, docId: KeyhiveDocumentId, minLevel: number): Promise<boolean> => {
+      try {
+        // Check public access
+        const publicAccess = await keyhive.accessForDoc(Identifier.publicId(), docId);
+        const publicStr = publicAccess ? publicAccess.toString() : "None";
+        if (accessLevels[publicStr] >= minLevel) return true;
+
+        // Check direct access
+        const access = await keyhive.accessForDoc(id, docId);
+        const accessStr = access ? access.toString() : "None";
+        const result = accessLevels[accessStr] >= minLevel;
+        if (!result) {
+          console.log(`[SubductionPolicy] DENIED: publicAccess=${publicStr} directAccess=${accessStr} minLevel=${minLevel} docId=${docId}`);
+        }
+        return result;
+      } catch (e) {
+        console.error(`[SubductionPolicy] hasAccess THREW for docId=${docId}:`, e);
+        return false;
+      }
+    };
+
+    return {
+      async authorizeConnect(_peerId) {
+        // Allow all connections. Doc-level checks (authorizeFetch,
+        // authorizePut, filterAuthorizedFetch) gate actual access.
+      },
+
+      async authorizeFetch(peerId, sedimentreeId) {
+        const sidBytes = sedimentreeId.toBytes();
+        if (isLegacyDocId(sidBytes)) return;
+        const identifier = new Identifier(peerId.toBytes());
+        const docId = new KeyhiveDocumentId(sidBytes);
+        if (!(await hasAccess(identifier, docId, accessLevels.Relay))) {
+          throw new Error("insufficient access to fetch: requires at least Relay");
+        }
+      },
+
+      async authorizePut(_requestor, author, sedimentreeId) {
+        const sidBytes = sedimentreeId.toBytes();
+        if (isLegacyDocId(sidBytes)) return;
+        const identifier = new Identifier(author.toBytes());
+        const docId = new KeyhiveDocumentId(sidBytes);
+        if (!(await hasAccess(identifier, docId, accessLevels.Edit))) {
+          throw new Error("insufficient access to put: requires at least Edit");
+        }
+      },
+
+      async filterAuthorizedFetch(peerId, ids) {
+        const identifier = new Identifier(peerId.toBytes());
+        const authorized = [];
+        for (const sid of ids) {
+          const sidBytes = sid.toBytes();
+          if (isLegacyDocId(sidBytes)) {
+            authorized.push(sid);
+            continue;
+          }
+          const docId = new KeyhiveDocumentId(sidBytes);
+          if (await hasAccess(identifier, docId, accessLevels.Relay)) {
+            authorized.push(sid);
+          }
+        }
+        return authorized;
+      },
+    };
+  }
+
   async receiveContactCard(contactCard: ContactCard
   ): Promise<Individual | undefined> {
     return receiveContactCard(this.keyhive, contactCard, this.keyhiveStorage);
@@ -127,6 +205,11 @@ export class AutomergeRepoKeyhive {
 
     const membered = doc.toMembered();
     await this.keyhive.revokeMember(agent, true, membered);
+  }
+
+  /** @deprecated Use {@link addSyncServerRelayToDoc} instead. */
+  async addSyncServerPullToDoc(docUrl: AutomergeUrl) {
+    return this.addSyncServerRelayToDoc(docUrl);
   }
 
   async addSyncServerRelayToDoc(docUrl: AutomergeUrl) {
