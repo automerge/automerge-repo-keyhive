@@ -143,7 +143,8 @@ export class SyncProtocol {
       return;
     }
     this.syncRequestQueued = true;
-    void this.initiateKeyhiveSync(peerId, false, false).catch((error) =>
+    void this.initiateKeyhiveSync(peerId, false, false).then(() => {
+    }).catch((error) =>
       console.error("[AMRepoKeyhive] Periodic sync failed:", error)
     ).finally(() => {
       this.syncRequestQueued = false;

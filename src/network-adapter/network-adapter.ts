@@ -242,6 +242,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
     }
+    if (message.type === "subduction-connection") {
+      this.networkAdapter.send(message);
+      return;
+    }
     void this.signAndSend(message, contactCard).catch((error) =>
       console.error(`[AMRepoKeyhive] Failed to sign and send (type=${message.type}):`, error)
     );
@@ -286,6 +290,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         console.debug(
           `[AMRepoKeyhive] Unknown remote peer ${message.senderId}. Ignoring message!`
         );
+        return;
+      }
+      if (message.type === "subduction-connection") {
+        this.emit("message", message);
         return;
       }
       if (!("data" in message) || message.data === undefined) {
