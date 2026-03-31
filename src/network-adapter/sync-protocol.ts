@@ -40,6 +40,7 @@ export interface SyncProtocolDeps {
 export class SyncProtocol {
   private lastEmittedTotalOps: bigint = 0n;
   private syncRequestQueued: boolean = false;
+  private fullSyncRequestQueued: boolean = false;
 
   private readonly keyhive: Keyhive;
   private readonly keyhiveStorage: KeyhiveStorage;
@@ -94,7 +95,13 @@ export class SyncProtocol {
       );
     }
     message.data = keyhiveMessageData.signed.payload;
+    return this.dispatchByType(message, metrics);
+  }
 
+  async dispatchByType(
+    message: Message,
+    metrics: Metrics,
+  ): Promise<boolean> {
     if (message.type === "keyhive-sync-request") {
       await this.sendKeyhiveSyncResponse(message, metrics);
       return true;
@@ -143,10 +150,28 @@ export class SyncProtocol {
       return;
     }
     this.syncRequestQueued = true;
-    void this.initiateKeyhiveSync(peerId, false, false).catch((error) =>
+    void this.initiateKeyhiveSync(peerId, false, false).then(() => {
+    }).catch((error) =>
       console.error("[AMRepoKeyhive] Periodic sync failed:", error)
     ).finally(() => {
       this.syncRequestQueued = false;
+    });
+  }
+
+  requestFullKeyhiveSync(): void {
+    const peerId = this.getPeerId();
+    if (peerId === undefined) {
+      return;
+    }
+    if (this.fullSyncRequestQueued) {
+      return;
+    }
+    this.fullSyncRequestQueued = true;
+    void this.initiateKeyhiveSync(peerId, false, false, true).then(() => {
+    }).catch((error) =>
+      console.error("[AMRepoKeyhive] Full sync failed:", error)
+    ).finally(() => {
+      this.fullSyncRequestQueued = false;
     });
   }
 
@@ -165,7 +190,8 @@ export class SyncProtocol {
   private async initiateKeyhiveSync(
     maybeSenderId: PeerId | undefined,
     includeContactCard: boolean,
-    attemptRecovery: boolean = false
+    attemptRecovery: boolean = false,
+    forceFullRequest: boolean = false,
   ): Promise<void> {
     const peerId = this.requirePeerId();
 
@@ -226,7 +252,7 @@ export class SyncProtocol {
           this.sendMessage(message, maybeContactCard);
         } else {
           const peer = this.peers.get(targetId);
-          if (peer !== undefined && peer.syncpoint !== null) {
+          if (peer !== undefined && peer.syncpoint !== null && !forceFullRequest) {
             // Send lightweight sync check instead of full request
             const pendingOpHashes = await this.cache.getPendingOpHashes(this.keyhive);
             const hashes = await this.getHashesForPeerPair(senderId, targetId);
