@@ -30,9 +30,9 @@ import { signData } from "../network-adapter/messages.js";
 // the best access method to WASM API.
 const accessLevels: Record<string, number> = {
   None: 0,
-  Pull: 1,
+  Relay: 1,
   Read: 2,
-  Write: 3,
+  Edit: 3,
   Admin: 4,
 };
 
@@ -129,7 +129,7 @@ export class AutomergeRepoKeyhive {
     await this.keyhive.revokeMember(agent, true, membered);
   }
 
-  async addSyncServerPullToDoc(docUrl: AutomergeUrl) {
+  async addSyncServerRelayToDoc(docUrl: AutomergeUrl) {
     if (!this.syncServer) return;
     try {
       const serverContactCard = ContactCard.fromJson(
@@ -139,12 +139,12 @@ export class AutomergeRepoKeyhive {
         console.error("[AMRepoKeyhive] Failed to parse sync server contact card");
         return;
       }
-      const pullAccess = Access.tryFromString("pull");
-      if (!pullAccess) {
-        console.error("[AMRepoKeyhive] Failed to create Pull access");
+      const relayAccess = Access.tryFromString("relay");
+      if (!relayAccess) {
+        console.error("[AMRepoKeyhive] Failed to create Relay access");
         return;
       }
-      await this.addMemberToDoc(docUrl, serverContactCard, pullAccess);
+      await this.addMemberToDoc(docUrl, serverContactCard, relayAccess);
     } catch (err) {
       console.error("[AMRepoKeyhive] Failed to add sync server to doc:", err);
     }
