@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@automerge/automerge-repo':
-        specifier: link:../automerge-repo/packages/automerge-repo
-        version: link:../automerge-repo/packages/automerge-repo
+        specifier: 2.6.0-subduction.10
+        version: 2.6.0-subduction.10
       '@automerge/automerge-repo-network-websocket':
-        specifier: 2.5.3
-        version: 2.5.3
+        specifier: 2.6.0-subduction.10
+        version: 2.6.0-subduction.10
       '@keyhive/keyhive':
         specifier: 0.0.0-alpha.56
         version: 0.0.0-alpha.56
@@ -57,14 +57,17 @@ importers:
 
 packages:
 
-  '@automerge/automerge-repo-network-websocket@2.5.3':
-    resolution: {integrity: sha512-p6K1YLo34cyGxJ6oMWqeBbWX9rGvEPGyPdX2eq8S/iWNDjYf8lbjKSOhOD8DX87uAMZN/y1XOY/RckwS8lPJbQ==}
+  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.10':
+    resolution: {integrity: sha512-YSb6n6sKyk7nzKsN5VUNDceIP4GA+vHGCBU5uO9FZLnWzbEvhHY8ppxqMOX/d3z/9X/pWjEH0abcLwuL0hce8g==}
 
-  '@automerge/automerge-repo@2.5.3':
-    resolution: {integrity: sha512-5ppzsUlzCs6PY+GeFlquaYLnVnYPz/hWzedep37zjb15tqZju1ukPPkBzT7KGEhEAnA99l4vfhfqSVC+1GktJg==}
+  '@automerge/automerge-repo@2.6.0-subduction.10':
+    resolution: {integrity: sha512-+5Qc+gphWMZihtlMkW8TxnFf6T6QE/rbkWVb8C2HN75vMJ90z3tSIc7t+wuuXxbauNhiEu6dQ7T9jt8gZkiWxQ==}
 
-  '@automerge/automerge@3.2.1':
-    resolution: {integrity: sha512-xsEZlZe8lWyVCbD7Z7roH4X6ZKlRxMmmumb0M5CuxJWptUEfYsf+1z9lFEJh4aDBbWTLAgxsXd+TBi6jKTj0+g==}
+  '@automerge/automerge-subduction@0.7.0':
+    resolution: {integrity: sha512-I838jrX+j6zeLEIyszuA246OY1HnTyS+bXODJAVlBmXGM0QzasRePulNrzJtclvowzhY56SybUj4+j/PNCdBhA==}
+
+  '@automerge/automerge@3.2.5':
+    resolution: {integrity: sha512-tCdaGDTLaRzBJV+Q9zMyyEH/vUFkBNh21jpwlpcEYV7gs5r63xh9UFa1N3yNJ5ZzmiLBD42TIBeqK+g54sLp0w==}
 
   '@cbor-extract/cbor-extract-darwin-arm64@2.2.0':
     resolution: {integrity: sha512-P7swiOAdF7aSi0H+tHtHtr6zrpF3aAq/W9FXx5HektRvLTM2O89xCyXF3pk7pLc7QpaY7AoaE8UowVf9QBdh3w==}
@@ -339,67 +342,56 @@ packages:
     resolution: {integrity: sha512-dV3T9MyAf0w8zPVLVBptVlzaXxka6xg1f16VAQmjg+4KMSTWDvhimI/Y6mp8oHwNrmnmVl9XxJ/w/mO4uIQONA==}
     cpu: [arm]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-arm-musleabihf@4.53.5':
     resolution: {integrity: sha512-wIGYC1x/hyjP+KAu9+ewDI+fi5XSNiUi9Bvg6KGAh2TsNMA3tSEs+Sh6jJ/r4BV/bx/CyWu2ue9kDnIdRyafcQ==}
     cpu: [arm]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-arm64-gnu@4.53.5':
     resolution: {integrity: sha512-Y+qVA0D9d0y2FRNiG9oM3Hut/DgODZbU9I8pLLPwAsU0tUKZ49cyV1tzmB/qRbSzGvY8lpgGkJuMyuhH7Ma+Vg==}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-arm64-musl@4.53.5':
     resolution: {integrity: sha512-juaC4bEgJsyFVfqhtGLz8mbopaWD+WeSOYr5E16y+1of6KQjc0BpwZLuxkClqY1i8sco+MdyoXPNiCkQou09+g==}
     cpu: [arm64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-loong64-gnu@4.53.5':
     resolution: {integrity: sha512-rIEC0hZ17A42iXtHX+EPJVL/CakHo+tT7W0pbzdAGuWOt2jxDFh7A/lRhsNHBcqL4T36+UiAgwO8pbmn3dE8wA==}
     cpu: [loong64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-ppc64-gnu@4.53.5':
     resolution: {integrity: sha512-T7l409NhUE552RcAOcmJHj3xyZ2h7vMWzcwQI0hvn5tqHh3oSoclf9WgTl+0QqffWFG8MEVZZP1/OBglKZx52Q==}
     cpu: [ppc64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-riscv64-gnu@4.53.5':
     resolution: {integrity: sha512-7OK5/GhxbnrMcxIFoYfhV/TkknarkYC1hqUw1wU2xUN3TVRLNT5FmBv4KkheSG2xZ6IEbRAhTooTV2+R5Tk0lQ==}
     cpu: [riscv64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-riscv64-musl@4.53.5':
     resolution: {integrity: sha512-GwuDBE/PsXaTa76lO5eLJTyr2k8QkPipAyOrs4V/KJufHCZBJ495VCGJol35grx9xryk4V+2zd3Ri+3v7NPh+w==}
     cpu: [riscv64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-s390x-gnu@4.53.5':
     resolution: {integrity: sha512-IAE1Ziyr1qNfnmiQLHBURAD+eh/zH1pIeJjeShleII7Vj8kyEm2PF77o+lf3WTHDpNJcu4IXJxNO0Zluro8bOw==}
     cpu: [s390x]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-x64-gnu@4.53.5':
     resolution: {integrity: sha512-Pg6E+oP7GvZ4XwgRJBuSXZjcqpIW3yCBhK4BcsANvb47qMvAbCjR6E+1a/U2WXz1JJxp9/4Dno3/iSJLcm5auw==}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-x64-musl@4.53.5':
     resolution: {integrity: sha512-txGtluxDKTxaMDzUduGP0wdfng24y1rygUMnmlUJ88fzCCULCLn7oE5kb2+tRB+MWq1QDZT6ObT5RrR8HFRKqg==}
     cpu: [x64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-openharmony-arm64@4.53.5':
     resolution: {integrity: sha512-3DFiLPnTxiOQV993fMc+KO8zXHTcIjgaInrqlG8zDp1TlhYl6WgrOHuJkJQ6M8zHEcntSJsUp1XFZSY8C1DYbg==}
@@ -1147,9 +1139,9 @@ packages:
 
 snapshots:
 
-  '@automerge/automerge-repo-network-websocket@2.5.3':
+  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.10':
     dependencies:
-      '@automerge/automerge-repo': 2.5.3
+      '@automerge/automerge-repo': 2.6.0-subduction.10
       cbor-x: 1.6.0
       debug: 4.4.3
       eventemitter3: 5.0.1
@@ -1160,20 +1152,27 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@automerge/automerge-repo@2.5.3':
+  '@automerge/automerge-repo@2.6.0-subduction.10':
     dependencies:
-      '@automerge/automerge': 3.2.1
+      '@automerge/automerge': 3.2.5
+      '@automerge/automerge-subduction': 0.7.0
       bs58check: 3.0.1
       cbor-x: 1.6.0
       debug: 4.4.3
       eventemitter3: 5.0.1
       fast-sha256: 1.3.0
+      isomorphic-ws: 5.0.0(ws@8.18.3)
       uuid: 9.0.1
+      ws: 8.18.3
       xstate: 5.25.0
     transitivePeerDependencies:
+      - bufferutil
       - supports-color
+      - utf-8-validate
 
-  '@automerge/automerge@3.2.1': {}
+  '@automerge/automerge-subduction@0.7.0': {}
+
+  '@automerge/automerge@3.2.5': {}
 
   '@cbor-extract/cbor-extract-darwin-arm64@2.2.0':
     optional: true
