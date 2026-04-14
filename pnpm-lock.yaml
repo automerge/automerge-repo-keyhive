@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@automerge/automerge-repo':
-        specifier: link:../automerge-repo/packages/automerge-repo
-        version: link:../automerge-repo/packages/automerge-repo
+        specifier: 2.6.0-subduction.11
+        version: 2.6.0-subduction.11
       '@automerge/automerge-repo-network-websocket':
-        specifier: 2.6.0-subduction.10
-        version: 2.6.0-subduction.10
+        specifier: 2.6.0-subduction.11
+        version: 2.6.0-subduction.11
       '@keyhive/keyhive':
         specifier: 0.0.0-alpha.56
         version: 0.0.0-alpha.56
@@ -57,11 +57,11 @@ importers:
 
 packages:
 
-  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.10':
-    resolution: {integrity: sha512-YSb6n6sKyk7nzKsN5VUNDceIP4GA+vHGCBU5uO9FZLnWzbEvhHY8ppxqMOX/d3z/9X/pWjEH0abcLwuL0hce8g==}
+  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.11':
+    resolution: {integrity: sha512-cqk8atx7FtUwJaGyasFa97KL3aHoOOjBMRh4SB4NsQjolxowpRQZUD2zATe22lKC1hK8itW9DZWWYdxXtanSVw==}
 
-  '@automerge/automerge-repo@2.6.0-subduction.10':
-    resolution: {integrity: sha512-+5Qc+gphWMZihtlMkW8TxnFf6T6QE/rbkWVb8C2HN75vMJ90z3tSIc7t+wuuXxbauNhiEu6dQ7T9jt8gZkiWxQ==}
+  '@automerge/automerge-repo@2.6.0-subduction.11':
+    resolution: {integrity: sha512-7e5LWBFUTrG8+XY7UWLeAk2UgXs1GHGispB3Td2R1mhmY6bQL8KaveHD1rgAL3YOKcjVMToGl5ei+ZRTLwJ6Kg==}
 
   '@automerge/automerge-subduction@0.7.0':
     resolution: {integrity: sha512-I838jrX+j6zeLEIyszuA246OY1HnTyS+bXODJAVlBmXGM0QzasRePulNrzJtclvowzhY56SybUj4+j/PNCdBhA==}
@@ -1139,9 +1139,9 @@ packages:
 
 snapshots:
 
-  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.10':
+  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.11':
     dependencies:
-      '@automerge/automerge-repo': 2.6.0-subduction.10
+      '@automerge/automerge-repo': 2.6.0-subduction.11
       cbor-x: 1.6.0
       debug: 4.4.3
       eventemitter3: 5.0.1
@@ -1152,7 +1152,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@automerge/automerge-repo@2.6.0-subduction.10':
+  '@automerge/automerge-repo@2.6.0-subduction.11':
     dependencies:
       '@automerge/automerge': 3.2.5
       '@automerge/automerge-subduction': 0.7.0
