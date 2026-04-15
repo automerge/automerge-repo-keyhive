@@ -1,9 +1,11 @@
 import {
   AutomergeUrl,
+  type BinaryDocumentId,
   Heads,
   NetworkAdapter,
   PeerId,
   Repo,
+  stringifyAutomergeUrl,
   type SubductionPolicy,
 } from "@automerge/automerge-repo/slim";
 import { hexToUint8Array } from "../utilities.js";
@@ -87,7 +89,7 @@ export class AutomergeRepoKeyhive {
       return true;
     };
 
-    const hasAccess = async (id: Identifier, docId: KeyhiveDocumentId, minLevel: number): Promise<boolean> => {
+    const hasAccess = async (id: Identifier, docUrl: AutomergeUrl, docId: KeyhiveDocumentId, minLevel: number): Promise<boolean> => {
       try {
         // Check public access
         const publicAccess = await keyhive.accessForDoc(Identifier.publicId(), docId);
@@ -99,11 +101,11 @@ export class AutomergeRepoKeyhive {
         const accessStr = access ? access.toString() : "None";
         const result = accessLevels[accessStr] >= minLevel;
         if (!result) {
-          console.log(`[SubductionPolicy] DENIED: publicAccess=${publicStr} directAccess=${accessStr} minLevel=${minLevel} docId=${docId}`);
+          console.log(`[SubductionPolicy] DENIED: publicAccess=${publicStr} directAccess=${accessStr} minLevel=${minLevel} docUrl=${docUrl}`);
         }
         return result;
       } catch (e) {
-        console.error(`[SubductionPolicy] hasAccess THREW for docId=${docId}:`, e);
+        console.error(`[SubductionPolicy] hasAccess THREW for docUrl=${docUrl}:`, e);
         return false;
       }
     };
@@ -119,7 +121,8 @@ export class AutomergeRepoKeyhive {
         if (isLegacyDocId(sidBytes)) return;
         const identifier = new Identifier(peerId.toBytes());
         const docId = new KeyhiveDocumentId(sidBytes);
-        if (!(await hasAccess(identifier, docId, accessLevels.Relay))) {
+        const docUrl = stringifyAutomergeUrl(sidBytes as BinaryDocumentId);
+        if (!(await hasAccess(identifier, docUrl, docId, accessLevels.Relay))) {
           throw new Error("insufficient access to fetch: requires at least Relay");
         }
       },
@@ -129,7 +132,8 @@ export class AutomergeRepoKeyhive {
         if (isLegacyDocId(sidBytes)) return;
         const identifier = new Identifier(author.toBytes());
         const docId = new KeyhiveDocumentId(sidBytes);
-        if (!(await hasAccess(identifier, docId, accessLevels.Edit))) {
+        const docUrl = stringifyAutomergeUrl(sidBytes as BinaryDocumentId);
+        if (!(await hasAccess(identifier, docUrl, docId, accessLevels.Edit))) {
           throw new Error("insufficient access to put: requires at least Edit");
         }
       },
@@ -144,7 +148,8 @@ export class AutomergeRepoKeyhive {
             continue;
           }
           const docId = new KeyhiveDocumentId(sidBytes);
-          if (await hasAccess(identifier, docId, accessLevels.Relay)) {
+          const docUrl = stringifyAutomergeUrl(sidBytes as BinaryDocumentId);
+          if (await hasAccess(identifier, docUrl, docId, accessLevels.Relay)) {
             authorized.push(sid);
           }
         }
