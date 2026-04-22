@@ -22,6 +22,7 @@ import {
   Membership,
   Stats,
 } from "@keyhive/keyhive/slim";
+import { MemorySigner } from "@automerge/automerge-subduction/slim";
 import { SyncServer } from "../sync-server.js";
 import { Active } from "./active.js";
 import { KeyhiveNetworkAdapter } from "../network-adapter/network-adapter.js";
@@ -76,6 +77,27 @@ export class AutomergeRepoKeyhive {
         }
       }, debounceMs)
     })
+  }
+
+  // Build a subduction MemorySigner from this hive's Ed25519 key pair so
+  // subduction and keyhive sign as the same peer. Requires that the
+  // key pair was created extractable (which the default path in
+  // `loadOrCreateSigner` ensures).
+  async constructSubductionSigner(): Promise<MemorySigner> {
+    const jwk = await crypto.subtle.exportKey(
+      "jwk",
+      this.active.keyPair.privateKey
+    );
+    if (!jwk.d) {
+      throw new Error(
+        "[AMRepoKeyhive] constructSubductionSigner: key pair has no private scalar (non-extractable?)"
+      );
+    }
+    let b64 = jwk.d.replace(/-/g, "+").replace(/_/g, "/");
+    const rem = b64.length % 4;
+    if (rem) b64 += "=".repeat(4 - rem);
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    return MemorySigner.fromBytes(bytes);
   }
 
   buildServerSubductionPolicy(): SubductionPolicy {
