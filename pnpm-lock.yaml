@@ -26,6 +26,9 @@ importers:
       eventemitter3:
         specifier: ^5.0.1
         version: 5.0.1
+      isomorphic-ws:
+        specifier: ^5.0.0
+        version: 5.0.0(ws@8.20.0)
     devDependencies:
       '@eslint/eslintrc':
         specifier: ^3.1.0

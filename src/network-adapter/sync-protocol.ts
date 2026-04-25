@@ -94,7 +94,22 @@ export class SyncProtocol {
       );
     }
     message.data = keyhiveMessageData.signed.payload;
+    return this.dispatchByType(message, metrics);
+  }
 
+  /**
+   * Type-dispatch entry point — assumes signature verification and
+   * contact-card ingestion have already been done, and that
+   * `message.data` carries the inline (camelCase) CBOR fields the
+   * per-type handlers expect.
+   *
+   * Used by the rust-direct transport, which performs verification +
+   * contact-card ingest at the SUK codec layer before reaching here.
+   */
+  async dispatchByType(
+    message: Message,
+    metrics: Metrics,
+  ): Promise<boolean> {
     if (message.type === "keyhive-sync-request") {
       await this.sendKeyhiveSyncResponse(message, metrics);
       return true;

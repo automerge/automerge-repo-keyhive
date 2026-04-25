@@ -37,6 +37,29 @@ export {
   KeyhiveStorage,
 } from "./keyhive/keyhive.js";
 export { KeyhiveNetworkAdapter } from "./network-adapter/network-adapter.js";
+export {
+  FrameDemuxer,
+  KeyhiveRustAdapter,
+  encodeSukFrame,
+  decodeSukFrame,
+  isSukFrame,
+  SUK_SCHEMA,
+  encodeSignedMessage,
+  decodeSignedMessage,
+  encodeRustKeyhiveMessage,
+  decodeRustKeyhiveMessage,
+  peerIdFromRust,
+  peerIdToRust,
+  SukFrameError,
+} from "./network-adapter/rust-transport/index.js";
+export type {
+  KeyhiveRustAdapterOptions,
+  KeyhiveMessageType,
+  RustEncodeInput,
+  RustDecodeOutput,
+  RustPeerId,
+  RustSignedMessage,
+} from "./network-adapter/rust-transport/index.js";
 export { SyncServer } from "./sync-server.js";
 export {
   peerIdFromSigner,

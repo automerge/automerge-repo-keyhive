@@ -24,7 +24,8 @@
     "@automerge/automerge-subduction": "0.7.0",
     "@keyhive/keyhive": "0.0.0-alpha.56",
     "cbor-x": "^1.6.0",
-    "eventemitter3": "^5.0.1"
+    "eventemitter3": "^5.0.1",
+    "isomorphic-ws": "^5.0.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.1.0",
