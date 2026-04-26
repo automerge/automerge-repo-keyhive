@@ -30,10 +30,11 @@ export function isWasmInitialized(): boolean {
 
 export { Active } from "./keyhive/active.js";
 export { KeyhiveEventEmitter } from "./keyhive/emitter.js";
-export { AutomergeRepoKeyhive } from "./keyhive/automerge-repo-keyhive.js"
+export { AutomergeRepoKeyhive, AutomergeRepoKeyhiveRust } from "./keyhive/automerge-repo-keyhive.js"
 export {
   docIdFromAutomergeUrl,
   initializeAutomergeRepoKeyhive,
+  initializeAutomergeRepoKeyhiveRust,
   KeyhiveStorage,
 } from "./keyhive/keyhive.js";
 export { KeyhiveNetworkAdapter } from "./network-adapter/network-adapter.js";

@@ -29,6 +29,7 @@ import { KeyhiveNetworkAdapter } from "../network-adapter/network-adapter.js";
 import { KeyhiveEventEmitter } from "./emitter.js";
 import { docIdFromAutomergeUrl, KeyhiveStorage, receiveContactCard } from "./keyhive.js";
 import { signData } from "../network-adapter/messages.js";
+import { KeyhiveRustAdapter } from "../network-adapter/rust-transport/keyhive-rust-adapter.js";
 
 // TODO: This is temporarily for calculating "best access". Move this and
 // the best access method to WASM API.
@@ -326,7 +327,7 @@ export class AutomergeRepoKeyhive {
   }
 };
 
-async function generateDoc(kh: Keyhive): Promise<KeyhiveDocument> {
+export async function generateDoc(kh: Keyhive): Promise<KeyhiveDocument> {
   // For now, randomly generate a ChangeId
   const changeIdArray = crypto.getRandomValues(new Uint8Array(10));
   const changeId = new ChangeId(changeIdArray);
@@ -343,4 +344,58 @@ export function keyhiveIdFactory(_keyhiveNetworkAdapter: KeyhiveNetworkAdapter, 
     const doc = await generateDoc(keyhive);
     return doc.doc_id.toBytes();
   };
+}
+
+/**
+ * Counterpart to {@link AutomergeRepoKeyhive} for peers that talk to a
+ * Rust subduction-keyhive sync server. Holds a {@link KeyhiveRustAdapter}
+ * (driven by SUK frames over a single multiplexed WebSocket) instead of
+ * a {@link KeyhiveNetworkAdapter}, and omits the legacy syncServer +
+ * createKeyhiveNetworkAdapter fields. Built by
+ * `initializeAutomergeRepoKeyhiveRust`.
+ *
+ * Membership management methods (addMemberToDoc, accessForDoc, etc.)
+ * still live on `AutomergeRepoKeyhive` and are not duplicated here yet —
+ * the Rust path is currently scoped to e2e validation, not the full
+ * demo UI. Reach into `keyhive` / `keyhiveStorage` directly if needed.
+ */
+export class AutomergeRepoKeyhiveRust {
+  constructor(
+    public readonly active: Active,
+    public readonly keyhive: Keyhive,
+    public readonly keyhiveStorage: KeyhiveStorage,
+    public readonly peerId: PeerId,
+    public readonly emitter: KeyhiveEventEmitter,
+    public readonly keyhiveAdapter: KeyhiveRustAdapter,
+    public readonly idFactory: (heads: Heads) => Promise<Uint8Array>,
+  ) {}
+
+  /**
+   * Wire keyhive membership updates to {@link Repo.shareConfigChanged}().
+   * Listens on the shared emitter rather than the adapter (which doesn't
+   * fan out events upstream) and debounces so bursts of keyhive ops
+   * don't trigger sweeps on every event.
+   */
+  linkRepo(repo: Repo, options?: { debounceMs?: number; onBeforeShareConfigChanged?: () => void }) {
+    const debounceMs = options?.debounceMs ?? 2000;
+    const onBefore = options?.onBeforeShareConfigChanged;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let pending = false;
+
+    this.emitter.on("update", () => {
+      pending = true;
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        if (!pending) return;
+        pending = false;
+        try {
+          onBefore?.();
+          repo.shareConfigChanged();
+        } catch (e) {
+          console.error(`[AMRepoKeyhiveRust] shareConfigChanged() threw:`, e);
+        }
+      }, debounceMs);
+    });
+  }
 }
