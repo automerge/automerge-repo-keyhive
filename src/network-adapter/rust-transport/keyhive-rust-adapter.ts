@@ -9,6 +9,7 @@
 
 import type { Message, PeerId } from "@automerge/automerge-repo/slim";
 import { ContactCard, Keyhive, Signed } from "@keyhive/keyhive/slim";
+import { EventEmitter } from "eventemitter3";
 
 import { Metrics } from "../metrics.js";
 import { Peer } from "../peer.js";
@@ -19,6 +20,7 @@ import { EventBytesOnlyEventCache } from "../event-bytes-only-event-cache.js";
 import { StandardEventCache } from "../standard-event-cache.js";
 import { PeriodicEventCache } from "../periodic-event-cache.js";
 import { peerIdFromVerifyingKey } from "../messages.js";
+import { keyhiveIdentifierFromPeerId } from "../../utilities.js";
 import { KeyhiveStorage, receiveContactCard } from "../../keyhive/keyhive.js";
 
 import { FrameDemuxer } from "./frame-demuxer.js";
@@ -58,10 +60,22 @@ export interface KeyhiveRustAdapterOptions {
 }
 
 /**
+ * Events emitted by {@link KeyhiveRustAdapter}. Mirrors the subset of
+ * `KeyhiveNetworkAdapter` events that consumers (e.g. the demo's TUI
+ * peer-manager) rely on, so callers can branch on adapter type and use
+ * the same event names.
+ */
+export interface KeyhiveRustAdapterEvents {
+  "peer-candidate": (payload: { peerId: PeerId }) => void;
+  "peer-disconnected": (payload: { peerId: PeerId }) => void;
+  "ingest-remote": () => void;
+}
+
+/**
  * Sync the local keyhive against a single Rust subduction-keyhive peer
  * (typically the Rust sync server) using SUK-framed wire messages.
  */
-export class KeyhiveRustAdapter {
+export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
   readonly localPeerId: PeerId;
   readonly remotePeerId: PeerId;
 
@@ -74,10 +88,22 @@ export class KeyhiveRustAdapter {
   private readonly metrics = new Metrics();
   private readonly pending = new Pending();
   private readonly syncProtocol: SyncProtocol;
+  private readonly syncRequestInterval: number;
+  private periodicSyncEnabled: boolean;
   private syncIntervalId?: ReturnType<typeof setInterval>;
   private periodicCacheRefreshId?: ReturnType<typeof setInterval>;
+  /**
+   * Tracks whether the underlying transport currently has an active connection
+   * to `remotePeerId`. Set true just before emitting the initial
+   * `peer-candidate` (in a `queueMicrotask` after construction) and reset when
+   * the demuxer closes. Exposed via {@link connected} so subscribers that
+   * attach *after* the initial emit can still observe current state without
+   * waiting for the next event.
+   */
+  private _connected = false;
 
   constructor(options: KeyhiveRustAdapterOptions) {
+    super();
     this.demuxer = options.demuxer;
     this.keyhive = options.keyhive;
     this.keyhiveStorage = options.keyhiveStorage;
@@ -91,6 +117,8 @@ export class KeyhiveRustAdapter {
 
     const cachingMode = options.cachingMode ?? "periodic";
     const syncRequestInterval = options.syncRequestInterval ?? 5000;
+    this.syncRequestInterval = syncRequestInterval;
+    this.periodicSyncEnabled = options.periodicallyRequestSync ?? false;
 
     let cache: EventCache;
     if (cachingMode === "periodic") {
@@ -133,8 +161,9 @@ export class KeyhiveRustAdapter {
         send: (message, contactCard) => {
           this.send(message, contactCard);
         },
-        emit: () => {
-          // Direct transport doesn't fan out events; suppress.
+        emit: (event) => {
+          // Forward keyhive sync events (notably "ingest-remote") to consumers.
+          (this.emit as (e: string) => boolean)(event);
         },
       },
       {
@@ -151,11 +180,59 @@ export class KeyhiveRustAdapter {
       );
     });
 
-    if (options.periodicallyRequestSync) {
+    if (this.periodicSyncEnabled) {
       this.syncIntervalId = setInterval(() => {
         this.syncProtocol.requestKeyhiveSync();
       }, syncRequestInterval);
     }
+
+    // Demuxer is connected by the time we reach here (FrameDemuxer.connect
+    // resolves on `open`). Surface a peer-candidate immediately so consumers
+    // tracking adapter readiness see the remote as live, then wire the
+    // close path to peer-disconnected.
+    queueMicrotask(() => {
+      this._connected = true;
+      this.emit("peer-candidate", { peerId: this.remotePeerId });
+    });
+    void this.demuxer.closed().then(() => {
+      this._connected = false;
+      this.emit("peer-disconnected", { peerId: this.remotePeerId });
+    });
+  }
+
+  /**
+   * Whether the transport currently has an active connection to
+   * `remotePeerId`. Useful for subscribers attached after the initial
+   * `peer-candidate` microtask fires (e.g. UI started after
+   * `initializeAutomergeRepoKeyhiveRust` returned) to seed their state.
+   */
+  get connected(): boolean {
+    return this._connected;
+  }
+
+  /**
+   * Resolves once the underlying transport is connected and this adapter
+   * is ready to send/receive. The `FrameDemuxer.connect()` factory resolves
+   * on WebSocket `open`, so by the time this adapter is constructed the
+   * transport is already open — `whenReady()` resolves on the next tick.
+   */
+  whenReady(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  /**
+   * Start (or restart) the periodic keyhive sync request loop. No-op if it
+   * is already running. Used by callers that asked for
+   * `periodicallyRequestSync: false` and want to defer kicking off the
+   * loop until after the subduction handshake completes (so SUK frames
+   * don't race the SUH handshake on a multiplexed WebSocket).
+   */
+  startPeriodicSync(): void {
+    if (this.syncIntervalId !== undefined) return;
+    this.periodicSyncEnabled = true;
+    this.syncIntervalId = setInterval(() => {
+      this.syncProtocol.requestKeyhiveSync();
+    }, this.syncRequestInterval);
   }
 
   /**
@@ -307,9 +384,24 @@ export class KeyhiveRustAdapter {
     if (signedMessage.contactCard !== "") {
       try {
         const contactCard = ContactCard.fromJson(signedMessage.contactCard);
+        console.warn(
+          `[KeyhiveRustAdapter] DIAG: ingesting contactCard from sender=${decoded.senderId} (cardJsonLen=${signedMessage.contactCard.length})`,
+        );
         await this.keyhiveQueue.run(() =>
           receiveContactCard(this.keyhive, contactCard, this.keyhiveStorage),
         );
+        try {
+          const senderIdentifier = keyhiveIdentifierFromPeerId(decoded.senderId);
+          const agent = await this.keyhive.getAgent(senderIdentifier);
+          console.warn(
+            `[KeyhiveRustAdapter] DIAG: post-ingest getAgent(senderId=${decoded.senderId}) -> ${agent ? "FOUND" : "NULL"}`,
+          );
+        } catch (lookupErr) {
+          console.warn(
+            `[KeyhiveRustAdapter] DIAG: post-ingest getAgent threw:`,
+            lookupErr,
+          );
+        }
       } catch (err) {
         console.error("[KeyhiveRustAdapter] contactCard ingest failed:", err);
         // Continue — the rest of the message may still be processable.

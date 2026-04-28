@@ -109,7 +109,7 @@ describe("rust-transport codec", () => {
       expect(peerIdFromRust(rust)).toBe(peerId);
     });
 
-    it("splits the dash-suffix off the base64 portion and back", () => {
+    it("drops the dash-suffix from the wire form (suffix is local-only)", () => {
       const signer = Signer.generateMemory();
       const peerId = peerIdFromVerifyingKey(signer.verifyingKey, "my-suffix");
       const rust = peerIdToRust(peerId);
@@ -118,8 +118,12 @@ describe("rust-transport codec", () => {
       expect(Array.from(rust.verifying_key)).toEqual(
         Array.from(signer.verifyingKey),
       );
-      expect(rust.suffix).toBe("my-suffix");
-      expect(peerIdFromRust(rust)).toBe(peerId);
+      // The Rust server keys peers by verifying_key alone; we must not put
+      // the TS-only suffix on the wire or its peer registry rejects us.
+      expect(rust.suffix).toBe(null);
+      // Round-trip drops the suffix — peerIdFromRust returns the no-suffix
+      // form regardless of what was originally encoded.
+      expect(peerIdFromRust(rust)).toBe(peerIdFromVerifyingKey(signer.verifyingKey));
     });
 
     it("rejects an obviously-malformed base64 portion", () => {

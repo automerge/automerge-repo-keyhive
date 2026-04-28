@@ -8,7 +8,7 @@ import {
   stringifyAutomergeUrl,
   type SubductionPolicy,
 } from "@automerge/automerge-repo/slim";
-import { hexToUint8Array } from "../utilities.js";
+import { hexToUint8Array, keyhiveIdentifierFromPeerId } from "../utilities.js";
 import {
   Access,
   ChangeId,
@@ -354,10 +354,10 @@ export function keyhiveIdFactory(_keyhiveNetworkAdapter: KeyhiveNetworkAdapter, 
  * createKeyhiveNetworkAdapter fields. Built by
  * `initializeAutomergeRepoKeyhiveRust`.
  *
- * Membership management methods (addMemberToDoc, accessForDoc, etc.)
- * still live on `AutomergeRepoKeyhive` and are not duplicated here yet —
- * the Rust path is currently scoped to e2e validation, not the full
- * demo UI. Reach into `keyhive` / `keyhiveStorage` directly if needed.
+ * Membership management methods mirror {@link AutomergeRepoKeyhive}.
+ * They will collapse onto a shared base class once the legacy/rust split
+ * is refactored; until then the bodies are direct copies (they only touch
+ * `this.keyhive`, no networkAdapter dependency).
  */
 export class AutomergeRepoKeyhiveRust {
   constructor(
@@ -366,7 +366,7 @@ export class AutomergeRepoKeyhiveRust {
     public readonly keyhiveStorage: KeyhiveStorage,
     public readonly peerId: PeerId,
     public readonly emitter: KeyhiveEventEmitter,
-    public readonly keyhiveAdapter: KeyhiveRustAdapter,
+    public readonly networkAdapter: KeyhiveRustAdapter,
     public readonly idFactory: (heads: Heads) => Promise<Uint8Array>,
   ) {}
 
@@ -397,5 +397,129 @@ export class AutomergeRepoKeyhiveRust {
         }
       }, debounceMs);
     });
+  }
+
+  async receiveContactCard(contactCard: ContactCard): Promise<Individual | undefined> {
+    return receiveContactCard(this.keyhive, contactCard, this.keyhiveStorage);
+  }
+
+  async addMemberToDoc(
+    docUrl: AutomergeUrl,
+    contactCard: ContactCard,
+    access: Access
+  ) {
+    await this.receiveContactCard(contactCard);
+    const agent = await this.keyhive.getAgent(contactCard.id);
+    if (!access || !agent) {
+      console.error(
+        "[AMRepoKeyhiveRust] Failed to add member: invalid access or agent!"
+      );
+      return;
+    }
+
+    const docId: KeyhiveDocumentId = docIdFromAutomergeUrl(docUrl);
+    const doc = await this.keyhive.getDocument(docId);
+    if (!doc) {
+      console.error(`[AMRepoKeyhiveRust] Failed to add member: doc not found for id ${docId}`);
+      return;
+    }
+    await this.keyhive.addMember(agent, doc.toMembered(), access, []);
+  }
+
+  async revokeMemberFromDoc(docUrl: AutomergeUrl, hexId: string) {
+    const identifier = new Identifier(hexToUint8Array(hexId));
+    const agent = await this.keyhive.getAgent(identifier);
+    if (!agent) {
+      console.error("[AMRepoKeyhiveRust] Agent to revoke not found");
+      return;
+    }
+    const docId = docIdFromAutomergeUrl(docUrl);
+    const doc = await this.keyhive.getDocument(docId);
+    if (!doc) {
+      console.error(`[AMRepoKeyhiveRust] Failed to revoke member: doc not found for id ${docId}`);
+      return;
+    }
+    await this.keyhive.revokeMember(agent, true, doc.toMembered());
+  }
+
+  // The Rust sync server's contact card is ingested via
+  // `KeyhiveRustAdapter.handleInbound` during the initial sync; we look the
+  // server agent up by its remotePeerId rather than holding a SyncServer
+  // record. Callers are expected to retry until the agent is known (the
+  // demo wraps this in `wasmRetry`); we throw a sentinel error in that
+  // window so retry wrappers can distinguish "transient: keep retrying"
+  // from a genuine failure.
+  async addSyncServerRelayToDoc(docUrl: AutomergeUrl) {
+    // The agent-missing branch must propagate so retry wrappers (the
+    // demo's `wasmRetry`) can keep trying until the contact card arrives.
+    // Other failures still get logged and swallowed.
+    const identifier = keyhiveIdentifierFromPeerId(this.networkAdapter.remotePeerId);
+    const agent = await this.keyhive.getAgent(identifier);
+    if (!agent) {
+      console.warn(
+        `[AMRepoKeyhiveRust] DIAG: sync server agent not yet known; retry after sync. remotePeerId=${this.networkAdapter.remotePeerId}`,
+      );
+      throw new Error(
+        `[AMRepoKeyhiveRust] sync server agent not yet known; retry after sync. remotePeerId=${this.networkAdapter.remotePeerId}`,
+      );
+    }
+    try {
+      const relayAccess = Access.tryFromString("relay");
+      if (!relayAccess) {
+        console.error("[AMRepoKeyhiveRust] Failed to create Relay access");
+        return;
+      }
+      const docId = docIdFromAutomergeUrl(docUrl);
+      const doc = await this.keyhive.getDocument(docId);
+      if (!doc) {
+        console.error(`[AMRepoKeyhiveRust] Failed to add sync server relay: doc not found for id ${docId}`);
+        return;
+      }
+      await this.keyhive.addMember(agent, doc.toMembered(), relayAccess, []);
+    } catch (err) {
+      console.error("[AMRepoKeyhiveRust] Failed to add sync server to doc:", err);
+    }
+  }
+
+  async setPublicAccess(docUrl: AutomergeUrl, access: Access) {
+    const publicId = Identifier.publicId();
+    const agent = await this.keyhive.getAgent(publicId);
+    if (!agent) {
+      console.error("[AMRepoKeyhiveRust] Failed to get public agent");
+      return;
+    }
+    const docId = docIdFromAutomergeUrl(docUrl);
+    const doc = await this.keyhive.getDocument(docId);
+    if (!doc) {
+      console.error(`[AMRepoKeyhiveRust] Failed to set public access: doc not found for id ${docId}`);
+      return;
+    }
+    await this.keyhive.addMember(agent, doc.toMembered(), access, []);
+  }
+
+  async getPublicAccess(docUrl: AutomergeUrl): Promise<Access | undefined> {
+    const publicId = Identifier.publicId();
+    const docId = docIdFromAutomergeUrl(docUrl);
+    return await this.keyhive.accessForDoc(publicId, docId);
+  }
+
+  async accessForDoc(id: Identifier, docId: KeyhiveDocumentId): Promise<Access | undefined> {
+    return await this.keyhive.accessForDoc(id, docId);
+  }
+
+  async bestAccessForDoc(id: Identifier, docUrl: AutomergeUrl): Promise<Access | undefined> {
+    const docId = docIdFromAutomergeUrl(docUrl);
+    const idAccess = await this.accessForDoc(id, docId);
+    const idStr = idAccess ? idAccess.toString() : "None";
+    const idAccessLevel = accessLevels[idStr];
+    const publicId = Identifier.publicId();
+    const publicAccess = await this.keyhive.accessForDoc(publicId, docId);
+    const publicStr = publicAccess ? publicAccess.toString() : "None";
+    const publicAccessLevel = accessLevels[publicStr];
+    return (idAccessLevel > publicAccessLevel) ? idAccess : publicAccess;
+  }
+
+  async docMemberCapabilities(docId: KeyhiveDocumentId): Promise<Membership[]> {
+    return await this.keyhive.docMemberCapabilities(docId);
   }
 }

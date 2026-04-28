@@ -185,6 +185,15 @@ export class FrameDemuxer {
     for (const ew of this.#subductionErrorWaiters) ew(err);
     this.#subductionErrorWaiters = [];
     this.#subductionWaiters = [];
+    if (this.#disconnectCallback) {
+      const cb = this.#disconnectCallback;
+      this.#disconnectCallback = null;
+      try {
+        cb();
+      } catch (e) {
+        console.error("[FrameDemuxer] onDisconnect callback threw:", e);
+      }
+    }
   }
 
   #teardown({

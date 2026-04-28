@@ -118,12 +118,23 @@ export function decodeSignedMessage(bytes: Uint8Array): RustSignedMessage {
       `decoded SignedMessage missing string contactCard field`
     );
   }
-  if (!(obj?.signed instanceof Uint8Array)) {
+  // ciborium's default `Vec<u8>` serialization on the server side emits a
+  // CBOR array (major type 4) rather than a byte string (major type 2), which
+  // cbor-x decodes as `number[]`. Tolerate either shape until the server
+  // pins `serde(with = "serde_bytes")` on `SignedMessage::signed`.
+  let signedBytes: Uint8Array;
+  if (obj?.signed instanceof Uint8Array) {
+    signedBytes = obj.signed;
+  } else if (Array.isArray(obj?.signed)) {
+    const arr = obj.signed as number[];
+    signedBytes = new Uint8Array(arr.length);
+    for (let i = 0; i < arr.length; i++) signedBytes[i] = arr[i];
+  } else {
     throw new SukFrameError(
       `decoded SignedMessage missing bytes signed field`
     );
   }
-  return { contactCard: obj.contactCard, signed: obj.signed };
+  return { contactCard: obj.contactCard, signed: signedBytes };
 }
 
 // ---------------------------------------------------------------------------
@@ -141,11 +152,16 @@ export interface RustPeerId {
 /**
  * Convert a TS PeerId (`base64(verifyingKey)[-suffix]`) into the
  * Rust-shape `KeyhivePeerId`.
+ *
+ * The TS suffix is a local-only identifier (used for keyhive storage
+ * uniqueness and multi-tab demos); the Rust server keys peers by the
+ * 32-byte verifying_key alone and rejects messages that arrive with a
+ * suffix that wasn't introduced via its own connection bridge. We drop
+ * the suffix on the wire so the server's lookup succeeds.
  */
 export function peerIdToRust(peerId: PeerId): RustPeerId {
   const dashIdx = peerId.indexOf("-");
   const b64 = dashIdx === -1 ? peerId : peerId.slice(0, dashIdx);
-  const suffix = dashIdx === -1 ? null : peerId.slice(dashIdx + 1);
 
   const binStr = atob(b64);
   if (binStr.length !== 32) {
@@ -155,11 +171,15 @@ export function peerIdToRust(peerId: PeerId): RustPeerId {
   }
   const verifying_key = new Uint8Array(32);
   for (let i = 0; i < 32; i++) verifying_key[i] = binStr.charCodeAt(i);
-  return { verifying_key, suffix };
+  return { verifying_key, suffix: null };
 }
 
 /**
  * Convert a Rust-shape `KeyhivePeerId` back into a TS PeerId string.
+ *
+ * The wire form has no suffix (see {@link peerIdToRust}). We mirror that
+ * here — incoming messages always produce a no-suffix PeerId, matching
+ * what the SyncProtocol's `verifyingKeyPeer` comparisons expect.
  */
 export function peerIdFromRust(rust: RustPeerId): PeerId {
   if (rust.verifying_key.length !== 32) {
@@ -169,11 +189,7 @@ export function peerIdFromRust(rust: RustPeerId): PeerId {
   }
   let bin = "";
   for (let i = 0; i < 32; i++) bin += String.fromCharCode(rust.verifying_key[i]);
-  let s = btoa(bin);
-  if (rust.suffix !== null && rust.suffix !== undefined && rust.suffix !== "") {
-    s += "-" + rust.suffix;
-  }
-  return s as PeerId;
+  return btoa(bin) as PeerId;
 }
 
 // ---------------------------------------------------------------------------

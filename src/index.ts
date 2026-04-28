@@ -3,10 +3,12 @@ import { initFromBase64Wasm } from "@keyhive/keyhive/slim";
 // @ts-expect-error
 import { wasmBase64 } from "@keyhive/keyhive/keyhive_wasm.base64.js";
 
-console.log(`automerge-repo-keyhive version: ${packageJson.version}`);
+// Top-level imports run before consumers can redirect stdout. The Rust TUI's
+// stdio IPC reader treats stdout as JSON, so banner lines must go to stderr.
+console.warn(`automerge-repo-keyhive version: ${packageJson.version}`);
 
 export const MODULE_INSTANCE_ID = Math.random().toString(36).slice(2);
-console.log(`[AMRepoKeyhive] Module instance ID: ${MODULE_INSTANCE_ID}`);
+console.warn(`[AMRepoKeyhive] Module instance ID: ${MODULE_INSTANCE_ID}`);
 
 let wasmInitialized = false;
 

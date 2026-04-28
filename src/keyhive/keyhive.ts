@@ -62,7 +62,9 @@ async function bootstrapKeyhive(options: {
   peerIdSuffix: string;
   keyPair?: CryptoKeyPair;
 }): Promise<KeyhiveBootstrap> {
+  console.warn(`[bootstrapKeyhive] enter suffix=${options.peerIdSuffix}`);
   const { keyPair, signer } = await loadOrCreateKeyPairAndSigner(options.storage, options.keyPair)
+  console.warn(`[bootstrapKeyhive] after loadOrCreateKeyPairAndSigner`);
   const emitter = new KeyhiveEventEmitter();
   const uniqueIdHash = new Uint8Array(
     await crypto.subtle.digest(
@@ -71,12 +73,15 @@ async function bootstrapKeyhive(options: {
     )
   );
   const keyhiveStorage = new KeyhiveStorage(uniqueIdHash, options.storage);
+  console.warn(`[bootstrapKeyhive] before loadOrCreateKeyhive`);
   const keyhive = await keyhiveStorage.loadOrCreateKeyhive(
     signer,
     uniqueIdHash,
     emitter.handleKeyhiveEvent
   );
+  console.warn(`[bootstrapKeyhive] after loadOrCreateKeyhive`);
   const active = await createActive(keyPair, signer, keyhive);
+  console.warn(`[bootstrapKeyhive] after createActive`);
   const peerId = peerIdFromSigner(active.signer, options.peerIdSuffix);
 
   // TODO: Server contact card and PeerId are currently just hardcoded for the demo
@@ -84,12 +89,14 @@ async function bootstrapKeyhive(options: {
     '{"Rotate":{"payload":{"old":[73,163,230,244,111,233,153,119,133,211,134,237,111,36,52,131,22,50,54,144,150,45,227,235,128,36,33,217,190,198,55,75],"new":[109,115,204,144,178,114,182,238,113,124,4,139,249,76,220,44,128,104,194,68,187,184,82,241,94,145,104,198,159,122,186,43]},"issuer":[215,244,30,111,15,78,235,218,7,241,63,222,141,131,33,22,234,116,180,208,97,235,210,55,202,209,170,178,98,37,223,159],"signature":[178,64,85,76,51,199,196,151,129,14,191,53,127,191,34,223,97,238,95,109,118,179,152,17,205,188,204,177,116,166,147,231,192,201,48,137,19,214,180,45,108,104,34,8,14,63,115,139,215,142,4,179,233,89,150,218,174,168,107,23,8,109,228,6]}}';
   const serverPeerIdHardcoded = "1/Qebw9O69oH8T/ejYMhFup0tNBh69I3ytGqsmIl358=" as PeerId;
 
+  console.warn(`[bootstrapKeyhive] before syncServerFromContactCard`);
   const syncServer = await syncServerFromContactCard(
     serverContactCardJson,
     serverPeerIdHardcoded,
     keyhive,
     keyhiveStorage
   );
+  console.warn(`[bootstrapKeyhive] after syncServerFromContactCard`);
 
   return {
     active,
@@ -282,18 +289,35 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
   cachingMode?: "none" | "standard" | "periodic";
   syncRequestInterval?: number;
   periodicallyRequestSync?: boolean;
+  /**
+   * Optional Promise that resolves once the subduction handshake on the
+   * shared WebSocket has completed. When provided, the initial outbound
+   * sync (which sends our contact card) and the periodic-sync interval
+   * are deferred until this resolves — preventing SUK frames from racing
+   * the SUH handshake on a multiplexed connection. Wire it up by passing
+   * the same Promise's resolver as `onConnected` on the corresponding
+   * `subductionTransports` entry.
+   */
+  subductionReady?: Promise<void>;
 }): Promise<AutomergeRepoKeyhiveRust> {
   const {
     automaticArchiveIngestion = true,
     cachingMode = "standard" as "none" | "standard" | "periodic",
     syncRequestInterval = 2000,
     periodicallyRequestSync = true,
+    subductionReady,
   } = options;
 
+  console.warn(`[initRustHive] before bootstrapKeyhive suffix=${options.peerIdSuffix}`);
   const bootstrap = await bootstrapKeyhive(options);
+  console.warn(`[initRustHive] after bootstrapKeyhive suffix=${options.peerIdSuffix}`);
   const { active, keyhive, keyhiveStorage, peerId, emitter, keyhiveQueue } = bootstrap;
 
-  const keyhiveAdapter = new KeyhiveRustAdapter({
+  // If the caller provided a `subductionReady` gate, suppress the periodic
+  // sync at construction time and start it after the gate resolves.
+  const startPeriodicNow = periodicallyRequestSync && subductionReady === undefined;
+
+  const networkAdapter = new KeyhiveRustAdapter({
     demuxer: options.demuxer,
     keyhive,
     keyhiveStorage,
@@ -303,13 +327,20 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
     remotePeerId: options.remotePeerId,
     cachingMode,
     syncRequestInterval,
-    periodicallyRequestSync,
+    periodicallyRequestSync: startPeriodicNow,
   });
 
-  setupEventFlushListener(bootstrap, keyhiveAdapter, { automaticArchiveIngestion });
+  setupEventFlushListener(bootstrap, networkAdapter, { automaticArchiveIngestion });
 
   // Initial outbound sync — announces our contact card to the server.
-  keyhiveAdapter.syncKeyhive(true);
+  if (subductionReady === undefined) {
+    networkAdapter.syncKeyhive(true);
+  } else {
+    void subductionReady.then(() => {
+      if (periodicallyRequestSync) networkAdapter.startPeriodicSync();
+      networkAdapter.syncKeyhive(true);
+    });
+  }
 
   const idFactory = async (_heads: import("@automerge/automerge-repo/slim").Heads) => {
     const doc = await generateDoc(keyhive);
@@ -322,7 +353,7 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
     keyhiveStorage,
     peerId,
     emitter,
-    keyhiveAdapter,
+    networkAdapter,
     idFactory,
   );
 }
