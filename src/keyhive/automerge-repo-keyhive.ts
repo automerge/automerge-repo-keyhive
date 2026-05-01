@@ -349,9 +349,11 @@ export function keyhiveIdFactory(_keyhiveNetworkAdapter: KeyhiveNetworkAdapter, 
 /**
  * Counterpart to {@link AutomergeRepoKeyhive} for peers that talk to a
  * Rust subduction-keyhive sync server. Holds a {@link KeyhiveRustAdapter}
- * (driven by SUK frames over a single multiplexed WebSocket) instead of
- * a {@link KeyhiveNetworkAdapter}, and omits the legacy syncServer +
- * createKeyhiveNetworkAdapter fields. Built by
+ * (driven by SUK frames over a single multiplexed WebSocket) for the
+ * server connection. May also expose `createKeyhiveNetworkAdapter` so the
+ * service-worker style topology — one Rust hive that fans tab connections
+ * out over MessageChannels using the legacy {@link KeyhiveNetworkAdapter}
+ * — can share one keyhive state across both transports. Built by
  * `initializeAutomergeRepoKeyhiveRust`.
  *
  * Membership management methods mirror {@link AutomergeRepoKeyhive}.
@@ -368,7 +370,37 @@ export class AutomergeRepoKeyhiveRust {
     public readonly emitter: KeyhiveEventEmitter,
     public readonly networkAdapter: KeyhiveRustAdapter,
     public readonly idFactory: (heads: Heads) => Promise<Uint8Array>,
+    public readonly createKeyhiveNetworkAdapter: (
+      networkAdapter: NetworkAdapter,
+      onlyShareWithHardcodedServerPeerId: boolean,
+      periodicallyRequestSync: boolean,
+      syncRequestInterval: number,
+      batchInterval?: number,
+      archiveThreshold?: number,
+    ) => KeyhiveNetworkAdapter,
   ) {}
+
+  /**
+   * Build a subduction MemorySigner from this hive's Ed25519 key pair so
+   * subduction and keyhive sign as the same peer. Mirrors
+   * {@link AutomergeRepoKeyhive.constructSubductionSigner}.
+   */
+  async constructSubductionSigner(): Promise<MemorySigner> {
+    const jwk = await crypto.subtle.exportKey(
+      "jwk",
+      this.active.keyPair.privateKey
+    );
+    if (!jwk.d) {
+      throw new Error(
+        "[AMRepoKeyhiveRust] constructSubductionSigner: key pair has no private scalar (non-extractable?)"
+      );
+    }
+    let b64 = jwk.d.replace(/-/g, "+").replace(/_/g, "/");
+    const rem = b64.length % 4;
+    if (rem) b64 += "=".repeat(4 - rem);
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    return MemorySigner.fromBytes(bytes);
+  }
 
   /**
    * Wire keyhive membership updates to {@link Repo.shareConfigChanged}().

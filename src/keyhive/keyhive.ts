@@ -282,8 +282,15 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
   storage: StorageAdapterInterface;
   peerIdSuffix: string;
   demuxer: FrameDemuxer;
-  /** The Rust sync server's keyhive peer id. Learned from the Rust server's `--ready-file`. */
-  remotePeerId: PeerId;
+  /**
+   * The Rust sync server's keyhive peer id. Defaults to the same
+   * hardcoded demo server peer id used by the legacy hive's
+   * `onlyShareWithHardcodedServerPeerId` path, so callers running
+   * against the demo server don't need to plumb it through. Override
+   * when running against a server with a different key, e.g. a local
+   * dev server with its own `--ready-file`.
+   */
+  remotePeerId?: PeerId;
   keyPair?: CryptoKeyPair;
   automaticArchiveIngestion?: boolean;
   cachingMode?: "none" | "standard" | "periodic";
@@ -311,7 +318,7 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
   console.warn(`[initRustHive] before bootstrapKeyhive suffix=${options.peerIdSuffix}`);
   const bootstrap = await bootstrapKeyhive(options);
   console.warn(`[initRustHive] after bootstrapKeyhive suffix=${options.peerIdSuffix}`);
-  const { active, keyhive, keyhiveStorage, peerId, emitter, keyhiveQueue } = bootstrap;
+  const { active, keyhive, keyhiveStorage, peerId, emitter, keyhiveQueue, serverPeerIdHardcoded } = bootstrap;
 
   // If the caller provided a `subductionReady` gate, suppress the periodic
   // sync at construction time and start it after the gate resolves.
@@ -324,7 +331,7 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
     keyhiveQueue,
     contactCard: active.contactCard,
     localPeerId: peerId,
-    remotePeerId: options.remotePeerId,
+    remotePeerId: options.remotePeerId ?? serverPeerIdHardcoded,
     cachingMode,
     syncRequestInterval,
     periodicallyRequestSync: startPeriodicNow,
@@ -342,6 +349,38 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
     });
   }
 
+  // Lets the Rust hive fan additional tab connections (over MessageChannels)
+  // out via legacy KeyhiveNetworkAdapters that share the same keyhive state.
+  // Used by the patchwork-next service worker; mirrors the legacy hive's
+  // closure shape so callers don't branch on hive variant.
+  const createKeyhiveNetworkAdapter = (
+    legacyAdapter: NetworkAdapter,
+    onlyShareWithHardcodedServerPeerId: boolean,
+    periodicallyRequestSyncFlag: boolean,
+    syncRequestIntervalArg: number,
+    batchIntervalOverride?: number,
+    archiveThresholdOverride?: number,
+  ): KeyhiveNetworkAdapter => {
+    const hardcodedRemoteId = onlyShareWithHardcodedServerPeerId
+      ? serverPeerIdHardcoded
+      : null;
+    return new KeyhiveNetworkAdapter({
+      networkAdapter: legacyAdapter,
+      contactCard: active.contactCard,
+      keyhive,
+      keyhiveStorage,
+      keyhiveQueue,
+      periodicallyRequestSync: periodicallyRequestSyncFlag,
+      cachingMode,
+      hardcodedRemoteId,
+      syncRequestInterval: syncRequestIntervalArg,
+      batchInterval: batchIntervalOverride,
+      retryPendingFromStorage: true,
+      enableCompaction: true,
+      archiveThreshold: archiveThresholdOverride ?? 200,
+    });
+  };
+
   const idFactory = async (_heads: import("@automerge/automerge-repo/slim").Heads) => {
     const doc = await generateDoc(keyhive);
     return doc.doc_id.toBytes();
@@ -355,6 +394,7 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
     emitter,
     networkAdapter,
     idFactory,
+    createKeyhiveNetworkAdapter,
   );
 }
 
@@ -439,17 +479,21 @@ export class KeyhiveStorage {
   }
 
   async saveEventBytesWithHash(eventBytes: Uint8Array) {
-    const hash = await crypto.subtle.digest(
-      "SHA-256",
-      eventBytes as Uint8Array<ArrayBuffer>
-    );
+    // Copy into a fresh JS-owned ArrayBuffer in this realm so Node 22's
+    // WebCrypto BufferSource brand-check accepts it. The network-path inputs
+    // come through cbor-x and (across pnpm-hoisted module copies) sometimes
+    // arrive as a plain Array of numbers or as a Uint8Array branded by a
+    // different realm; the local-emit path comes from wasm-bindgen. The copy
+    // normalizes all of those at the cost of one allocation per event.
+    const canonical = new Uint8Array(eventBytes);
+    const hash = await crypto.subtle.digest("SHA-256", canonical);
     await this.storage.save(
       [
         KEYHIVE_DB_KEY,
         KEYHIVE_EVENTS_KEY,
         uint8ArrayToHex(new Uint8Array(hash)),
       ],
-      eventBytes
+      canonical
     );
   }
 
