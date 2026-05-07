@@ -48,11 +48,12 @@ export function decodeKeyhiveMessageData(
       contactCard,
       signed,
     };
-  } catch (error) {
-    console.error(
-      "[AMRepoKeyhive] Failed to decode keyhive message data:",
-      error
-    );
+  } catch {
+    // console.error(
+    //   "[AMRepoKeyhive] Failed to decode keyhive message data:",
+    //   error
+    // );
+    // We are currently expecting non-keyhive messages to fall here
     return undefined;
   }
 }

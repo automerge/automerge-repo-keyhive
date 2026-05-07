@@ -44,6 +44,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
   private peers: Map<PeerId, Peer> = new Map();
   private syncIntervalId?: ReturnType<typeof setInterval>;
+  private fullSyncIntervalId?: ReturnType<typeof setInterval>;
   private compactionIntervalId?: ReturnType<typeof setInterval>;
   private batchProcessor?: BatchProcessor;
 
@@ -136,6 +137,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
           () => this.syncProtocol.requestKeyhiveSync(),
           syncRequestInterval,
         );
+        this.fullSyncIntervalId = setInterval(
+          () => this.syncProtocol.requestFullKeyhiveSync(),
+          5 * 60 * 1000,
+        );
     }
 
     if (enableCompaction) {
@@ -219,6 +224,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       clearInterval(this.syncIntervalId);
       this.syncIntervalId = undefined;
     }
+    if (this.fullSyncIntervalId) {
+      clearInterval(this.fullSyncIntervalId);
+      this.fullSyncIntervalId = undefined;
+    }
     if (this.compactionIntervalId) {
       clearInterval(this.compactionIntervalId);
       this.compactionIntervalId = undefined;
@@ -246,9 +255,13 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       this.networkAdapter.send(message);
       return;
     }
-    void this.signAndSend(message, contactCard).catch((error) =>
-      console.error(`[AMRepoKeyhive] Failed to sign and send (type=${message.type}):`, error)
-    );
+    if (message.type?.startsWith("keyhive-")) {
+      void this.signAndSend(message, contactCard).catch((error) =>
+        console.error(`[AMRepoKeyhive] Failed to sign and send (type=${message.type}):`, error)
+      );
+    } else {
+      this.networkAdapter.send(message);
+    }
   }
 
   async signAndSend(
