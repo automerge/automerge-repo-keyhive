@@ -19,8 +19,6 @@ export type {
   RustSignedMessage,
 } from "./codec.js";
 
-export { FrameDemuxer } from "./frame-demuxer.js";
-
 export {
   KeyhiveRustAdapter,
   type KeyhiveRustAdapterOptions,

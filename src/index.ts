@@ -41,7 +41,6 @@ export {
 } from "./keyhive/keyhive.js";
 export { KeyhiveNetworkAdapter } from "./network-adapter/network-adapter.js";
 export {
-  FrameDemuxer,
   KeyhiveRustAdapter,
   encodeSukFrame,
   decodeSukFrame,

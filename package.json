@@ -21,8 +21,8 @@
   "dependencies": {
     "@automerge/automerge-repo": "link:../automerge-repo/packages/automerge-repo",
     "@automerge/automerge-repo-network-websocket": "link:../automerge-repo/packages/automerge-repo-network-websocket",
-    "@automerge/automerge-subduction": "0.7.0",
-    "@keyhive/keyhive": "0.0.0-alpha.56",
+    "@automerge/automerge-subduction": "file:../subduction/automerge_subduction_wasm/automerge-automerge-subduction-0.11.0.tgz",
+    "@keyhive/keyhive": "file:../keyhive/keyhive_wasm/keyhive-keyhive-0.0.0-alpha.56c.tgz",
     "cbor-x": "^1.6.0",
     "eventemitter3": "^5.0.1",
     "isomorphic-ws": "^5.0.0"

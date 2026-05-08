@@ -1,13 +1,9 @@
-// Keyhive sync over the Rust subduction wire (SUK frames on a raw
-// WebSocket). Drives the existing `SyncProtocol` after translating
-// between the TS Message shape and the Rust `KeyhiveMessage` enum shape.
-//
-// Compared to `KeyhiveNetworkAdapter`, this does NOT use an automerge-repo
-// `NetworkAdapter`. The transport is a `FrameDemuxer` over a raw WebSocket;
-// subduction-WASM consumes non-SUK frames (sedimentree sync), and this
-// class consumes SUK frames (keyhive sync).
+// Keyhive sync over subduction (SUK frames). Translates between the TS
+// Message shape and the Rust `KeyhiveMessage` wire format, driving
+// `SyncProtocol` for the actual sync logic.
 
 import type { Message, PeerId } from "@automerge/automerge-repo/slim";
+import type { Subduction } from "@automerge/automerge-subduction/slim";
 import { ContactCard, Keyhive, Signed } from "@keyhive/keyhive/slim";
 import { EventEmitter } from "eventemitter3";
 
@@ -23,7 +19,6 @@ import { peerIdFromVerifyingKey } from "../messages.js";
 import { keyhiveIdentifierFromPeerId } from "../../utilities.js";
 import { KeyhiveStorage, receiveContactCard } from "../../keyhive/keyhive.js";
 
-import { FrameDemuxer } from "./frame-demuxer.js";
 import {
   KeyhiveMessageType,
   decodeRustKeyhiveMessage,
@@ -32,6 +27,7 @@ import {
   encodeRustKeyhiveMessage,
   encodeSignedMessage,
   encodeSukFrame,
+  peerIdToRust,
 } from "./codec.js";
 
 const KEYHIVE_MESSAGE_TYPES: ReadonlySet<string> = new Set<KeyhiveMessageType>([
@@ -45,7 +41,7 @@ const KEYHIVE_MESSAGE_TYPES: ReadonlySet<string> = new Set<KeyhiveMessageType>([
 ]);
 
 export interface KeyhiveRustAdapterOptions {
-  demuxer: FrameDemuxer;
+  subduction: Subduction | Promise<Subduction>;
   keyhive: Keyhive;
   keyhiveStorage: KeyhiveStorage;
   keyhiveQueue: PromiseQueue;
@@ -79,7 +75,7 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
   readonly localPeerId: PeerId;
   readonly remotePeerId: PeerId;
 
-  private readonly demuxer: FrameDemuxer;
+  private readonly subductionReady: Promise<{ subduction: Subduction; wasmPeerId: any }>;
   private readonly keyhive: Keyhive;
   private readonly keyhiveStorage: KeyhiveStorage;
   private readonly keyhiveQueue: PromiseQueue;
@@ -95,22 +91,31 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
   /**
    * Tracks whether the underlying transport currently has an active connection
    * to `remotePeerId`. Set true just before emitting the initial
-   * `peer-candidate` (in a `queueMicrotask` after construction) and reset when
-   * the demuxer closes. Exposed via {@link connected} so subscribers that
-   * attach *after* the initial emit can still observe current state without
+   * `peer-candidate` (in a `queueMicrotask` after construction). Exposed
+   * via {@link connected} so subscribers that attach *after* the initial
+   * emit can still observe current state without
    * waiting for the next event.
    */
   private _connected = false;
 
   constructor(options: KeyhiveRustAdapterOptions) {
     super();
-    this.demuxer = options.demuxer;
     this.keyhive = options.keyhive;
     this.keyhiveStorage = options.keyhiveStorage;
     this.keyhiveQueue = options.keyhiveQueue;
     this.contactCard = options.contactCard;
     this.localPeerId = options.localPeerId;
     this.remotePeerId = options.remotePeerId;
+
+    // Get a PeerId instance from subduction's own module to avoid
+    // cross-module wasm-bindgen instanceof failures.
+    const remotePeerBytes = peerIdToRust(options.remotePeerId).verifying_key;
+    this.subductionReady = Promise.resolve(options.subduction).then(
+      async (subduction) => {
+        const wasmPeerId = await waitForPeer(subduction, remotePeerBytes);
+        return { subduction, wasmPeerId };
+      },
+    );
 
     this.peers = new Map<PeerId, Peer>();
     this.peers.set(this.remotePeerId, new Peer());
@@ -174,10 +179,12 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
       },
     );
 
-    this.demuxer.setSukHandler((bytes) => {
-      void this.handleInbound(bytes).catch((err) =>
-        console.error("[KeyhiveRustAdapter] inbound SUK handler failed:", err),
-      );
+    void this.subductionReady.then(({ subduction }) => {
+      subduction.registerFrameHandler((bytes: Uint8Array, _peerId: any) => {
+        void this.handleInbound(bytes).catch((err) =>
+          console.error("[KeyhiveRustAdapter] inbound SUK handler failed:", err),
+        );
+      });
     });
 
     if (this.periodicSyncEnabled) {
@@ -186,17 +193,11 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
       }, syncRequestInterval);
     }
 
-    // Demuxer is connected by the time we reach here (FrameDemuxer.connect
-    // resolves on `open`). Surface a peer-candidate immediately so consumers
-    // tracking adapter readiness see the remote as live, then wire the
-    // close path to peer-disconnected.
+    // Surface a peer-candidate immediately so consumers tracking
+    // adapter readiness see the remote as live.
     queueMicrotask(() => {
       this._connected = true;
       this.emit("peer-candidate", { peerId: this.remotePeerId });
-    });
-    void this.demuxer.closed().then(() => {
-      this._connected = false;
-      this.emit("peer-disconnected", { peerId: this.remotePeerId });
     });
   }
 
@@ -210,12 +211,7 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     return this._connected;
   }
 
-  /**
-   * Resolves once the underlying transport is connected and this adapter
-   * is ready to send/receive. The `FrameDemuxer.connect()` factory resolves
-   * on WebSocket `open`, so by the time this adapter is constructed the
-   * transport is already open — `whenReady()` resolves on the next tick.
-   */
+  /** Resolves once the adapter is ready to send/receive. */
   whenReady(): Promise<void> {
     return Promise.resolve();
   }
@@ -255,7 +251,9 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
       clearInterval(this.periodicCacheRefreshId);
       this.periodicCacheRefreshId = undefined;
     }
-    this.demuxer.setSukHandler(null);
+    void this.subductionReady.then(({ subduction }) =>
+      subduction.registerFrameHandler(undefined as any),
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────
@@ -263,13 +261,6 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
   // ─────────────────────────────────────────────────────────────────────
 
   private send(message: Message, contactCard?: ContactCard): void {
-    if (this.demuxer.isClosed()) {
-      console.warn(
-        "[KeyhiveRustAdapter] dropping outbound message: demuxer closed",
-        message.type,
-      );
-      return;
-    }
     if (!message.type || !KEYHIVE_MESSAGE_TYPES.has(message.type)) {
       console.warn(
         `[KeyhiveRustAdapter] dropping non-keyhive message type=${message.type}`,
@@ -283,7 +274,16 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
           this.signAndFrame(message, contactCard),
         );
         this.pending.fire(seqNumber, () => {
-          this.demuxer.sendSuk(bytes);
+          void this.subductionReady
+            .then(({ subduction, wasmPeerId }) =>
+              subduction.sendRawFrame(bytes, wasmPeerId),
+            )
+            .catch((err: any) =>
+              console.warn(
+                "[KeyhiveRustAdapter] sendRawFrame failed:",
+                err,
+              ),
+            );
         });
       } catch (err) {
         console.error(
@@ -427,5 +427,24 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
         err,
       );
     }
+  }
+}
+
+async function waitForPeer(
+  subduction: Subduction,
+  remotePeerBytes: Uint8Array,
+): Promise<any> {
+  for (;;) {
+    const peers = await subduction.getConnectedPeerIds();
+    for (const p of peers) {
+      const bytes = (p as any).toBytes() as Uint8Array;
+      if (
+        bytes.length === remotePeerBytes.length &&
+        bytes.every((b, i) => b === remotePeerBytes[i])
+      ) {
+        return p;
+      }
+    }
+    await new Promise((r) => setTimeout(r, 100));
   }
 }

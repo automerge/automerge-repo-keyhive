@@ -15,11 +15,11 @@ importers:
         specifier: link:../automerge-repo/packages/automerge-repo-network-websocket
         version: link:../automerge-repo/packages/automerge-repo-network-websocket
       '@automerge/automerge-subduction':
-        specifier: 0.7.0
-        version: 0.7.0
+        specifier: file:../subduction/automerge_subduction_wasm/automerge-automerge-subduction-0.11.0.tgz
+        version: file:../subduction/automerge_subduction_wasm/automerge-automerge-subduction-0.11.0.tgz
       '@keyhive/keyhive':
-        specifier: 0.0.0-alpha.56
-        version: 0.0.0-alpha.56
+        specifier: file:../keyhive/keyhive_wasm/keyhive-keyhive-0.0.0-alpha.56c.tgz
+        version: file:../keyhive/keyhive_wasm/keyhive-keyhive-0.0.0-alpha.56c.tgz
       cbor-x:
         specifier: ^1.6.0
         version: 1.6.0
@@ -63,8 +63,9 @@ importers:
 
 packages:
 
-  '@automerge/automerge-subduction@0.7.0':
-    resolution: {integrity: sha512-I838jrX+j6zeLEIyszuA246OY1HnTyS+bXODJAVlBmXGM0QzasRePulNrzJtclvowzhY56SybUj4+j/PNCdBhA==}
+  '@automerge/automerge-subduction@file:../subduction/automerge_subduction_wasm/automerge-automerge-subduction-0.11.0.tgz':
+    resolution: {integrity: sha512-4LKHaiTTTNYkcb3t3vutHbvzhUsLLWaeCagcJdTLgQGwvkf8/oCIsrJxlS3CcpvH1KWfPkCpoJrjc3aPofJmdw==, tarball: file:../subduction/automerge_subduction_wasm/automerge-automerge-subduction-0.11.0.tgz}
+    version: 0.11.0
 
   '@cbor-extract/cbor-extract-darwin-arm64@2.2.0':
     resolution: {integrity: sha512-P7swiOAdF7aSi0H+tHtHtr6zrpF3aAq/W9FXx5HektRvLTM2O89xCyXF3pk7pLc7QpaY7AoaE8UowVf9QBdh3w==}
@@ -295,8 +296,9 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@keyhive/keyhive@0.0.0-alpha.56':
-    resolution: {integrity: sha512-hx/MRkRqCSJFIh5jHKs9HkzDQy4tUZzgaRlc85+8t22VciubmZAU1FyugmYboskPUxUGwqZC1GarwXfxhrp5DA==}
+  '@keyhive/keyhive@file:../keyhive/keyhive_wasm/keyhive-keyhive-0.0.0-alpha.56c.tgz':
+    resolution: {integrity: sha512-knFfVNk+nky50RkirhS+XasGZVgvj/J2aYLfj8xWw0H+gzs8NvHBn74FQUc+gOmY49NK3pX/psFm8Y6KlEwicg==, tarball: file:../keyhive/keyhive_wasm/keyhive-keyhive-0.0.0-alpha.56c.tgz}
+    version: 0.0.0-alpha.56c
 
   '@noble/ed25519@3.0.0':
     resolution: {integrity: sha512-QyteqMNm0GLqfa5SoYbSC3+Pvykwpn95Zgth4MFVSMKBB75ELl9tX1LAVsN4c3HXOrakHsF2gL4zWDAYCcsnzg==}
@@ -1113,7 +1115,7 @@ packages:
 
 snapshots:
 
-  '@automerge/automerge-subduction@0.7.0': {}
+  '@automerge/automerge-subduction@file:../subduction/automerge_subduction_wasm/automerge-automerge-subduction-0.11.0.tgz': {}
 
   '@cbor-extract/cbor-extract-darwin-arm64@2.2.0':
     optional: true
@@ -1265,7 +1267,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@keyhive/keyhive@0.0.0-alpha.56': {}
+  '@keyhive/keyhive@file:../keyhive/keyhive_wasm/keyhive-keyhive-0.0.0-alpha.56c.tgz': {}
 
   '@noble/ed25519@3.0.0': {}
 

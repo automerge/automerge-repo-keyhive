@@ -21,7 +21,7 @@ import { syncServerFromContactCard, SyncServer } from "../sync-server.js";
 import { Active, createActive, loadOrCreateSigner, storeActiveKeyPair } from "./active.js";
 import { KeyhiveNetworkAdapter } from "../network-adapter/network-adapter.js";
 import { KeyhiveRustAdapter } from "../network-adapter/rust-transport/keyhive-rust-adapter.js";
-import { FrameDemuxer } from "../network-adapter/rust-transport/frame-demuxer.js";
+import type { Subduction } from "@automerge/automerge-subduction/slim";
 import { PromiseQueue } from "../network-adapter/pending.js";
 import { KeyhiveEventEmitter } from "./emitter.js";
 import { AutomergeRepoKeyhive, AutomergeRepoKeyhiveRust, generateDoc, keyhiveIdFactory } from "./automerge-repo-keyhive.js";
@@ -270,7 +270,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
 }
 
 /**
- * Build a keyhive instance and a `KeyhiveRustAdapter` over a `FrameDemuxer`,
+ * Build a keyhive instance and a `KeyhiveRustAdapter` backed by subduction,
  * sharing one private `PromiseQueue` across both. Use this for peers that
  * talk to a Rust subduction-keyhive sync server (SUK frames over a single
  * multiplexed WebSocket).
@@ -281,7 +281,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
 export async function initializeAutomergeRepoKeyhiveRust(options: {
   storage: StorageAdapterInterface;
   peerIdSuffix: string;
-  demuxer: FrameDemuxer;
+  subduction: Subduction | Promise<Subduction>;
   /**
    * The Rust sync server's keyhive peer id. Defaults to the same
    * hardcoded demo server peer id used by the legacy hive's
@@ -296,23 +296,12 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
   cachingMode?: "none" | "standard" | "periodic";
   syncRequestInterval?: number;
   periodicallyRequestSync?: boolean;
-  /**
-   * Optional Promise that resolves once the subduction handshake on the
-   * shared WebSocket has completed. When provided, the initial outbound
-   * sync (which sends our contact card) and the periodic-sync interval
-   * are deferred until this resolves — preventing SUK frames from racing
-   * the SUH handshake on a multiplexed connection. Wire it up by passing
-   * the same Promise's resolver as `onConnected` on the corresponding
-   * `subductionTransports` entry.
-   */
-  subductionReady?: Promise<void>;
 }): Promise<AutomergeRepoKeyhiveRust> {
   const {
     automaticArchiveIngestion = true,
     cachingMode = "standard" as "none" | "standard" | "periodic",
     syncRequestInterval = 2000,
     periodicallyRequestSync = true,
-    subductionReady,
   } = options;
 
   console.warn(`[initRustHive] before bootstrapKeyhive suffix=${options.peerIdSuffix}`);
@@ -320,12 +309,8 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
   console.warn(`[initRustHive] after bootstrapKeyhive suffix=${options.peerIdSuffix}`);
   const { active, keyhive, keyhiveStorage, peerId, emitter, keyhiveQueue, serverPeerIdHardcoded } = bootstrap;
 
-  // If the caller provided a `subductionReady` gate, suppress the periodic
-  // sync at construction time and start it after the gate resolves.
-  const startPeriodicNow = periodicallyRequestSync && subductionReady === undefined;
-
   const networkAdapter = new KeyhiveRustAdapter({
-    demuxer: options.demuxer,
+    subduction: options.subduction,
     keyhive,
     keyhiveStorage,
     keyhiveQueue,
@@ -334,20 +319,12 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
     remotePeerId: options.remotePeerId ?? serverPeerIdHardcoded,
     cachingMode,
     syncRequestInterval,
-    periodicallyRequestSync: startPeriodicNow,
+    periodicallyRequestSync,
   });
 
   setupEventFlushListener(bootstrap, networkAdapter, { automaticArchiveIngestion });
 
-  // Initial outbound sync — announces our contact card to the server.
-  if (subductionReady === undefined) {
-    networkAdapter.syncKeyhive(true);
-  } else {
-    void subductionReady.then(() => {
-      if (periodicallyRequestSync) networkAdapter.startPeriodicSync();
-      networkAdapter.syncKeyhive(true);
-    });
-  }
+  networkAdapter.syncKeyhive(true);
 
   // Lets the Rust hive fan additional tab connections (over MessageChannels)
   // out via legacy KeyhiveNetworkAdapters that share the same keyhive state.
