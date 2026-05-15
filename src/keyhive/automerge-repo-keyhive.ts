@@ -554,4 +554,8 @@ export class AutomergeRepoKeyhiveRust {
   async docMemberCapabilities(docId: KeyhiveDocumentId): Promise<Membership[]> {
     return await this.keyhive.docMemberCapabilities(docId);
   }
+
+  async stats(): Promise<Stats> {
+    return await this.keyhive.stats();
+  }
 }
