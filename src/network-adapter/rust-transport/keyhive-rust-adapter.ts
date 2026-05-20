@@ -23,10 +23,8 @@ import {
   KeyhiveMessageType,
   decodeRustKeyhiveMessage,
   decodeSignedMessage,
-  decodeSukFrame,
   encodeRustKeyhiveMessage,
   encodeSignedMessage,
-  encodeSukFrame,
   peerIdToRust,
 } from "./codec.js";
 
@@ -180,10 +178,20 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     );
 
     void this.subductionReady.then(({ subduction }) => {
-      subduction.registerFrameHandler((bytes: Uint8Array, _peerId: any) => {
-        void this.handleInbound(bytes).catch((err) =>
-          console.error("[KeyhiveRustAdapter] inbound SUK handler failed:", err),
-        );
+      subduction.registerFrameHandler({
+        onMessage: (payload: Uint8Array, _peerId: any) => {
+          void this.handleInbound(payload).catch((err) =>
+            console.error(
+              "[KeyhiveRustAdapter] inbound SUK handler failed:",
+              err,
+            ),
+          );
+        },
+        onPeerDisconnect: (_peerId: any) => {
+          this._connected = false;
+          this.syncProtocol.onPeerDisconnected(this.remotePeerId);
+          this.emit("peer-disconnected", { peerId: this.remotePeerId });
+        },
       });
     });
 
@@ -252,12 +260,12 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
       this.periodicCacheRefreshId = undefined;
     }
     void this.subductionReady.then(({ subduction }) =>
-      subduction.registerFrameHandler(undefined as any),
+      subduction.registerFrameHandler(undefined),
     );
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // Outbound: SyncProtocol → SUK-framed bytes
+  // Outbound: SyncProtocol → keyhive payload bytes
   // ─────────────────────────────────────────────────────────────────────
 
   private send(message: Message, contactCard?: ContactCard): void {
@@ -271,16 +279,16 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     void (async () => {
       try {
         const bytes = await this.keyhiveQueue.run(() =>
-          this.signAndFrame(message, contactCard),
+          this.signAndEncode(message, contactCard),
         );
         this.pending.fire(seqNumber, () => {
           void this.subductionReady
             .then(({ subduction, wasmPeerId }) =>
-              subduction.sendRawFrame(bytes, wasmPeerId),
+              subduction.sendKeyhiveMessage(bytes, wasmPeerId),
             )
             .catch((err: any) =>
               console.warn(
-                "[KeyhiveRustAdapter] sendRawFrame failed:",
+                "[KeyhiveRustAdapter] sendKeyhiveMessage failed:",
                 err,
               ),
             );
@@ -295,7 +303,7 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     })();
   }
 
-  private async signAndFrame(
+  private async signAndEncode(
     message: Message,
     contactCard?: ContactCard,
   ): Promise<Uint8Array> {
@@ -318,29 +326,20 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     const signed = await this.keyhive.trySign(payload);
     const signedBytes = signed.toBytes();
     const contactCardJson = contactCard ? contactCard.toJson() : "";
-    const signedMessageBytes = encodeSignedMessage({
+    return encodeSignedMessage({
       contactCard: contactCardJson,
       signed: signedBytes,
     });
-    return encodeSukFrame(signedMessageBytes);
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // Inbound: SUK-framed bytes → SyncProtocol.dispatchByType
+  // Inbound: keyhive payload → SyncProtocol.dispatchByType
   // ─────────────────────────────────────────────────────────────────────
 
-  private async handleInbound(frame: Uint8Array): Promise<void> {
-    let signedMessageBytes: Uint8Array;
-    try {
-      signedMessageBytes = decodeSukFrame(frame);
-    } catch (err) {
-      console.error("[KeyhiveRustAdapter] bad SUK frame:", err);
-      return;
-    }
-
+  private async handleInbound(payload: Uint8Array): Promise<void> {
     let signedMessage: ReturnType<typeof decodeSignedMessage>;
     try {
-      signedMessage = decodeSignedMessage(signedMessageBytes);
+      signedMessage = decodeSignedMessage(payload);
     } catch (err) {
       console.error("[KeyhiveRustAdapter] bad SignedMessage CBOR:", err);
       return;
