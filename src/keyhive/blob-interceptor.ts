@@ -1,4 +1,4 @@
-import { type BlobInterceptor, type DocumentId } from "@automerge/automerge-repo/slim";
+import { type BlobInterceptor, type DocumentId, parseAutomergeUrl } from "@automerge/automerge-repo/slim";
 import {
   ChangeId,
   DocumentId as KeyhiveDocumentId,
@@ -22,6 +22,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     documentId: DocumentId,
     blob: Uint8Array
   ): Promise<Uint8Array> {
+    if (isLegacyDocId(documentId)) return blob;
     return this.#queue.run(async () => {
       const doc = await this.#keyhive.getDocument(
         toKeyhiveDocId(documentId)
@@ -42,6 +43,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     documentId: DocumentId,
     blob: Uint8Array
   ): Promise<Uint8Array | null> {
+    if (isLegacyDocId(documentId)) return blob;
     return this.#queue.run(async () => {
       const doc = await this.#keyhive.getDocument(
         toKeyhiveDocId(documentId)
@@ -69,4 +71,13 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
 
 function toKeyhiveDocId(documentId: DocumentId): KeyhiveDocumentId {
   return docIdFromAutomergeUrl(`automerge:${documentId}` as any);
+}
+
+function isLegacyDocId(documentId: DocumentId): boolean {
+  const { binaryDocumentId } = parseAutomergeUrl(`automerge:${documentId}` as any);
+  if (binaryDocumentId.length < 32) return true;
+  for (let i = 16; i < 32; i++) {
+    if (binaryDocumentId[i] !== 0) return false;
+  }
+  return true;
 }
