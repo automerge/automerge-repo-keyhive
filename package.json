@@ -1,6 +1,6 @@
 {
   "name": "@automerge/automerge-repo-keyhive",
-  "version": "0.2.0-alpha.sub.2b",
+  "version": "0.3.0-alpha.sub.1",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
