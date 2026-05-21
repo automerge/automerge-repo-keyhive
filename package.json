@@ -22,7 +22,7 @@
     "@automerge/automerge-repo": "link:../automerge-repo/packages/automerge-repo",
     "@automerge/automerge-repo-network-websocket": "link:../automerge-repo/packages/automerge-repo-network-websocket",
     "@automerge/automerge-subduction": "0.13.0",
-    "@keyhive/keyhive": "0.0.0-alpha.58",
+    "@keyhive/keyhive": "0.0.0-alpha.58b",
     "@noble/hashes": "^2.2.0",
     "cbor-x": "^1.6.0",
     "eventemitter3": "^5.0.1",
