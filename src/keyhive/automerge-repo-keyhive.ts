@@ -1,14 +1,13 @@
 import {
   AutomergeUrl,
-  type BinaryDocumentId,
   Heads,
   NetworkAdapter,
   PeerId,
   Repo,
-  stringifyAutomergeUrl,
   type SubductionPolicy,
 } from "@automerge/automerge-repo/slim";
-import { hexToUint8Array, keyhiveIdentifierFromPeerId } from "../utilities.js";
+import { hexToUint8Array, isLegacyDocId, keyhiveIdentifierFromPeerId, uint8ArrayToHex } from "../utilities.js";
+import { KeyhiveBlobInterceptor } from "./blob-interceptor.js";
 import {
   Access,
   ChangeId,
@@ -41,44 +40,18 @@ const accessLevels: Record<string, number> = {
   Admin: 4,
 };
 
-export class AutomergeRepoKeyhive {
+/**
+ * Shared base for {@link AutomergeRepoKeyhive} and
+ * {@link AutomergeRepoKeyhiveRust}. Holds the keyhive state common to both
+ * paths and the membership/access operations that depend only on the
+ * `Keyhive` instance.
+ */
+export abstract class AutomergeRepoKeyhiveBase {
   constructor(
     public readonly active: Active,
     public readonly keyhive: Keyhive,
     public readonly keyhiveStorage: KeyhiveStorage,
-    public readonly peerId: PeerId,
-    public readonly syncServer: SyncServer,
-    public readonly networkAdapter: KeyhiveNetworkAdapter,
-    public readonly emitter: KeyhiveEventEmitter,
-    public readonly idFactory: (heads: Heads) => Promise<Uint8Array>,
-    public readonly createKeyhiveNetworkAdapter: (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean, periodicallyRequestSync: boolean, syncRequestInterval: number, batchInterval?: number, archiveThreshold?: number) => KeyhiveNetworkAdapter,
   ) {}
-
-  // Configure `AutomergeRepoKeyhive` to notify the provided `Repo` about
-  // potential `Keyhive` membership updates. Debounces ingest-remote events
-  // so that bursts of keyhive ops don't trigger sweeps on every single event.
-  linkRepo(repo: Repo, options?: { debounceMs?: number, onBeforeShareConfigChanged?: () => void }) {
-    const debounceMs = options?.debounceMs ?? 2000
-    const onBefore = options?.onBeforeShareConfigChanged
-    let timer: ReturnType<typeof setTimeout> | null = null
-    let inProgress = false;
-
-    (this.networkAdapter as any).on("ingest-remote", () => {
-      inProgress = true
-      if (timer) return
-      timer = setTimeout(() => {
-        timer = null
-        if (!inProgress) return
-        inProgress = false
-        try {
-          onBefore?.()
-          repo.shareConfigChanged()
-        } catch (e) {
-          console.error(`[AMRepoKeyhive] shareConfigChanged() threw:`, e)
-        }
-      }, debounceMs)
-    })
-  }
 
   // Build a subduction MemorySigner from this hive's Ed25519 key pair so
   // subduction and keyhive sign as the same peer. Requires that the
@@ -101,88 +74,7 @@ export class AutomergeRepoKeyhive {
     return MemorySigner.fromBytes(bytes);
   }
 
-  buildServerSubductionPolicy(): SubductionPolicy {
-    const keyhive = this.keyhive;
-
-    // Legacy (non-keyhive) doc IDs are 16 bytes padded to 32 with zeros.
-    const isLegacyDocId = (bytes: Uint8Array): boolean => {
-      for (let i = 16; i < 32; i++) {
-        if (bytes[i] !== 0) return false;
-      }
-      return true;
-    };
-
-    const hasAccess = async (id: Identifier, docUrl: AutomergeUrl, docId: KeyhiveDocumentId, minLevel: number): Promise<boolean> => {
-      try {
-        // Check public access
-        const publicAccess = await keyhive.accessForDoc(Identifier.publicId(), docId);
-        const publicStr = publicAccess ? publicAccess.toString() : "None";
-        if (accessLevels[publicStr] >= minLevel) return true;
-
-        // Check direct access
-        const access = await keyhive.accessForDoc(id, docId);
-        const accessStr = access ? access.toString() : "None";
-        const result = accessLevels[accessStr] >= minLevel;
-        if (!result) {
-          console.log(`[SubductionPolicy] DENIED: publicAccess=${publicStr} directAccess=${accessStr} minLevel=${minLevel} docUrl=${docUrl}`);
-        }
-        return result;
-      } catch (e) {
-        console.error(`[SubductionPolicy] hasAccess THREW for docUrl=${docUrl}:`, e);
-        return false;
-      }
-    };
-
-    return {
-      async authorizeConnect(_peerId) {
-        // Allow all connections. Doc checks (authorizeFetch,
-        // authorizePut, filterAuthorizedFetch) determine actual access.
-      },
-
-      async authorizeFetch(peerId, sedimentreeId) {
-        const sidBytes = sedimentreeId.toBytes();
-        if (isLegacyDocId(sidBytes)) return;
-        const identifier = new Identifier(peerId.toBytes());
-        const docId = new KeyhiveDocumentId(sidBytes);
-        const docUrl = stringifyAutomergeUrl(sidBytes as BinaryDocumentId);
-        if (!(await hasAccess(identifier, docUrl, docId, accessLevels.Relay))) {
-          throw new Error("insufficient access to fetch: requires at least Relay");
-        }
-      },
-
-      async authorizePut(_requestor, author, sedimentreeId) {
-        const sidBytes = sedimentreeId.toBytes();
-        if (isLegacyDocId(sidBytes)) return;
-        const identifier = new Identifier(author.toBytes());
-        const docId = new KeyhiveDocumentId(sidBytes);
-        const docUrl = stringifyAutomergeUrl(sidBytes as BinaryDocumentId);
-        if (!(await hasAccess(identifier, docUrl, docId, accessLevels.Edit))) {
-          throw new Error("insufficient access to put: requires at least Edit");
-        }
-      },
-
-      async filterAuthorizedFetch(peerId, ids) {
-        const identifier = new Identifier(peerId.toBytes());
-        const authorized = [];
-        for (const sid of ids) {
-          const sidBytes = sid.toBytes();
-          if (isLegacyDocId(sidBytes)) {
-            authorized.push(sid);
-            continue;
-          }
-          const docId = new KeyhiveDocumentId(sidBytes);
-          const docUrl = stringifyAutomergeUrl(sidBytes as BinaryDocumentId);
-          if (await hasAccess(identifier, docUrl, docId, accessLevels.Relay)) {
-            authorized.push(sid);
-          }
-        }
-        return authorized;
-      },
-    };
-  }
-
-  async receiveContactCard(contactCard: ContactCard
-  ): Promise<Individual | undefined> {
+  async receiveContactCard(contactCard: ContactCard): Promise<Individual | undefined> {
     return receiveContactCard(this.keyhive, contactCard, this.keyhiveStorage);
   }
 
@@ -212,13 +104,9 @@ export class AutomergeRepoKeyhive {
     await this.keyhive.addMember(agent, doc.toMembered(), access, []);
   }
 
-  async revokeMemberFromDoc(
-    docUrl: AutomergeUrl,
-    hexId: string
-  ) {
+  async revokeMemberFromDoc(docUrl: AutomergeUrl, hexId: string) {
     const identifier = new Identifier(hexToUint8Array(hexId));
     const agent = await this.keyhive.getAgent(identifier);
-
     if (!agent) {
       console.error("[AMRepoKeyhive] Agent to revoke not found");
       return;
@@ -231,8 +119,171 @@ export class AutomergeRepoKeyhive {
       return;
     }
 
-    const membered = doc.toMembered();
-    await this.keyhive.revokeMember(agent, true, membered);
+    await this.keyhive.revokeMember(agent, true, doc.toMembered());
+  }
+
+  async setPublicAccess(docUrl: AutomergeUrl, access: Access) {
+    const publicId = Identifier.publicId();
+    const agent = await this.keyhive.getAgent(publicId);
+    if (!agent) {
+      console.error("[AMRepoKeyhive] Failed to get public agent");
+      return;
+    }
+
+    const docId = docIdFromAutomergeUrl(docUrl);
+    const doc = await this.keyhive.getDocument(docId);
+    if (!doc) {
+      console.error(`[AMRepoKeyhive] Failed to set public access: doc not found for id ${docId}`);
+      return;
+    }
+
+    await this.keyhive.addMember(agent, doc.toMembered(), access, []);
+  }
+
+  async getPublicAccess(docUrl: AutomergeUrl): Promise<Access | undefined> {
+    const publicId = Identifier.publicId();
+    const docId = docIdFromAutomergeUrl(docUrl);
+    return await this.keyhive.accessForDoc(publicId, docId);
+  }
+
+  async accessForDoc(id: Identifier, docId: KeyhiveDocumentId): Promise<Access | undefined> {
+    return await this.keyhive.accessForDoc(id, docId);
+  }
+
+  async bestAccessForDoc(id: Identifier, docUrl: AutomergeUrl): Promise<Access | undefined> {
+    const docId = docIdFromAutomergeUrl(docUrl);
+    console.debug(`[AMRepoKeyhive] bestAccessForDoc: docId=${docId}`)
+    const idAccess = await this.accessForDoc(id, docId);
+    const idStr = idAccess ? idAccess.toString() : "None";
+    const idAccessLevel = accessLevels[idStr];
+    const publicId = Identifier.publicId();
+    const publicAccess = await this.keyhive.accessForDoc(publicId, docId);
+    const publicStr = publicAccess ? publicAccess.toString() : "None";
+    const publicAccessLevel = accessLevels[publicStr];
+    console.debug(`[AMRepoKeyhive] bestAccessForDoc: docId=${docId}, idStr=${idStr}, publicStr=${publicStr}, idAccessLevel=${idAccessLevel}, publicAccessLevel=${publicAccessLevel}`);
+    return (idAccessLevel > publicAccessLevel) ? idAccess : publicAccess;
+  }
+
+  async docMemberCapabilities(docId: KeyhiveDocumentId): Promise<Membership[]> {
+    return await this.keyhive.docMemberCapabilities(docId);
+  }
+
+  async stats(): Promise<Stats> {
+    return await this.keyhive.stats();
+  }
+}
+
+export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
+  #linked = false;
+
+  constructor(
+    active: Active,
+    keyhive: Keyhive,
+    keyhiveStorage: KeyhiveStorage,
+    public readonly peerId: PeerId,
+    public readonly syncServer: SyncServer,
+    public readonly networkAdapter: KeyhiveNetworkAdapter,
+    public readonly emitter: KeyhiveEventEmitter,
+    public readonly idFactory: (heads: Heads) => Promise<Uint8Array>,
+    public readonly createKeyhiveNetworkAdapter: (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean, periodicallyRequestSync: boolean, syncRequestInterval: number, batchInterval?: number, archiveThreshold?: number) => KeyhiveNetworkAdapter,
+  ) {
+    super(active, keyhive, keyhiveStorage);
+  }
+
+  // Configure `AutomergeRepoKeyhive` to notify the provided `Repo` about
+  // potential `Keyhive` membership updates. Debounces ingest-remote events
+  // so that bursts of keyhive ops don't trigger sweeps on every single event.
+  linkRepo(repo: Repo, options?: { debounceMs?: number, onBeforeShareConfigChanged?: () => void }) {
+    if (this.#linked) {
+      console.warn("[AMRepoKeyhive] linkRepo called more than once; ignoring.")
+      return
+    }
+    this.#linked = true
+    const debounceMs = options?.debounceMs ?? 2000
+    const onBefore = options?.onBeforeShareConfigChanged
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let inProgress = false;
+
+    (this.networkAdapter as any).on("ingest-remote", () => {
+      inProgress = true
+      if (timer) return
+      timer = setTimeout(() => {
+        timer = null
+        if (!inProgress) return
+        inProgress = false
+        try {
+          onBefore?.()
+          repo.shareConfigChanged()
+        } catch (e) {
+          console.error(`[AMRepoKeyhive] shareConfigChanged() threw:`, e)
+        }
+      }, debounceMs)
+    })
+  }
+
+  buildServerSubductionPolicy(): SubductionPolicy {
+    const keyhive = this.keyhive;
+
+    const hasAccess = async (id: Identifier, docId: KeyhiveDocumentId, minLevel: number): Promise<boolean> => {
+      try {
+        // Check public access
+        const publicAccess = await keyhive.accessForDoc(Identifier.publicId(), docId);
+        const publicStr = publicAccess ? publicAccess.toString() : "None";
+        if (accessLevels[publicStr] >= minLevel) return true;
+
+        // Check direct access
+        const access = await keyhive.accessForDoc(id, docId);
+        const accessStr = access ? access.toString() : "None";
+        return accessLevels[accessStr] >= minLevel;
+      } catch (e) {
+        console.error(`[SubductionPolicy] hasAccess threw for docId=${docId}:`, e);
+        return false;
+      }
+    };
+
+    return {
+      async authorizeConnect(_peerId) {
+        // Allow all connections. Doc checks (authorizeFetch,
+        // authorizePut, filterAuthorizedFetch) determine actual access.
+      },
+
+      async authorizeFetch(peerId, sedimentreeId) {
+        const sidBytes = sedimentreeId.toBytes();
+        if (isLegacyDocId(sidBytes)) return;
+        const identifier = new Identifier(peerId.toBytes());
+        const docId = new KeyhiveDocumentId(sidBytes);
+        if (!(await hasAccess(identifier, docId, accessLevels.Relay))) {
+          throw new Error("insufficient access to fetch: requires at least Relay");
+        }
+      },
+
+      async authorizePut(_requestor, author, sedimentreeId) {
+        const sidBytes = sedimentreeId.toBytes();
+        if (isLegacyDocId(sidBytes)) return;
+        const identifier = new Identifier(author.toBytes());
+        const docId = new KeyhiveDocumentId(sidBytes);
+        if (!(await hasAccess(identifier, docId, accessLevels.Edit))) {
+          throw new Error("insufficient access to put: requires at least Edit");
+        }
+      },
+
+      async filterAuthorizedFetch(peerId, ids) {
+        const identifier = new Identifier(peerId.toBytes());
+        const authorized = [];
+        for (const sid of ids) {
+          const sidBytes = sid.toBytes();
+          if (isLegacyDocId(sidBytes)) {
+            authorized.push(sid);
+            continue;
+          }
+          const docId = new KeyhiveDocumentId(sidBytes);
+          if (await hasAccess(identifier, docId, accessLevels.Relay)) {
+            authorized.push(sid);
+          }
+        }
+        return authorized;
+      },
+    };
   }
 
   // @deprecated Use {@link addSyncServerRelayToDoc} instead.
@@ -261,54 +312,8 @@ export class AutomergeRepoKeyhive {
     }
   }
 
-  async setPublicAccess(docUrl: AutomergeUrl, access: Access) {
-    const publicId = Identifier.publicId();
-    const agent = await this.keyhive.getAgent(publicId);
-    if (!agent) {
-      console.error("[AMRepoKeyhive] Failed to get public agent");
-      return;
-    }
-
-    const docId = docIdFromAutomergeUrl(docUrl);
-    const doc = await this.keyhive.getDocument(docId);
-    if (!doc) {
-      console.error(`[AMRepoKeyhive] Failed to set public access: doc not found for id ${docId}`);
-      return;
-    }
-
-    await this.keyhive.addMember(agent, doc.toMembered(), access, []);
-  }
-
-  async getPublicAccess(docUrl: AutomergeUrl): Promise<Access | undefined> {
-    const publicId = Identifier.publicId();
-    const docId = docIdFromAutomergeUrl(docUrl);
-    return await this.keyhive.accessForDoc(publicId, docId);
-  }
-
   async generateDoc(): Promise<KeyhiveDocument> {
     return generateDoc(this.keyhive);
-  }
-
-  async accessForDoc(id: Identifier, docId: KeyhiveDocumentId): Promise<Access | undefined> {
-    return await this.keyhive.accessForDoc(id, docId);
-  }
-
-  async bestAccessForDoc(id: Identifier, docUrl: AutomergeUrl): Promise<Access | undefined> {
-    const docId = docIdFromAutomergeUrl(docUrl);
-    console.debug(`[AMRepoKeyhive] bestAccessForDoc: docId=${docId}`)
-    const idAccess = await this.accessForDoc(id, docId);
-    const idStr = idAccess ? idAccess.toString() : "None";
-    const idAccessLevel = accessLevels[idStr];
-    const publicId = Identifier.publicId();
-    const publicAccess = await this.keyhive.accessForDoc(publicId, docId);
-    const publicStr = publicAccess ? publicAccess.toString() : "None";
-    const publicAccessLevel = accessLevels[publicStr];
-    console.debug(`[AMRepoKeyhive] bestAccessForDoc: docId=${docId}, idStr=${idStr}, publicStr=${publicStr}, idAccessLevel=${idAccessLevel}, publicAccessLevel=${publicAccessLevel}`);
-    return (idAccessLevel > publicAccessLevel) ? idAccess : publicAccess;
-  }
-
-  async docMemberCapabilities(docId: KeyhiveDocumentId): Promise<Membership[]> {
-    return await this.keyhive.docMemberCapabilities(docId);
   }
 
   async signData(
@@ -320,10 +325,6 @@ export class AutomergeRepoKeyhive {
 
   keyhiveIdFactory(): (heads: Heads) => Promise<Uint8Array> {
     return keyhiveIdFactory(this.networkAdapter, this.keyhive)
-  }
-
-  async stats(): Promise<Stats> {
-    return await this.keyhive.stats()
   }
 };
 
@@ -350,11 +351,18 @@ export function keyhiveIdFactory(_keyhiveNetworkAdapter: KeyhiveNetworkAdapter, 
  * Counterpart to {@link AutomergeRepoKeyhive} for peers that talk to a
  * Rust subduction-keyhive sync server.
  */
-export class AutomergeRepoKeyhiveRust {
+export class AutomergeRepoKeyhiveRust extends AutomergeRepoKeyhiveBase {
+  #linkRepoSchedule: (() => void) | null = null;
+  #repo: Repo | null = null;
+  // Per-doc set of member-id hexes already seen. A membership increase caused
+  // by our own agent triggers a single rotation and nudge edit, giving the new
+  // member an entry point into the document's predecessor app secret chain.
+  #seenMembers: Map<string, Set<string>> = new Map();
+
   constructor(
-    public readonly active: Active,
-    public readonly keyhive: Keyhive,
-    public readonly keyhiveStorage: KeyhiveStorage,
+    active: Active,
+    keyhive: Keyhive,
+    keyhiveStorage: KeyhiveStorage,
     public readonly peerId: PeerId,
     public readonly emitter: KeyhiveEventEmitter,
     public readonly networkAdapter: KeyhiveRustAdapter,
@@ -367,35 +375,23 @@ export class AutomergeRepoKeyhiveRust {
       batchInterval?: number,
       archiveThreshold?: number,
     ) => KeyhiveNetworkAdapter,
-  ) {}
-
-  // Build a subduction MemorySigner from this hive's Ed25519 key pair so
-  // subduction and keyhive sign as the same peer.
-  async constructSubductionSigner(): Promise<MemorySigner> {
-    const jwk = await crypto.subtle.exportKey(
-      "jwk",
-      this.active.keyPair.privateKey
-    );
-    if (!jwk.d) {
-      throw new Error(
-        "[AMRepoKeyhiveRust] constructSubductionSigner: key pair has no private scalar (non-extractable?)"
-      );
-    }
-    let b64 = jwk.d.replace(/-/g, "+").replace(/_/g, "/");
-    const rem = b64.length % 4;
-    if (rem) b64 += "=".repeat(4 - rem);
-    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-    return MemorySigner.fromBytes(bytes);
+    public readonly blobInterceptor: KeyhiveBlobInterceptor,
+  ) {
+    super(active, keyhive, keyhiveStorage);
   }
 
   /** Wire keyhive membership updates to {@link Repo.shareConfigChanged}(). */
   linkRepo(repo: Repo, options?: { debounceMs?: number; onBeforeShareConfigChanged?: () => void }) {
+    if (this.#linkRepoSchedule) {
+      console.warn("[AMRepoKeyhiveRust] linkRepo called more than once; ignoring.");
+      return;
+    }
     const debounceMs = options?.debounceMs ?? 2000;
     const onBefore = options?.onBeforeShareConfigChanged;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let pending = false;
 
-    this.emitter.on("update", () => {
+    const schedule = () => {
       pending = true;
       if (timer) return;
       timer = setTimeout(() => {
@@ -408,60 +404,88 @@ export class AutomergeRepoKeyhiveRust {
         } catch (e) {
           console.error(`[AMRepoKeyhiveRust] shareConfigChanged() threw:`, e);
         }
+        // Membership may have changed; nudge any reader our agent just added.
+        void this.#checkForMembershipNudges();
       }, debounceMs);
-    });
+    };
+
+    this.#repo = repo;
+    this.#linkRepoSchedule = schedule;
+    this.emitter.on("update", schedule);
+    (this.networkAdapter as any).on("ingest-remote", schedule);
   }
 
-  async receiveContactCard(contactCard: ContactCard): Promise<Individual | undefined> {
-    return receiveContactCard(this.keyhive, contactCard, this.keyhiveStorage);
+  /**
+   * Signal a keyhive change that originated from this same agent (membership
+   * or content), scheduling a debounced `shareConfigChanged()`.
+   */
+  notifySameAgentKeyhiveChange(): void {
+    this.#linkRepoSchedule?.();
   }
 
-  async addMemberToDoc(
-    docUrl: AutomergeUrl,
-    contactCard: ContactCard,
-    access: Access
-  ) {
-    await this.receiveContactCard(contactCard);
-    const agent = await this.keyhive.getAgent(contactCard.id);
-    if (!access || !agent) {
-      console.error(
-        "[AMRepoKeyhiveRust] Failed to add member: invalid access or agent!"
-      );
-      return;
-    }
+  /**
+   * Give any reader our agent just added a way into the document's history.
+   *
+   * A simple add leaves the new member with no derivable key, so we rotate
+   * the PCS key (`forcePcsUpdate`) and then write a nudge edit under it.
+   * That edit encrypts under the post-rotation key and gives a way into the
+   * predecessor app secret chain.
+   */
+  async #checkForMembershipNudges(): Promise<void> {
+    const repo = this.#repo;
+    if (!repo) return;
+    // Zero-padded 64-hex id, matching the members' `who.id` / `verifyingKey`
+    // hexes. `keyhive.idString` is not zero-padded, so it must not be used here.
+    const ourIdHex = uint8ArrayToHex(this.keyhive.id.bytes);
+    for (const documentId of this.blobInterceptor.trackedDocIds) {
+      try {
+        const doc = await this.keyhive.getDocument(
+          docIdFromAutomergeUrl(`automerge:${documentId}` as AutomergeUrl),
+        );
+        if (!doc) continue;
+        const members = await doc.members();
+        const currentIds = new Set(
+          members.map((c) => uint8ArrayToHex(c.who.id.toBytes())),
+        );
+        const baseline =
+          this.#seenMembers.get(documentId) ??
+          new Set(
+            members
+              .filter((c) => uint8ArrayToHex(c.proof.verifyingKey) !== ourIdHex)
+              .map((c) => uint8ArrayToHex(c.who.id.toBytes())),
+          );
+        let addedByUs = 0;
+        for (const c of members) {
+          const idHex = uint8ArrayToHex(c.who.id.toBytes());
+          if (idHex === ourIdHex) continue; // never nudge for our own membership
+          if (baseline.has(idHex)) continue; // not new
+          if (uint8ArrayToHex(c.proof.verifyingKey) === ourIdHex) addedByUs++;
+        }
+        // Record the new membership regardless, so a given add nudges once.
+        this.#seenMembers.set(documentId, currentIds);
+        if (addedByUs === 0) continue;
 
-    const docId: KeyhiveDocumentId = docIdFromAutomergeUrl(docUrl);
-    const doc = await this.keyhive.getDocument(docId);
-    if (!doc) {
-      console.error(`[AMRepoKeyhiveRust] Failed to add member: doc not found for id ${docId}`);
-      return;
+        // Rotate (so the new member has a derivable current key), persist the
+        // rotated leaf secret for any sibling instance, then write the nudge.
+        const leafSecret = await this.keyhive.forcePcsUpdate(doc);
+        await this.keyhiveStorage.saveLeafSecret(leafSecret);
+        const handle = await repo.find(`automerge:${documentId}` as AutomergeUrl);
+        handle.change((d: any) => {
+          d._lastAddMember = Date.now();
+        });
+      } catch (e) {
+        console.error(
+          `[AMRepoKeyhiveRust] membership nudge check failed for ${documentId}:`,
+          e,
+        );
+      }
     }
-    await this.keyhive.addMember(agent, doc.toMembered(), access, []);
-  }
-
-  async revokeMemberFromDoc(docUrl: AutomergeUrl, hexId: string) {
-    const identifier = new Identifier(hexToUint8Array(hexId));
-    const agent = await this.keyhive.getAgent(identifier);
-    if (!agent) {
-      console.error("[AMRepoKeyhiveRust] Agent to revoke not found");
-      return;
-    }
-    const docId = docIdFromAutomergeUrl(docUrl);
-    const doc = await this.keyhive.getDocument(docId);
-    if (!doc) {
-      console.error(`[AMRepoKeyhiveRust] Failed to revoke member: doc not found for id ${docId}`);
-      return;
-    }
-    await this.keyhive.revokeMember(agent, true, doc.toMembered());
   }
 
   async addSyncServerRelayToDoc(docUrl: AutomergeUrl) {
     const identifier = keyhiveIdentifierFromPeerId(this.networkAdapter.remotePeerId);
     const agent = await this.keyhive.getAgent(identifier);
     if (!agent) {
-      console.warn(
-        `[AMRepoKeyhiveRust] DIAG: sync server agent not yet known; retry after sync. remotePeerId=${this.networkAdapter.remotePeerId}`,
-      );
       throw new Error(
         `[AMRepoKeyhiveRust] sync server agent not yet known; retry after sync. remotePeerId=${this.networkAdapter.remotePeerId}`,
       );
@@ -482,51 +506,5 @@ export class AutomergeRepoKeyhiveRust {
     } catch (err) {
       console.error("[AMRepoKeyhiveRust] Failed to add sync server to doc:", err);
     }
-  }
-
-  async setPublicAccess(docUrl: AutomergeUrl, access: Access) {
-    const publicId = Identifier.publicId();
-    const agent = await this.keyhive.getAgent(publicId);
-    if (!agent) {
-      console.error("[AMRepoKeyhiveRust] Failed to get public agent");
-      return;
-    }
-    const docId = docIdFromAutomergeUrl(docUrl);
-    const doc = await this.keyhive.getDocument(docId);
-    if (!doc) {
-      console.error(`[AMRepoKeyhiveRust] Failed to set public access: doc not found for id ${docId}`);
-      return;
-    }
-    await this.keyhive.addMember(agent, doc.toMembered(), access, []);
-  }
-
-  async getPublicAccess(docUrl: AutomergeUrl): Promise<Access | undefined> {
-    const publicId = Identifier.publicId();
-    const docId = docIdFromAutomergeUrl(docUrl);
-    return await this.keyhive.accessForDoc(publicId, docId);
-  }
-
-  async accessForDoc(id: Identifier, docId: KeyhiveDocumentId): Promise<Access | undefined> {
-    return await this.keyhive.accessForDoc(id, docId);
-  }
-
-  async bestAccessForDoc(id: Identifier, docUrl: AutomergeUrl): Promise<Access | undefined> {
-    const docId = docIdFromAutomergeUrl(docUrl);
-    const idAccess = await this.accessForDoc(id, docId);
-    const idStr = idAccess ? idAccess.toString() : "None";
-    const idAccessLevel = accessLevels[idStr];
-    const publicId = Identifier.publicId();
-    const publicAccess = await this.keyhive.accessForDoc(publicId, docId);
-    const publicStr = publicAccess ? publicAccess.toString() : "None";
-    const publicAccessLevel = accessLevels[publicStr];
-    return (idAccessLevel > publicAccessLevel) ? idAccess : publicAccess;
-  }
-
-  async docMemberCapabilities(docId: KeyhiveDocumentId): Promise<Membership[]> {
-    return await this.keyhive.docMemberCapabilities(docId);
-  }
-
-  async stats(): Promise<Stats> {
-    return await this.keyhive.stats();
   }
 }

@@ -23,7 +23,7 @@ import {
 //   subduction_keyhive/src/peer_id.rs           {verifying_key: [u8;32], suffix: Option<String>}
 //
 // The tests below check our codec produces bytes whose structural
-// invariants match those Rust types — not just that we're internally
+// invariants match those Rust types, not just that we're internally
 // self-consistent.
 
 describe("rust-transport codec", () => {
@@ -71,10 +71,10 @@ describe("rust-transport codec", () => {
 
       const keys = Object.keys(raw).sort();
       expect(keys).toEqual(["contactCard", "signed"]);
-      // contactCard MUST be a JSON text string, not bytes or null.
+      // contactCard must be a JSON text string, not bytes or null.
       expect(typeof raw.contactCard).toBe("string");
       expect(raw.contactCard).toBe('{"some":"json"}');
-      // signed MUST be a CBOR byte string (decoded as Uint8Array/Buffer).
+      // signed must be a CBOR byte string (decoded as Uint8Array/Buffer).
       expect(raw.signed instanceof Uint8Array).toBe(true);
       expect(Array.from(raw.signed as Uint8Array)).toEqual([0x01, 0x02, 0x03]);
     });
@@ -85,7 +85,7 @@ describe("rust-transport codec", () => {
         signed: new Uint8Array([0xab]),
       });
       const raw = cborDecode(cbor) as Record<string, unknown>;
-      // The "contactCard" key must be present and be the empty string —
+      // The "contactCard" key must be present and be the empty string.
       // Rust's `from_cbor` deserialises into `String` (not `Option<String>`)
       // and treats `""` as "no contact card".
       expect(Object.keys(raw)).toContain("contactCard");
@@ -98,7 +98,7 @@ describe("rust-transport codec", () => {
       const signer = Signer.generateMemory();
       const peerId = peerIdFromVerifyingKey(signer.verifyingKey);
       const rust = peerIdToRust(peerId);
-      // The Rust shape carries the raw 32-byte Ed25519 verifying key —
+      // The Rust shape carries the raw 32-byte Ed25519 verifying key,
       // not the base64 form. Bytes must match the signer's key exactly.
       expect(rust.verifying_key.length).toBe(32);
       expect(Array.from(rust.verifying_key)).toEqual(
@@ -121,13 +121,13 @@ describe("rust-transport codec", () => {
       // The Rust server keys peers by verifying_key alone; we must not put
       // the TS-only suffix on the wire or its peer registry rejects us.
       expect(rust.suffix).toBe(null);
-      // Round-trip drops the suffix — peerIdFromRust returns the no-suffix
+      // Round-trip drops the suffix. peerIdFromRust returns the no-suffix
       // form regardless of what was originally encoded.
       expect(peerIdFromRust(rust)).toBe(peerIdFromVerifyingKey(signer.verifyingKey));
     });
 
     it("rejects an obviously-malformed base64 portion", () => {
-      // Two base64 chars decode to ~1 byte — far short of the 32 required.
+      // Two base64 chars decode to ~1 byte, far short of the 32 required.
       expect(() => peerIdToRust("AB" as PeerId)).toThrow(
         /verifying-key length/,
       );
@@ -175,7 +175,7 @@ describe("rust-transport codec", () => {
         ["found", "pending", "sender_id", "target_id"].sort(),
       );
       const sender = inner.sender_id as { verifying_key: Uint8Array; suffix: unknown };
-      // The verifying_key MUST be the raw 32 bytes — *not* the base64 form
+      // The verifying_key must be the raw 32 bytes, not the base64 form
       // we hold on the TS side.
       expect(sender.verifying_key.length).toBe(32);
       expect(Array.from(sender.verifying_key)).toEqual(
@@ -199,8 +199,8 @@ describe("rust-transport codec", () => {
       const raw = cborDecode(cbor) as Record<string, Record<string, unknown>>;
       const inner = raw.SyncResponse;
       // Rust expects sync_responder_total / sync_requester_total
-      // (snake_case). Catching this rename failure is the whole point —
-      // the Rust side will reject the message if the keys are wrong.
+      // (snake_case). Catching this rename failure is the whole point.
+      // The Rust side will reject the message if the keys are wrong.
       expect(inner.sync_responder_total).toBe(17);
       expect(inner.sync_requester_total).toBe(9);
       expect(inner.syncResponderTotal).toBeUndefined();
@@ -220,6 +220,45 @@ describe("rust-transport codec", () => {
       expect(inner.sender_syncpoint).toBe(41);
       expect(inner.senderTotal).toBeUndefined();
       expect(inner.senderSyncpoint).toBeUndefined();
+    });
+
+    it("emits sender_digest as the raw 32-byte op-set XOR (no 8-byte fold)", () => {
+      // The Rust side deserializes sender_digest into a fixed [u8; 32], so the
+      // wire value must be exactly the 32-byte XOR, not the old folded 8 bytes.
+      const digest = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
+      const cbor = encodeRustKeyhiveMessage({
+        type: "keyhive-sync-check",
+        senderId,
+        targetId,
+        inlineDataCbor: cborEncode({
+          senderTotal: 42,
+          senderSyncpoint: 41,
+          senderDigest: digest,
+        }),
+      });
+      const raw = cborDecode(cbor) as Record<string, Record<string, unknown>>;
+      const wireDigest = raw.SyncCheck.sender_digest;
+      expect(wireDigest).toBeInstanceOf(Uint8Array);
+      expect((wireDigest as Uint8Array).length).toBe(32);
+      expect(Array.from(wireDigest as Uint8Array)).toEqual(Array.from(digest));
+    });
+
+    it("defaults an absent sender_digest to 32 zero bytes", () => {
+      // A SyncCheck built without a digest must still carry a 32-byte
+      // all-zero field, so an old Rust peer never receives a short byte
+      // string it would reject, and an all-zero digest never matches a
+      // non-empty op-set.
+      const cbor = encodeRustKeyhiveMessage({
+        type: "keyhive-sync-check",
+        senderId,
+        targetId,
+        inlineDataCbor: cborEncode({ senderTotal: 42, senderSyncpoint: 41 }),
+      });
+      const raw = cborDecode(cbor) as Record<string, Record<string, unknown>>;
+      const wireDigest = raw.SyncCheck.sender_digest as Uint8Array;
+      expect(wireDigest).toBeInstanceOf(Uint8Array);
+      expect(wireDigest.length).toBe(32);
+      expect(wireDigest.every((b) => b === 0)).toBe(true);
     });
 
     it("renames sync-confirmation field (confirmerTotal → confirmer_total)", () => {
@@ -244,7 +283,7 @@ describe("rust-transport codec", () => {
       });
       const raw = cborDecode(cbor) as Record<string, Record<string, unknown>>;
       const inner = raw.RequestContactCard;
-      // Rust defines RequestContactCard { sender_id, target_id } — exactly
+      // Rust defines RequestContactCard { sender_id, target_id }, exactly
       // two fields. Anything else means we leaked inline data on the wire.
       expect(Object.keys(inner).sort()).toEqual(["sender_id", "target_id"]);
     });
