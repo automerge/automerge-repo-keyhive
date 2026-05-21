@@ -31,11 +31,18 @@ export function isWasmInitialized(): boolean {
 export { Active } from "./keyhive/active.js";
 export { KeyhiveEventEmitter } from "./keyhive/emitter.js";
 export { AutomergeRepoKeyhive, AutomergeRepoKeyhiveRust } from "./keyhive/automerge-repo-keyhive.js"
+export { KeyhiveBlobInterceptor } from "./keyhive/blob-interceptor.js"
 export {
   docIdFromAutomergeUrl,
   initializeAutomergeRepoKeyhive,
   initializeAutomergeRepoKeyhiveRust,
+  initializeAutomergeRepoKeyhiveWithRepo,
+  initializeAutomergeRepoKeyhiveRustWithRepo,
   KeyhiveStorage,
+  KEYHIVE_SYNC_SERVER_CONTACT_CARD_JSON,
+  KEYHIVE_SYNC_SERVER_PEER_ID,
+  SUBDUCTION_SYNC_SERVER_CONTACT_CARD_JSON,
+  SUBDUCTION_SYNC_SERVER_PEER_ID,
 } from "./keyhive/keyhive.js";
 export type { SyncServerIdentity, SyncServerSelection } from "./keyhive/keyhive.js";
 export { KeyhiveNetworkAdapter } from "./network-adapter/network-adapter.js";

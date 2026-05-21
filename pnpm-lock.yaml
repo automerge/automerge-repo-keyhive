@@ -9,17 +9,20 @@ importers:
   .:
     dependencies:
       '@automerge/automerge-repo':
-        specifier: 2.6.0-subduction.21
-        version: 2.6.0-subduction.21
+        specifier: link:../automerge-repo/packages/automerge-repo
+        version: link:../automerge-repo/packages/automerge-repo
       '@automerge/automerge-repo-network-websocket':
-        specifier: 2.6.0-subduction.21
-        version: 2.6.0-subduction.21
+        specifier: 2.6.0-subduction.22
+        version: 2.6.0-subduction.22
       '@automerge/automerge-subduction':
-        specifier: 0.13.0
-        version: 0.13.0
+        specifier: 0.15.0
+        version: 0.15.0
       '@keyhive/keyhive':
-        specifier: 0.0.0-alpha.57g
-        version: 0.0.0-alpha.57g
+        specifier: file:/Users/jtfmumm/dev/keyhive/keyhive_wasm/keyhive-keyhive-0.0.0-alpha.58.tgz
+        version: file:../keyhive/keyhive_wasm/keyhive-keyhive-0.0.0-alpha.58.tgz
+      '@noble/hashes':
+        specifier: ^2.2.0
+        version: 2.2.0
       cbor-x:
         specifier: ^1.6.0
         version: 1.6.0
@@ -63,14 +66,17 @@ importers:
 
 packages:
 
-  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.21':
-    resolution: {integrity: sha512-9advk34JgRvBRLtSnMIrP4jhkC6eKB2bbH+v/q+zsRLkk3vrdTxQCWcuh1LqdbF3U8DEZmIjU9M7pYumS9Mwaw==}
+  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.22':
+    resolution: {integrity: sha512-CNWUC4GENECSqURLbT7bZmr3IE16rCSMBjWzUyhxlxvOAAKSiqZs+hUfgysxtDTPJ4cQdZdmJmaQ1KDtYBmePg==}
 
-  '@automerge/automerge-repo@2.6.0-subduction.21':
-    resolution: {integrity: sha512-MG9v9c7z0zrGmXpdwkeuSiOcdAO+vmPp857WoJrECBG6au0uKJqXszndahLZYXUoolZw3TvByVAOe7Swosft+w==}
+  '@automerge/automerge-repo@2.6.0-subduction.22':
+    resolution: {integrity: sha512-BxNJQPtutS8wFu14AADDHxKqpnYJxNMgYmgZqW1RBnje2/TXxqs8jJLwWKluAlPN7AsVT3CLJheoXla20VhqcA==}
 
   '@automerge/automerge-subduction@0.13.0':
     resolution: {integrity: sha512-7XlCIS0GH3ctboE8UPmD9rfiv203Q8n5Lx63xE6xCgtlpwecDKqzLDp77e9hUEo76j17Y8bYQyfsROqaByLf5A==}
+
+  '@automerge/automerge-subduction@0.15.0':
+    resolution: {integrity: sha512-UxD3hfzZoH9yj2/YQZZSr9bJH7R/l+xIIZ9nMPMpsBOAlEFI5AEC4hkVOqC52QOCwq4bcqek0gTYkSWWfNvc2A==}
 
   '@automerge/automerge@3.2.6':
     resolution: {integrity: sha512-9/GXXfYYWNVGpnbRrGQzTNU4fWZ3XaEMeEg0OrpK4pvlQSpkmUBoirEb/4TMK6BwMysZGV5Yeneq3wwc7RNGfg==}
@@ -304,8 +310,9 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@keyhive/keyhive@0.0.0-alpha.57g':
-    resolution: {integrity: sha512-o8u0emy+vQQPmYKS8HqyjAUw9hXEApXv3tt+G9ZUJUPMVTuaor17N4BKFmNdAiH2Jt/TTX7Vsr8QaRNRf0FOIA==}
+  '@keyhive/keyhive@file:../keyhive/keyhive_wasm/keyhive-keyhive-0.0.0-alpha.58.tgz':
+    resolution: {integrity: sha512-4RwLgQ+593+EwW+3VijFZTLNiEEyBkJUUQvPO/JNo/tciwBoL1pxCkFTCJkiFkfLTVKI2N+wMPJdc9tpt8KMAQ==, tarball: file:../keyhive/keyhive_wasm/keyhive-keyhive-0.0.0-alpha.58.tgz}
+    version: 0.0.0-alpha.58
 
   '@noble/ed25519@3.0.0':
     resolution: {integrity: sha512-QyteqMNm0GLqfa5SoYbSC3+Pvykwpn95Zgth4MFVSMKBB75ELl9tX1LAVsN4c3HXOrakHsF2gL4zWDAYCcsnzg==}
@@ -313,6 +320,10 @@ packages:
   '@noble/hashes@1.8.0':
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
     engines: {node: ^14.21.3 || >=16}
+
+  '@noble/hashes@2.2.0':
+    resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
+    engines: {node: '>= 20.19.0'}
 
   '@rollup/rollup-android-arm-eabi@4.53.5':
     resolution: {integrity: sha512-iDGS/h7D8t7tvZ1t6+WPK04KD0MwzLZrG0se1hzBjSi5fyxlsiggoJHwh18PCFNn7tG43OWb6pdZ6Y+rMlmyNQ==}
@@ -1157,9 +1168,9 @@ packages:
 
 snapshots:
 
-  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.21':
+  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.22':
     dependencies:
-      '@automerge/automerge-repo': 2.6.0-subduction.21
+      '@automerge/automerge-repo': 2.6.0-subduction.22
       cbor-x: 1.6.0
       debug: 4.4.3
       eventemitter3: 5.0.1
@@ -1170,7 +1181,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@automerge/automerge-repo@2.6.0-subduction.21':
+  '@automerge/automerge-repo@2.6.0-subduction.22':
     dependencies:
       '@automerge/automerge': 3.2.6
       '@automerge/automerge-subduction': 0.13.0
@@ -1189,6 +1200,8 @@ snapshots:
       - utf-8-validate
 
   '@automerge/automerge-subduction@0.13.0': {}
+
+  '@automerge/automerge-subduction@0.15.0': {}
 
   '@automerge/automerge@3.2.6': {}
 
@@ -1342,11 +1355,13 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@keyhive/keyhive@0.0.0-alpha.57g': {}
+  '@keyhive/keyhive@file:../keyhive/keyhive_wasm/keyhive-keyhive-0.0.0-alpha.58.tgz': {}
 
   '@noble/ed25519@3.0.0': {}
 
   '@noble/hashes@1.8.0': {}
+
+  '@noble/hashes@2.2.0': {}
 
   '@rollup/rollup-android-arm-eabi@4.53.5':
     optional: true

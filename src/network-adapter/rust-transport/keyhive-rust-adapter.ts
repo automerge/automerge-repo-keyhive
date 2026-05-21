@@ -16,7 +16,6 @@ import { EventBytesOnlyEventCache } from "../event-bytes-only-event-cache.js";
 import { StandardEventCache } from "../standard-event-cache.js";
 import { PeriodicEventCache } from "../periodic-event-cache.js";
 import { peerIdFromVerifyingKey } from "../messages.js";
-import { keyhiveIdentifierFromPeerId } from "../../utilities.js";
 import { KeyhiveStorage, receiveContactCard } from "../../keyhive/keyhive.js";
 
 import {
@@ -356,24 +355,9 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     if (signedMessage.contactCard !== "") {
       try {
         const contactCard = ContactCard.fromJson(signedMessage.contactCard);
-        console.warn(
-          `[KeyhiveRustAdapter] DIAG: ingesting contactCard from sender=${decoded.senderId} (cardJsonLen=${signedMessage.contactCard.length})`,
-        );
         await this.keyhiveQueue.run(() =>
           receiveContactCard(this.keyhive, contactCard, this.keyhiveStorage),
         );
-        try {
-          const senderIdentifier = keyhiveIdentifierFromPeerId(decoded.senderId);
-          const agent = await this.keyhive.getAgent(senderIdentifier);
-          console.warn(
-            `[KeyhiveRustAdapter] DIAG: post-ingest getAgent(senderId=${decoded.senderId}) -> ${agent ? "FOUND" : "NULL"}`,
-          );
-        } catch (lookupErr) {
-          console.warn(
-            `[KeyhiveRustAdapter] DIAG: post-ingest getAgent threw:`,
-            lookupErr,
-          );
-        }
       } catch (err) {
         console.error("[KeyhiveRustAdapter] contactCard ingest failed:", err);
         // Continue. The rest of the message may still be valid.

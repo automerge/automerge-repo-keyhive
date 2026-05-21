@@ -150,8 +150,7 @@ export class SyncProtocol {
       return;
     }
     this.syncRequestQueued = true;
-    void this.initiateKeyhiveSync(peerId, false, false).then(() => {
-    }).catch((error) =>
+    void this.initiateKeyhiveSync(peerId, false, false).catch((error) =>
       console.error("[AMRepoKeyhive] Periodic sync failed:", error)
     ).finally(() => {
       this.syncRequestQueued = false;
@@ -167,8 +166,7 @@ export class SyncProtocol {
       return;
     }
     this.fullSyncRequestQueued = true;
-    void this.initiateKeyhiveSync(peerId, false, false, true).then(() => {
-    }).catch((error) =>
+    void this.initiateKeyhiveSync(peerId, false, false, true).catch((error) =>
       console.error("[AMRepoKeyhive] Full sync failed:", error)
     ).finally(() => {
       this.fullSyncRequestQueued = false;
@@ -177,6 +175,9 @@ export class SyncProtocol {
 
   invalidateCaches(): void {
     this.cache.onKeyhiveChanged();
+    for (const peer of this.peers.values()) {
+      peer.syncpoint = null;
+    }
   }
 
   onPeerDisconnected(peerId: PeerId): void {
@@ -728,6 +729,7 @@ export class SyncProtocol {
           metrics.recordStorageRetry();
           try {
             await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
+            await this.keyhiveStorage.loadPrekeySecrets(this.keyhive);
             const retryPending = await this.keyhiveStorage.withSuppressedEventWrites(() =>
               this.keyhive.ingestEventsBytes(events)
             );

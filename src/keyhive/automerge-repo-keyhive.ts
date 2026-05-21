@@ -1,14 +1,13 @@
 import {
   AutomergeUrl,
-  type BinaryDocumentId,
   Heads,
   NetworkAdapter,
   PeerId,
   Repo,
-  stringifyAutomergeUrl,
   type SubductionPolicy,
 } from "@automerge/automerge-repo/slim";
-import { hexToUint8Array, keyhiveIdentifierFromPeerId } from "../utilities.js";
+import { hexToUint8Array, keyhiveIdentifierFromPeerId, uint8ArrayToHex } from "../utilities.js";
+import { KeyhiveBlobInterceptor } from "./blob-interceptor.js";
 import {
   Access,
   ChangeId,
@@ -42,6 +41,8 @@ const accessLevels: Record<string, number> = {
 };
 
 export class AutomergeRepoKeyhive {
+  #linked = false;
+
   constructor(
     public readonly active: Active,
     public readonly keyhive: Keyhive,
@@ -58,6 +59,11 @@ export class AutomergeRepoKeyhive {
   // potential `Keyhive` membership updates. Debounces ingest-remote events
   // so that bursts of keyhive ops don't trigger sweeps on every single event.
   linkRepo(repo: Repo, options?: { debounceMs?: number, onBeforeShareConfigChanged?: () => void }) {
+    if (this.#linked) {
+      console.warn("[AMRepoKeyhive] linkRepo called more than once; ignoring.")
+      return
+    }
+    this.#linked = true
     const debounceMs = options?.debounceMs ?? 2000
     const onBefore = options?.onBeforeShareConfigChanged
     let timer: ReturnType<typeof setTimeout> | null = null
@@ -112,7 +118,7 @@ export class AutomergeRepoKeyhive {
       return true;
     };
 
-    const hasAccess = async (id: Identifier, docUrl: AutomergeUrl, docId: KeyhiveDocumentId, minLevel: number): Promise<boolean> => {
+    const hasAccess = async (id: Identifier, docId: KeyhiveDocumentId, minLevel: number): Promise<boolean> => {
       try {
         // Check public access
         const publicAccess = await keyhive.accessForDoc(Identifier.publicId(), docId);
@@ -122,13 +128,9 @@ export class AutomergeRepoKeyhive {
         // Check direct access
         const access = await keyhive.accessForDoc(id, docId);
         const accessStr = access ? access.toString() : "None";
-        const result = accessLevels[accessStr] >= minLevel;
-        if (!result) {
-          console.log(`[SubductionPolicy] DENIED: publicAccess=${publicStr} directAccess=${accessStr} minLevel=${minLevel} docUrl=${docUrl}`);
-        }
-        return result;
+        return accessLevels[accessStr] >= minLevel;
       } catch (e) {
-        console.error(`[SubductionPolicy] hasAccess THREW for docUrl=${docUrl}:`, e);
+        console.error(`[SubductionPolicy] hasAccess threw for docId=${docId}:`, e);
         return false;
       }
     };
@@ -144,8 +146,7 @@ export class AutomergeRepoKeyhive {
         if (isLegacyDocId(sidBytes)) return;
         const identifier = new Identifier(peerId.toBytes());
         const docId = new KeyhiveDocumentId(sidBytes);
-        const docUrl = stringifyAutomergeUrl(sidBytes as BinaryDocumentId);
-        if (!(await hasAccess(identifier, docUrl, docId, accessLevels.Relay))) {
+        if (!(await hasAccess(identifier, docId, accessLevels.Relay))) {
           throw new Error("insufficient access to fetch: requires at least Relay");
         }
       },
@@ -155,8 +156,7 @@ export class AutomergeRepoKeyhive {
         if (isLegacyDocId(sidBytes)) return;
         const identifier = new Identifier(author.toBytes());
         const docId = new KeyhiveDocumentId(sidBytes);
-        const docUrl = stringifyAutomergeUrl(sidBytes as BinaryDocumentId);
-        if (!(await hasAccess(identifier, docUrl, docId, accessLevels.Edit))) {
+        if (!(await hasAccess(identifier, docId, accessLevels.Edit))) {
           throw new Error("insufficient access to put: requires at least Edit");
         }
       },
@@ -171,8 +171,7 @@ export class AutomergeRepoKeyhive {
             continue;
           }
           const docId = new KeyhiveDocumentId(sidBytes);
-          const docUrl = stringifyAutomergeUrl(sidBytes as BinaryDocumentId);
-          if (await hasAccess(identifier, docUrl, docId, accessLevels.Relay)) {
+          if (await hasAccess(identifier, docId, accessLevels.Relay)) {
             authorized.push(sid);
           }
         }
@@ -210,6 +209,7 @@ export class AutomergeRepoKeyhive {
       return;
     }
     await this.keyhive.addMember(agent, doc.toMembered(), access, []);
+    await this.keyhive.forcePcsUpdate(doc);
   }
 
   async revokeMemberFromDoc(
@@ -277,6 +277,7 @@ export class AutomergeRepoKeyhive {
     }
 
     await this.keyhive.addMember(agent, doc.toMembered(), access, []);
+    await this.keyhive.forcePcsUpdate(doc);
   }
 
   async getPublicAccess(docUrl: AutomergeUrl): Promise<Access | undefined> {
@@ -351,6 +352,15 @@ export function keyhiveIdFactory(_keyhiveNetworkAdapter: KeyhiveNetworkAdapter, 
  * Rust subduction-keyhive sync server.
  */
 export class AutomergeRepoKeyhiveRust {
+  #linkRepoSchedule: (() => void) | null = null;
+  // Debounced trigger for the membership-nudge check. Fired only for
+  // same-agent keyhive changes (via notifySameAgentKeyhiveChange).
+  #scheduleMembershipNudge: (() => void) | null = null;
+  // Per-doc set of member ids (hex of Agent.id) seen at the last check.
+  // On a local keyhive change, a nudge fires for a doc whose membership has
+  // grown beyond this set.
+  #lastSeenMembers: Map<string, Set<string>> = new Map();
+
   constructor(
     public readonly active: Active,
     public readonly keyhive: Keyhive,
@@ -367,6 +377,7 @@ export class AutomergeRepoKeyhiveRust {
       batchInterval?: number,
       archiveThreshold?: number,
     ) => KeyhiveNetworkAdapter,
+    public readonly blobInterceptor: KeyhiveBlobInterceptor,
   ) {}
 
   // Build a subduction MemorySigner from this hive's Ed25519 key pair so
@@ -390,12 +401,16 @@ export class AutomergeRepoKeyhiveRust {
 
   /** Wire keyhive membership updates to {@link Repo.shareConfigChanged}(). */
   linkRepo(repo: Repo, options?: { debounceMs?: number; onBeforeShareConfigChanged?: () => void }) {
+    if (this.#linkRepoSchedule) {
+      console.warn("[AMRepoKeyhiveRust] linkRepo called more than once; ignoring.");
+      return;
+    }
     const debounceMs = options?.debounceMs ?? 2000;
     const onBefore = options?.onBeforeShareConfigChanged;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let pending = false;
 
-    this.emitter.on("update", () => {
+    const schedule = () => {
       pending = true;
       if (timer) return;
       timer = setTimeout(() => {
@@ -409,7 +424,72 @@ export class AutomergeRepoKeyhiveRust {
           console.error(`[AMRepoKeyhiveRust] shareConfigChanged() threw:`, e);
         }
       }, debounceMs);
-    });
+    };
+
+    this.#linkRepoSchedule = schedule;
+    this.emitter.on("update", schedule);
+    (this.networkAdapter as any).on("ingest-remote", schedule);
+
+    // Separate debounce for nudge creation, fired only via
+    // notifySameAgentKeyhiveChange.
+    let nudgeTimer: ReturnType<typeof setTimeout> | null = null;
+    let nudgePending = false;
+    this.#scheduleMembershipNudge = () => {
+      nudgePending = true;
+      if (nudgeTimer) return;
+      nudgeTimer = setTimeout(async () => {
+        nudgeTimer = null;
+        if (!nudgePending) return;
+        nudgePending = false;
+        await this.#checkForMembershipNudges(repo);
+      }, debounceMs);
+    };
+  }
+
+  /**
+   * Signal a keyhive change that originated from this same agent (membership
+   * or content). This drives nudge creation.
+   */
+  notifySameAgentKeyhiveChange(): void {
+    this.#linkRepoSchedule?.();
+    this.#scheduleMembershipNudge?.();
+  }
+
+  /**
+   * Create a refresh edit (`_pcsRefresh`) for any tracked doc whose membership
+   * has grown since it was last seen. This gives a newly-added member a
+   * content commit encrypted under the current key and carrying the predecessor key
+   * chain.
+   */
+  async #checkForMembershipNudges(repo: Repo) {
+    const trackedDocs = this.blobInterceptor.trackedDocIds;
+    for (const documentId of trackedDocs) {
+      try {
+        const keyhiveDocId = docIdFromAutomergeUrl(`automerge:${documentId}` as AutomergeUrl);
+        const doc = await this.keyhive.getDocument(keyhiveDocId);
+        if (!doc) continue;
+        const members = await doc.members();
+        const currentIds = new Set(members.map(c => uint8ArrayToHex(c.who.id.toBytes())));
+        const lastSeen = this.#lastSeenMembers.get(documentId);
+        if (!lastSeen) {
+          // First time we've checked this doc. Record its current members as
+          // the baseline and don't nudge: we can't tell which of these were
+          // just added, so we only nudge for members added after this point.
+          this.#lastSeenMembers.set(documentId, currentIds);
+          continue;
+        }
+        const hasNewMember = [...currentIds].some(id => !lastSeen.has(id));
+        if (!hasNewMember) continue;
+        const handle = await repo.find<{ _pcsRefresh?: number }>(`automerge:${documentId}` as AutomergeUrl);
+        // Write a nudge edit to force a content commit under the
+        // current key. This way, a newly-added member has a way to decrypt
+        // and access the predecessor key chain for the document.
+        handle.change((d) => { d._pcsRefresh = Date.now(); });
+        this.#lastSeenMembers.set(documentId, currentIds);
+      } catch {
+        // Per-doc isolation: a failure on one doc should not block the rest.
+      }
+    }
   }
 
   async receiveContactCard(contactCard: ContactCard): Promise<Individual | undefined> {
@@ -437,6 +517,7 @@ export class AutomergeRepoKeyhiveRust {
       return;
     }
     await this.keyhive.addMember(agent, doc.toMembered(), access, []);
+    await this.keyhive.forcePcsUpdate(doc);
   }
 
   async revokeMemberFromDoc(docUrl: AutomergeUrl, hexId: string) {
@@ -459,9 +540,6 @@ export class AutomergeRepoKeyhiveRust {
     const identifier = keyhiveIdentifierFromPeerId(this.networkAdapter.remotePeerId);
     const agent = await this.keyhive.getAgent(identifier);
     if (!agent) {
-      console.warn(
-        `[AMRepoKeyhiveRust] DIAG: sync server agent not yet known; retry after sync. remotePeerId=${this.networkAdapter.remotePeerId}`,
-      );
       throw new Error(
         `[AMRepoKeyhiveRust] sync server agent not yet known; retry after sync. remotePeerId=${this.networkAdapter.remotePeerId}`,
       );
@@ -498,6 +576,7 @@ export class AutomergeRepoKeyhiveRust {
       return;
     }
     await this.keyhive.addMember(agent, doc.toMembered(), access, []);
+    await this.keyhive.forcePcsUpdate(doc);
   }
 
   async getPublicAccess(docUrl: AutomergeUrl): Promise<Access | undefined> {
