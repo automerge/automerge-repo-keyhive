@@ -1,6 +1,6 @@
 {
   "name": "@automerge/automerge-repo-keyhive",
-  "version": "0.3.0-alpha.sub.1",
+  "version": "0.3.0-alpha.sub.8",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,10 +19,11 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "@automerge/automerge-repo": "2.6.0-subduction.21",
-    "@automerge/automerge-repo-network-websocket": "2.6.0-subduction.21",
-    "@automerge/automerge-subduction": "0.13.0",
-    "@keyhive/keyhive": "0.0.0-alpha.57g",
+    "@automerge/automerge-repo": "2.6.0-subduction.37",
+    "@automerge/automerge-repo-network-websocket": "2.6.0-subduction.37",
+    "@automerge/automerge-subduction": "0.16.0",
+    "@keyhive/keyhive": "0.1.0-alpha.5",
+    "@noble/hashes": "^2.2.0",
     "cbor-x": "^1.6.0",
     "eventemitter3": "^5.0.1",
     "isomorphic-ws": "^5.0.0"
@@ -38,5 +39,10 @@
     "globals": "^15.0.0",
     "typescript": "^5.2",
     "vitest": "^1.6.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "@automerge/automerge-repo": "2.6.0-subduction.37"
+    }
   }
 }

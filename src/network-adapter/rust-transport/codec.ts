@@ -29,7 +29,8 @@
 //                             sync_responder_total, sync_requester_total } }
 //   { "RequestContactCard": { sender_id, target_id } }
 //   { "MissingContactCard": { sender_id, target_id } }
-//   { "SyncCheck":          { sender_id, target_id, sender_total, sender_syncpoint } }
+//   { "SyncCheck":          { sender_id, target_id, sender_total, sender_syncpoint,
+//                             sender_digest (32-byte byte string) } }
 //   { "SyncConfirmation":   { sender_id, target_id, confirmer_total } }
 //
 // KeyhivePeerId (CBOR map):
@@ -91,7 +92,7 @@ export function decodeSukFrame(bytes: Uint8Array): Uint8Array {
     throw new SukFrameError(`message too short: ${bytes.length} bytes`);
   }
   const totalSize =
-    (bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7];
+    ((bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7]) >>> 0;
   if (totalSize !== bytes.length) {
     throw new SukFrameError(
       `size mismatch: declared ${totalSize}, actual ${bytes.length}`
@@ -221,6 +222,11 @@ const TYPE_BY_RUST_VARIANT: Record<string, KeyhiveMessageType> = Object.fromEntr
   Object.entries(RUST_VARIANT_BY_TYPE).map(([k, v]) => [v, k as KeyhiveMessageType])
 );
 
+// Sent for a SyncCheck whose op-set digest is absent (a peer predating the
+// digest field). All-zero never matches a non-empty pair-set digest, so the
+// receiver falls back to a full sync rather than wrongly short-circuiting.
+const ZERO_DIGEST = new Uint8Array(32);
+
 /**
  * The fields-only shape used in the existing TS adapter (camelCase) for
  * each keyhive message type. We only handle the fields that travel inside
@@ -240,7 +246,7 @@ export type TsInnerData =
       syncRequesterTotal?: number;
     } // sync-ops
   | {} // request/missing contact card
-  | { senderTotal: number; senderSyncpoint: number } // sync-check
+  | { senderTotal: number; senderSyncpoint: number; senderDigest?: Uint8Array } // sync-check
   | { confirmerTotal: number }; // sync-confirmation
 
 export interface RustEncodeInput {
@@ -343,6 +349,7 @@ function decodeInlineForType(
       return {
         sender_total: obj.senderTotal ?? 0,
         sender_syncpoint: obj.senderSyncpoint ?? 0,
+        sender_digest: obj.senderDigest ?? ZERO_DIGEST,
       };
     case "keyhive-sync-confirmation":
       return { confirmer_total: obj.confirmerTotal ?? 0 };
@@ -385,6 +392,7 @@ function encodeInlineForType(
       inline = {
         senderTotal: Number(v.sender_total ?? 0),
         senderSyncpoint: Number(v.sender_syncpoint ?? 0),
+        senderDigest: (v.sender_digest as Uint8Array) ?? ZERO_DIGEST,
       };
       break;
     case "keyhive-sync-confirmation":

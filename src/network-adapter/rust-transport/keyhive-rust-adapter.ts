@@ -16,7 +16,6 @@ import { EventBytesOnlyEventCache } from "../event-bytes-only-event-cache.js";
 import { StandardEventCache } from "../standard-event-cache.js";
 import { PeriodicEventCache } from "../periodic-event-cache.js";
 import { peerIdFromVerifyingKey } from "../messages.js";
-import { keyhiveIdentifierFromPeerId } from "../../utilities.js";
 import { KeyhiveStorage, receiveContactCard } from "../../keyhive/keyhive.js";
 
 import {
@@ -27,6 +26,11 @@ import {
   encodeSignedMessage,
   peerIdToRust,
 } from "./codec.js";
+
+// Cadence of the full-sync fallback. A forced full request bypasses the
+// lightweight sync-check, recovering from a stale syncpoint that would
+// otherwise keep the check short-circuiting. Matches KeyhiveNetworkAdapter.
+const FULL_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 const KEYHIVE_MESSAGE_TYPES: ReadonlySet<string> = new Set<KeyhiveMessageType>([
   "keyhive-sync-request",
@@ -79,6 +83,7 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
   private readonly syncRequestInterval: number;
   private periodicSyncEnabled: boolean;
   private syncIntervalId?: ReturnType<typeof setInterval>;
+  private fullSyncIntervalId?: ReturnType<typeof setInterval>;
   private periodicCacheRefreshId?: ReturnType<typeof setInterval>;
   /**
    * Tracks whether the underlying transport currently has an active connection
@@ -190,6 +195,11 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
       this.syncIntervalId = setInterval(() => {
         this.syncProtocol.requestKeyhiveSync();
       }, syncRequestInterval);
+      // Fallback: periodically force a full sync request so a stale syncpoint
+      // can't keep the lightweight sync-check short-circuiting indefinitely.
+      this.fullSyncIntervalId = setInterval(() => {
+        this.syncProtocol.requestFullKeyhiveSync();
+      }, FULL_SYNC_INTERVAL_MS);
     }
 
     // Surface a peer-candidate immediately so consumers tracking
@@ -218,6 +228,9 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     this.syncIntervalId = setInterval(() => {
       this.syncProtocol.requestKeyhiveSync();
     }, this.syncRequestInterval);
+    this.fullSyncIntervalId = setInterval(() => {
+      this.syncProtocol.requestFullKeyhiveSync();
+    }, FULL_SYNC_INTERVAL_MS);
   }
 
   /**
@@ -235,6 +248,10 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     if (this.syncIntervalId) {
       clearInterval(this.syncIntervalId);
       this.syncIntervalId = undefined;
+    }
+    if (this.fullSyncIntervalId) {
+      clearInterval(this.fullSyncIntervalId);
+      this.fullSyncIntervalId = undefined;
     }
     if (this.periodicCacheRefreshId) {
       clearInterval(this.periodicCacheRefreshId);
@@ -356,24 +373,9 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     if (signedMessage.contactCard !== "") {
       try {
         const contactCard = ContactCard.fromJson(signedMessage.contactCard);
-        console.warn(
-          `[KeyhiveRustAdapter] DIAG: ingesting contactCard from sender=${decoded.senderId} (cardJsonLen=${signedMessage.contactCard.length})`,
-        );
         await this.keyhiveQueue.run(() =>
           receiveContactCard(this.keyhive, contactCard, this.keyhiveStorage),
         );
-        try {
-          const senderIdentifier = keyhiveIdentifierFromPeerId(decoded.senderId);
-          const agent = await this.keyhive.getAgent(senderIdentifier);
-          console.warn(
-            `[KeyhiveRustAdapter] DIAG: post-ingest getAgent(senderId=${decoded.senderId}) -> ${agent ? "FOUND" : "NULL"}`,
-          );
-        } catch (lookupErr) {
-          console.warn(
-            `[KeyhiveRustAdapter] DIAG: post-ingest getAgent threw:`,
-            lookupErr,
-          );
-        }
       } catch (err) {
         console.error("[KeyhiveRustAdapter] contactCard ingest failed:", err);
         // Continue. The rest of the message may still be valid.

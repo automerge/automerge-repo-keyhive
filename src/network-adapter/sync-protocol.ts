@@ -8,7 +8,7 @@ import { buildSyncResponseCbor, buildSyncOpsCbor, buildCborByteStringArray } fro
 import { PromiseQueue } from "./pending.js";
 import { Metrics } from "./metrics.js";
 import type { PeerHashes, EventBytesResult } from "./sync-data.js";
-import { keyhiveIdentifierFromPeerId, unwrapWasmError } from "../utilities.js";
+import { arraysEqual, keyhiveIdentifierFromPeerId, unwrapWasmError } from "../utilities.js";
 import {
   receiveContactCard,
   KeyhiveStorage,
@@ -22,6 +22,20 @@ export interface SyncProtocolConfig {
   retryPendingFromStorage: boolean;
   minSyncRequestInterval: number;
   minSyncResponseInterval: number;
+}
+
+// Order-independent XOR of a pairwise op-hash set into a single 32-byte digest.
+function pairSetDigest(hashes: Map<string, Uint8Array>): Uint8Array {
+  const acc = new Uint8Array(32);
+  for (const bytes of hashes.values()) {
+    const n = Math.min(bytes.length, 32);
+    for (let i = 0; i < n; i++) acc[i] ^= bytes[i];
+  }
+  return acc;
+}
+
+function digestHex(d: Uint8Array): string {
+  return Array.from(d, (x) => x.toString(16).padStart(2, "0")).join("");
 }
 
 export interface SyncProtocolDeps {
@@ -150,8 +164,7 @@ export class SyncProtocol {
       return;
     }
     this.syncRequestQueued = true;
-    void this.initiateKeyhiveSync(peerId, false, false).then(() => {
-    }).catch((error) =>
+    void this.initiateKeyhiveSync(peerId, false, false).catch((error) =>
       console.error("[AMRepoKeyhive] Periodic sync failed:", error)
     ).finally(() => {
       this.syncRequestQueued = false;
@@ -167,8 +180,7 @@ export class SyncProtocol {
       return;
     }
     this.fullSyncRequestQueued = true;
-    void this.initiateKeyhiveSync(peerId, false, false, true).then(() => {
-    }).catch((error) =>
+    void this.initiateKeyhiveSync(peerId, false, false, true).catch((error) =>
       console.error("[AMRepoKeyhive] Full sync failed:", error)
     ).finally(() => {
       this.fullSyncRequestQueued = false;
@@ -177,6 +189,9 @@ export class SyncProtocol {
 
   invalidateCaches(): void {
     this.cache.onKeyhiveChanged();
+    for (const peer of this.peers.values()) {
+      peer.syncpoint = null;
+    }
   }
 
   onPeerDisconnected(peerId: PeerId): void {
@@ -260,6 +275,7 @@ export class SyncProtocol {
             const data = encode({
               senderTotal,
               senderSyncpoint: peer.syncpoint,
+              senderDigest: pairSetDigest(hashes),
             });
             const message = {
               type: "keyhive-sync-check",
@@ -609,6 +625,7 @@ export class SyncProtocol {
     const checkData = decode(message.data as Uint8Array);
     const theirTotalForUs: number = checkData.senderTotal;
     const theirSyncpoint: number = checkData.senderSyncpoint;
+    const theirDigest: Uint8Array = checkData.senderDigest ?? new Uint8Array(32);
 
     metrics.recordSyncCheckReceived();
 
@@ -631,23 +648,30 @@ export class SyncProtocol {
       const pendingOpHashes = await this.cache.getPendingOpHashes(this.keyhive);
       const hashes = await this.getHashesForPeerPair(peerId, message.senderId);
       const ourTotalForThem = hashes.size + pendingOpHashes.length;
-
-      // Sync check conditions
+      const ourDigest = pairSetDigest(hashes);
       const ourSyncpointMatchesTheirTotal = peer.syncpoint !== null &&
         peer.syncpoint === theirTotalForUs;
       const theirSyncpointMatchesOurTotal = theirSyncpoint === ourTotalForThem;
+      const digestsMatch = arraysEqual(ourDigest, theirDigest);
 
-      if (ourSyncpointMatchesTheirTotal && theirSyncpointMatchesOurTotal) {
+      if (ourSyncpointMatchesTheirTotal && theirSyncpointMatchesOurTotal && digestsMatch) {
         console.debug(
-          `[AMRepoKeyhive] Sync check passed for ${message.senderId}: both totals match (ours=${ourTotalForThem}, theirs=${theirTotalForUs})`
+          `[AMRepoKeyhive] Sync check PASS (short-circuit) for ${message.senderId}: ` +
+            `ourTotalForThem=${ourTotalForThem} theirTotalForUs=${theirTotalForUs} ` +
+            `ourSyncpoint=${peer.syncpoint ?? "null"} theirSyncpoint=${theirSyncpoint} ` +
+            `digest=${digestHex(ourDigest)} pending=${pendingOpHashes.length}`
         );
         metrics.recordSyncCheckShortCircuited();
         return;
       }
 
-      // Totals mismatch. Start full sync request
+      // Counts or digest mismatch. Start full sync request
       console.debug(
-        `[AMRepoKeyhive] Sync check failed for ${message.senderId}: mismatch (ourActual=${ourTotalForThem}, theirSyncpoint=${theirSyncpoint}, theirTotalForUs=${theirTotalForUs}, ourSyncpoint=${peer.syncpoint ?? "null"}). Falling back to full sync.`
+        `[AMRepoKeyhive] Sync check FALLBACK (full-sync) for ${message.senderId}: ` +
+          `ourTotalForThem=${ourTotalForThem} theirTotalForUs=${theirTotalForUs} ` +
+          `ourSyncpoint=${peer.syncpoint ?? "null"} theirSyncpoint=${theirSyncpoint} ` +
+          `digestsMatch=${digestsMatch} ourDigest=${digestHex(ourDigest)} ` +
+          `theirDigest=${digestHex(theirDigest)} pending=${pendingOpHashes.length}`
       );
       metrics.recordSyncCheckFallback();
 
@@ -728,6 +752,7 @@ export class SyncProtocol {
           metrics.recordStorageRetry();
           try {
             await this.keyhiveStorage.ingestKeyhiveFromStorage(this.keyhive);
+            await this.keyhiveStorage.loadPrekeySecrets(this.keyhive);
             const retryPending = await this.keyhiveStorage.withSuppressedEventWrites(() =>
               this.keyhive.ingestEventsBytes(events)
             );

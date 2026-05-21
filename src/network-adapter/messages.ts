@@ -49,7 +49,7 @@ export function decodeKeyhiveMessageData(
       signed,
     };
   } catch {
-    // We currently expect non-keyhive messages to fall here
+    // Non-keyhive messages are expected to fail decoding here.
     return undefined;
   }
 }

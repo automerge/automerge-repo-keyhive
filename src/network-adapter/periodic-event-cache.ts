@@ -103,7 +103,8 @@ export class PeriodicEventCache implements EventCache {
   }
 
   onKeyhiveChanged(): void {
-    // no-op: refreshes on its own timer
+    // Reset lastTotalOps so the next refresh() recomputes.
+    this.lastTotalOps = 0n;
   }
 
   // TODO: This is called when attempting recovery from storage before
