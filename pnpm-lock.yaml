@@ -20,6 +20,9 @@ importers:
       '@keyhive/keyhive':
         specifier: 0.0.0-alpha.57g
         version: 0.0.0-alpha.57g
+      '@noble/hashes':
+        specifier: ^2.2.0
+        version: 2.2.0
       cbor-x:
         specifier: ^1.6.0
         version: 1.6.0
@@ -313,6 +316,10 @@ packages:
   '@noble/hashes@1.8.0':
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
     engines: {node: ^14.21.3 || >=16}
+
+  '@noble/hashes@2.2.0':
+    resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
+    engines: {node: '>= 20.19.0'}
 
   '@rollup/rollup-android-arm-eabi@4.53.5':
     resolution: {integrity: sha512-iDGS/h7D8t7tvZ1t6+WPK04KD0MwzLZrG0se1hzBjSi5fyxlsiggoJHwh18PCFNn7tG43OWb6pdZ6Y+rMlmyNQ==}
@@ -1347,6 +1354,8 @@ snapshots:
   '@noble/ed25519@3.0.0': {}
 
   '@noble/hashes@1.8.0': {}
+
+  '@noble/hashes@2.2.0': {}
 
   '@rollup/rollup-android-arm-eabi@4.53.5':
     optional: true

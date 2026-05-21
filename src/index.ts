@@ -33,6 +33,7 @@ export function isWasmInitialized(): boolean {
 export { Active } from "./keyhive/active.js";
 export { KeyhiveEventEmitter } from "./keyhive/emitter.js";
 export { AutomergeRepoKeyhive, AutomergeRepoKeyhiveRust } from "./keyhive/automerge-repo-keyhive.js"
+export { KeyhiveBlobInterceptor } from "./keyhive/blob-interceptor.js"
 export {
   docIdFromAutomergeUrl,
   initializeAutomergeRepoKeyhive,

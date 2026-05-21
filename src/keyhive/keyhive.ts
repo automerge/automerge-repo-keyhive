@@ -25,6 +25,7 @@ import type { Subduction } from "@automerge/automerge-subduction/slim";
 import { PromiseQueue } from "../network-adapter/pending.js";
 import { KeyhiveEventEmitter } from "./emitter.js";
 import { AutomergeRepoKeyhive, AutomergeRepoKeyhiveRust, generateDoc, keyhiveIdFactory } from "./automerge-repo-keyhive.js";
+import { KeyhiveBlobInterceptor } from "./blob-interceptor.js";
 
 export const KEYHIVE_DB_KEY = "keyhive-db";
 export const KEYHIVE_ARCHIVES_KEY = "/archives/";
@@ -256,6 +257,8 @@ export async function initializeAutomergeRepoKeyhive(options: {
 
   setupEventFlushListener(bootstrap, keyhiveNetworkAdapter, { automaticArchiveIngestion });
 
+  const blobInterceptor = new KeyhiveBlobInterceptor(keyhive, keyhiveQueue);
+
   return new AutomergeRepoKeyhive(
     active,
     keyhive,
@@ -266,6 +269,7 @@ export async function initializeAutomergeRepoKeyhive(options: {
     emitter,
     keyhiveIdFactory(keyhiveNetworkAdapter, keyhive),
     createKeyhiveNetworkAdapter,
+    blobInterceptor,
   );
 }
 
@@ -363,6 +367,8 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
     return doc.doc_id.toBytes();
   };
 
+  const blobInterceptor = new KeyhiveBlobInterceptor(keyhive, keyhiveQueue);
+
   return new AutomergeRepoKeyhiveRust(
     active,
     keyhive,
@@ -372,6 +378,7 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
     networkAdapter,
     idFactory,
     createKeyhiveNetworkAdapter,
+    blobInterceptor,
   );
 }
 

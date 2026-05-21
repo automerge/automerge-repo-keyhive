@@ -1,6 +1,7 @@
 import {
   AutomergeUrl,
   type BinaryDocumentId,
+  type BlobInterceptor,
   Heads,
   NetworkAdapter,
   PeerId,
@@ -52,6 +53,7 @@ export class AutomergeRepoKeyhive {
     public readonly emitter: KeyhiveEventEmitter,
     public readonly idFactory: (heads: Heads) => Promise<Uint8Array>,
     public readonly createKeyhiveNetworkAdapter: (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean, periodicallyRequestSync: boolean, syncRequestInterval: number, batchInterval?: number, archiveThreshold?: number) => KeyhiveNetworkAdapter,
+    public readonly blobInterceptor: BlobInterceptor,
   ) {}
 
   // Configure `AutomergeRepoKeyhive` to notify the provided `Repo` about
@@ -378,6 +380,7 @@ export class AutomergeRepoKeyhiveRust {
       batchInterval?: number,
       archiveThreshold?: number,
     ) => KeyhiveNetworkAdapter,
+    public readonly blobInterceptor: BlobInterceptor,
   ) {}
 
   /**
