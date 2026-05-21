@@ -38,6 +38,26 @@ export function unwrapWasmError(error: unknown): unknown {
   return error;
 }
 
+export function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+// Legacy (pre-keyhive) document ids are 16 real bytes zero-padded to 32.
+// A keyhive document id uses all 32 bytes, so a non-zero byte anywhere in
+// [16, 32) marks a real keyhive id. A shorter-than-32-byte id is treated as
+// legacy as well.
+export function isLegacyDocId(bytes: Uint8Array): boolean {
+  if (bytes.length < 32) return true;
+  for (let i = 16; i < 32; i++) {
+    if (bytes[i] !== 0) return false;
+  }
+  return true;
+}
+
 export function hexToUint8Array(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) {

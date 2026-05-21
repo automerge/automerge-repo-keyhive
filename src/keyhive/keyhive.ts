@@ -3,6 +3,8 @@ import {
   NetworkAdapter,
   parseAutomergeUrl,
   PeerId,
+  type Repo,
+  type RepoConfig,
   StorageAdapterInterface,
   StorageKey,
 } from "@automerge/automerge-repo/slim";
@@ -25,11 +27,13 @@ import type { Subduction } from "@automerge/automerge-subduction/slim";
 import { PromiseQueue } from "../network-adapter/pending.js";
 import { KeyhiveEventEmitter } from "./emitter.js";
 import { AutomergeRepoKeyhive, AutomergeRepoKeyhiveRust, generateDoc, keyhiveIdFactory } from "./automerge-repo-keyhive.js";
+import { KeyhiveBlobInterceptor } from "./blob-interceptor.js";
 
 export const KEYHIVE_DB_KEY = "keyhive-db";
 export const KEYHIVE_ARCHIVES_KEY = "/archives/";
 export const KEYHIVE_EVENTS_KEY = "/ops/";
 export const KEYHIVE_PREKEY_SECRETS_KEY = "/prekey-secrets";
+export const KEYHIVE_LEAF_SECRETS_KEY = "/leaf-secrets/";
 
 export function docIdFromAutomergeUrl(url: AutomergeUrl): KeyhiveDocumentId {
   const { binaryDocumentId } = parseAutomergeUrl(url);
@@ -50,29 +54,6 @@ export interface SyncServerIdentity {
  */
 export type SyncServerSelection = "subduction" | "keyhive" | SyncServerIdentity;
 
-// Known sync-server identities.
-const SYNC_SERVERS: Record<"subduction" | "keyhive", SyncServerIdentity> = {
-  // subduction.sync.inkandswitch.com (issuer f709c58c…).
-  subduction: {
-    contactCardJson:
-      '{"Rotate":{"payload":{"old":[33,137,111,238,179,125,3,30,133,139,50,112,178,153,171,132,174,170,136,174,242,17,131,192,37,125,253,108,91,65,84,110],"new":[34,214,236,200,87,89,211,226,207,54,34,177,181,49,195,126,244,174,192,163,6,174,225,45,147,0,82,73,79,78,196,60]},"issuer":[247,9,197,140,25,81,187,131,117,217,148,149,178,185,64,74,187,27,132,103,122,139,165,214,120,158,18,104,148,65,76,25],"signature":[92,213,174,209,83,196,175,199,100,26,241,68,150,220,89,224,87,196,169,73,234,232,74,212,191,3,116,4,138,189,221,44,177,140,139,161,19,139,164,49,224,197,190,25,144,134,90,157,255,86,184,5,184,94,70,127,22,40,43,34,200,182,65,8]}}',
-    peerId: "9wnFjBlRu4N12ZSVsrlASrsbhGd6i6XWeJ4SaJRBTBk=" as PeerId,
-  },
-  // keyhive.sync.automerge.org (issuer d7f41e6f…).
-  keyhive: {
-    contactCardJson:
-      '{"Rotate":{"payload":{"old":[73,163,230,244,111,233,153,119,133,211,134,237,111,36,52,131,22,50,54,144,150,45,227,235,128,36,33,217,190,198,55,75],"new":[109,115,204,144,178,114,182,238,113,124,4,139,249,76,220,44,128,104,194,68,187,184,82,241,94,145,104,198,159,122,186,43]},"issuer":[215,244,30,111,15,78,235,218,7,241,63,222,141,131,33,22,234,116,180,208,97,235,210,55,202,209,170,178,98,37,223,159],"signature":[178,64,85,76,51,199,196,151,129,14,191,53,127,191,34,223,97,238,95,109,118,179,152,17,205,188,204,177,116,166,147,231,192,201,48,137,19,214,180,45,108,104,34,8,14,63,115,139,215,142,4,179,233,89,150,218,174,168,107,23,8,109,228,6]}}',
-    peerId: "1/Qebw9O69oH8T/ejYMhFup0tNBh69I3ytGqsmIl358=" as PeerId,
-  },
-};
-
-/** Resolve a {@link SyncServerSelection} to its card + peer id. */
-function resolveSyncServer(
-  selection: SyncServerSelection = "subduction"
-): SyncServerIdentity {
-  return typeof selection === "string" ? SYNC_SERVERS[selection] : selection;
-}
-
 /**
  * Shared keyhive context: signer, storage, keyhive instance, active,
  * peerId, emitter, queue, and the selected syncServer.
@@ -90,6 +71,43 @@ interface KeyhiveContext {
   serverPeerIdHardcoded: PeerId;
 }
 
+// TODO: these sync-server identities are temporarily hardcoded.
+
+/** keyhive.sync.automerge.org keyhive contact card (issuer d7f41e6f…). */
+export const KEYHIVE_SYNC_SERVER_CONTACT_CARD_JSON =
+  '{"Rotate":{"payload":{"old":[73,163,230,244,111,233,153,119,133,211,134,237,111,36,52,131,22,50,54,144,150,45,227,235,128,36,33,217,190,198,55,75],"new":[109,115,204,144,178,114,182,238,113,124,4,139,249,76,220,44,128,104,194,68,187,184,82,241,94,145,104,198,159,122,186,43]},"issuer":[215,244,30,111,15,78,235,218,7,241,63,222,141,131,33,22,234,116,180,208,97,235,210,55,202,209,170,178,98,37,223,159],"signature":[178,64,85,76,51,199,196,151,129,14,191,53,127,191,34,223,97,238,95,109,118,179,152,17,205,188,204,177,116,166,147,231,192,201,48,137,19,214,180,45,108,104,34,8,14,63,115,139,215,142,4,179,233,89,150,218,174,168,107,23,8,109,228,6]}}';
+/** keyhive.sync.automerge.org subduction peer id. */
+export const KEYHIVE_SYNC_SERVER_PEER_ID =
+  "1/Qebw9O69oH8T/ejYMhFup0tNBh69I3ytGqsmIl358=" as PeerId;
+
+/** subduction.sync.inkandswitch.com keyhive contact card (issuer f709c58c…),
+ * captured over the wire from its MissingContactCard at rust-transport/codec.ts. */
+export const SUBDUCTION_SYNC_SERVER_CONTACT_CARD_JSON =
+  '{"Rotate":{"payload":{"old":[33,137,111,238,179,125,3,30,133,139,50,112,178,153,171,132,174,170,136,174,242,17,131,192,37,125,253,108,91,65,84,110],"new":[34,214,236,200,87,89,211,226,207,54,34,177,181,49,195,126,244,174,192,163,6,174,225,45,147,0,82,73,79,78,196,60]},"issuer":[247,9,197,140,25,81,187,131,117,217,148,149,178,185,64,74,187,27,132,103,122,139,165,214,120,158,18,104,148,65,76,25],"signature":[92,213,174,209,83,196,175,199,100,26,241,68,150,220,89,224,87,196,169,73,234,232,74,212,191,3,116,4,138,189,221,44,177,140,139,161,19,139,164,49,224,197,190,25,144,134,90,157,255,86,184,5,184,94,70,127,22,40,43,34,200,182,65,8]}}';
+/** subduction.sync.inkandswitch.com subduction peer id. */
+export const SUBDUCTION_SYNC_SERVER_PEER_ID =
+  "9wnFjBlRu4N12ZSVsrlASrsbhGd6i6XWeJ4SaJRBTBk=" as PeerId;
+
+// Known sync-server identities, keyed by name. Each card and peer id are a
+// matched pair, so selecting by name can never mismatch them.
+const SYNC_SERVERS: Record<"subduction" | "keyhive", SyncServerIdentity> = {
+  subduction: {
+    contactCardJson: SUBDUCTION_SYNC_SERVER_CONTACT_CARD_JSON,
+    peerId: SUBDUCTION_SYNC_SERVER_PEER_ID,
+  },
+  keyhive: {
+    contactCardJson: KEYHIVE_SYNC_SERVER_CONTACT_CARD_JSON,
+    peerId: KEYHIVE_SYNC_SERVER_PEER_ID,
+  },
+};
+
+/** Resolve a {@link SyncServerSelection} to its card + peer id. */
+function resolveSyncServer(
+  selection: SyncServerSelection = "subduction"
+): SyncServerIdentity {
+  return typeof selection === "string" ? SYNC_SERVERS[selection] : selection;
+}
+
 async function bootstrapKeyhive(options: {
   storage: StorageAdapterInterface;
   peerIdSuffix: string;
@@ -97,9 +115,7 @@ async function bootstrapKeyhive(options: {
   /** Which sync server to register as the relay. Defaults to subduction.sync. */
   syncServer?: SyncServerSelection;
 }): Promise<KeyhiveContext> {
-  console.warn(`[bootstrapKeyhive] enter suffix=${options.peerIdSuffix}`);
   const { keyPair, signer } = await loadOrCreateKeyPairAndSigner(options.storage, options.keyPair)
-  console.warn(`[bootstrapKeyhive] after loadOrCreateKeyPairAndSigner`);
   const emitter = new KeyhiveEventEmitter();
   const uniqueIdHash = new Uint8Array(
     await crypto.subtle.digest(
@@ -108,28 +124,23 @@ async function bootstrapKeyhive(options: {
     )
   );
   const keyhiveStorage = new KeyhiveStorage(uniqueIdHash, options.storage);
-  console.warn(`[bootstrapKeyhive] before loadOrCreateKeyhive`);
   const keyhive = await keyhiveStorage.loadOrCreateKeyhive(
     signer,
     uniqueIdHash,
     emitter.handleKeyhiveEvent
   );
-  console.warn(`[bootstrapKeyhive] after loadOrCreateKeyhive`);
   const active = await createActive(keyPair, signer, keyhive);
-  console.warn(`[bootstrapKeyhive] after createActive`);
   const peerId = peerIdFromSigner(active.signer, options.peerIdSuffix);
 
   const { contactCardJson: serverContactCardJson, peerId: serverPeerIdHardcoded } =
     resolveSyncServer(options.syncServer);
 
-  console.warn(`[bootstrapKeyhive] before syncServerFromContactCard`);
   const syncServer = await syncServerFromContactCard(
     serverContactCardJson,
     serverPeerIdHardcoded,
     keyhive,
     keyhiveStorage
   );
-  console.warn(`[bootstrapKeyhive] after syncServerFromContactCard`);
 
   return {
     active,
@@ -212,9 +223,10 @@ function setupEventFlushListener(
           await keyhiveStorage.savePrekeySecrets(keyhive);
         }
 
-        if (eventsToSave.length > 0) {
-          // Invalidate caches so the next sync computes fresh totals
-          // (otherwise sync-check uses stale senderTotal from cached hashes)
+        if (eventsToSave.length > 0 || needSync) {
+          // Invalidate caches so the next sync computes fresh totals.
+          // Needed even when event writes are suppressed (e.g. during
+          // ingestion from a Tab) because the keyhive state changed.
           driver.invalidateCaches();
         }
 
@@ -289,6 +301,8 @@ export async function initializeAutomergeRepoKeyhive(options: {
 
   setupEventFlushListener(bootstrap, keyhiveNetworkAdapter, { automaticArchiveIngestion });
 
+  await keyhiveStorage.savePrekeySecrets(keyhive);
+
   return new AutomergeRepoKeyhive(
     active,
     keyhive,
@@ -324,10 +338,7 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
     syncRequestInterval = 2000,
     periodicallyRequestSync = true,
   } = options;
-
-  console.warn(`[initRustHive] before bootstrapKeyhive suffix=${options.peerIdSuffix}`);
   const bootstrap = await bootstrapKeyhive(options);
-  console.warn(`[initRustHive] after bootstrapKeyhive suffix=${options.peerIdSuffix}`);
   const { active, keyhive, keyhiveStorage, peerId, emitter, keyhiveQueue, serverPeerIdHardcoded } = bootstrap;
 
   const networkAdapter = new KeyhiveRustAdapter({
@@ -345,6 +356,8 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
 
   setupEventFlushListener(bootstrap, networkAdapter, { automaticArchiveIngestion });
 
+  await keyhiveStorage.savePrekeySecrets(keyhive);
+
   networkAdapter.syncKeyhive(true);
 
   const createKeyhiveNetworkAdapter = (
@@ -358,7 +371,7 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
     const hardcodedRemoteId = onlyShareWithHardcodedServerPeerId
       ? serverPeerIdHardcoded
       : null;
-    return new KeyhiveNetworkAdapter({
+    const adapter = new KeyhiveNetworkAdapter({
       networkAdapter: legacyAdapter,
       contactCard: active.contactCard,
       keyhive,
@@ -373,12 +386,25 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
       enableCompaction: true,
       archiveThreshold: archiveThresholdOverride ?? 200,
     });
+    const onEncrypt = () => adapter.invalidateCaches();
+    emitter.on("encrypt", onEncrypt);
+    const disconnect = adapter.disconnect.bind(adapter);
+    adapter.disconnect = () => {
+      emitter.off("encrypt", onEncrypt);
+      disconnect();
+    };
+    return adapter;
   };
 
   const idFactory = async (_heads: import("@automerge/automerge-repo/slim").Heads) => {
     const doc = await generateDoc(keyhive);
     return doc.doc_id.toBytes();
   };
+
+  const blobInterceptor = new KeyhiveBlobInterceptor(keyhive, keyhiveQueue, () => {
+    emitter.emit("encrypt");
+  }, options.storage);
+  await blobInterceptor.loadPersistedPcsKeyHashes();
 
   return new AutomergeRepoKeyhiveRust(
     active,
@@ -389,7 +415,76 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
     networkAdapter,
     idFactory,
     createKeyhiveNetworkAdapter,
+    blobInterceptor,
   );
+}
+
+// Construct a keyhive and its `Repo` together.
+export async function initializeAutomergeRepoKeyhiveWithRepo(
+  options: Parameters<typeof initializeAutomergeRepoKeyhive>[0] & {
+    createRepo: (config: RepoConfig) => Repo;
+    repo?: Omit<RepoConfig, "peerId" | "idFactory" | "network">;
+  },
+): Promise<{ hive: AutomergeRepoKeyhive; repo: Repo }> {
+  const { createRepo, repo: repoOptions, ...hiveOptions } = options;
+  const hive = await initializeAutomergeRepoKeyhive(hiveOptions);
+  const repo = createRepo({
+    ...repoOptions,
+    network: [hive.networkAdapter],
+    peerId: hive.peerId,
+    idFactory: hive.idFactory,
+  });
+  hive.linkRepo(repo);
+  return { hive, repo };
+}
+
+/**
+ * Construct a keyhive and its Automerge `Repo` (connected to a Rust subduction
+ * sync server) together.
+ *
+ * The hive's network adapter needs the repo's subduction instance, but the repo
+ * needs the hive first. This function injects the hive-derived `signer`, `peerId`,
+ * `idFactory`, and `subductionBlobInterceptor` into the repo, passes
+ * `repo.subduction` back to the hive, and calls `linkRepo`.
+ */
+export async function initializeAutomergeRepoKeyhiveRustWithRepo(
+  options: Omit<
+    Parameters<typeof initializeAutomergeRepoKeyhiveRust>[0],
+    "subduction"
+  > & {
+    createRepo: (config: RepoConfig) => Repo;
+    repo?: Omit<
+      RepoConfig,
+      "peerId" | "idFactory" | "signer" | "subductionBlobInterceptor"
+    >;
+  },
+): Promise<{ hive: AutomergeRepoKeyhiveRust; repo: Repo }> {
+  const { createRepo, repo: repoOptions, ...hiveOptions } = options;
+
+  // Hand the hive a deferred subduction promise, build the repo, then resolve
+  // it from `repo.subduction`.
+  let resolveSubduction!: (s: Subduction) => void;
+  const subductionPromise = new Promise<Subduction>((resolve) => {
+    resolveSubduction = resolve;
+  });
+
+  const hive = await initializeAutomergeRepoKeyhiveRust({
+    ...hiveOptions,
+    subduction: subductionPromise,
+  });
+
+  const repo = createRepo({
+    ...repoOptions,
+    signer: await hive.constructSubductionSigner(),
+    peerId: hive.peerId,
+    idFactory: hive.idFactory,
+    subductionBlobInterceptor: hive.blobInterceptor,
+  });
+
+  repo.subduction.then(resolveSubduction as (s: unknown) => void);
+  hive.linkRepo(repo);
+
+  return { hive, repo };
 }
 
 export async function receiveContactCard(keyhive: Keyhive, contactCard: ContactCard, keyhiveStorage: KeyhiveStorage
@@ -485,8 +580,28 @@ export class KeyhiveStorage {
     );
   }
 
+  // Persist a single rotated leaf secret (the bytes returned by
+  // `forcePcsUpdate`) as one content-addressed entry, so a sibling instance of
+  // this identity can pick up just the new secret on an encrypt/decrypt miss.
+  async saveLeafSecret(secretBytes: Uint8Array): Promise<string> {
+    const canonical = new Uint8Array(secretBytes);
+    const hash = await crypto.subtle.digest("SHA-256", canonical);
+    const hashHex = uint8ArrayToHex(new Uint8Array(hash));
+    await this.storage.save(
+      [KEYHIVE_DB_KEY, KEYHIVE_LEAF_SECRETS_KEY, hashHex],
+      canonical
+    );
+    return hashHex;
+  }
+
   async savePrekeySecrets(kh: Keyhive): Promise<void> {
     try {
+      // Load existing secrets first so we don't overwrite secrets saved by another
+      // instance.
+      const existing = await this.storage.load([KEYHIVE_DB_KEY, KEYHIVE_PREKEY_SECRETS_KEY]);
+      if (existing) {
+        await kh.importPrekeySecrets(existing);
+      }
       const bytes = await kh.exportPrekeySecrets();
       await this.storage.save([KEYHIVE_DB_KEY, KEYHIVE_PREKEY_SECRETS_KEY], bytes);
     } catch (error) {
@@ -721,7 +836,7 @@ export class KeyhiveStorage {
       }
     }
 
-    // No archives in storage. Create new keyhive
+    // No archives in storage. Create new keyhive.
     const store = CiphertextStore.newInMemory();
     console.log(`[AMRepoKeyhive] Initializing new Keyhive`);
     const kh = await Keyhive.init(signer, store, event_handler);
