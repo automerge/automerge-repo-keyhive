@@ -61,6 +61,14 @@ async function bootstrapKeyhive(options: {
   storage: StorageAdapterInterface;
   peerIdSuffix: string;
   keyPair?: CryptoKeyPair;
+  /**
+   * Override the sync server's signed contact card (JSON). Defaults to
+   * subduction.sync's. Must be a matched pair with `serverPeerId`. Both
+   * have to describe the same server or keyhive sync silently fails to route.
+   */
+  serverContactCardJson?: string;
+  /** Override the sync server's keyhive peer id. Defaults to subduction.sync. */
+  serverPeerId?: PeerId;
 }): Promise<KeyhiveBootstrap> {
   console.warn(`[bootstrapKeyhive] enter suffix=${options.peerIdSuffix}`);
   const { keyPair, signer } = await loadOrCreateKeyPairAndSigner(options.storage, options.keyPair)
@@ -84,10 +92,26 @@ async function bootstrapKeyhive(options: {
   console.warn(`[bootstrapKeyhive] after createActive`);
   const peerId = peerIdFromSigner(active.signer, options.peerIdSuffix);
 
-  // TODO: Server contact card and PeerId are currently just hardcoded for the demo
+  // subduction.sync is the default sync-server identity (issuer f709c58c…).
+  // Callers that target a different server (e.g., the e2e harness, or a local
+  // dev server) pass `serverContactCardJson` + `serverPeerId` as a matched pair.
+  const DEFAULT_SUBDUCTION_CONTACT_CARD =
+    '{"Rotate":{"payload":{"old":[33,137,111,238,179,125,3,30,133,139,50,112,178,153,171,132,174,170,136,174,242,17,131,192,37,125,253,108,91,65,84,110],"new":[34,214,236,200,87,89,211,226,207,54,34,177,181,49,195,126,244,174,192,163,6,174,225,45,147,0,82,73,79,78,196,60]},"issuer":[247,9,197,140,25,81,187,131,117,217,148,149,178,185,64,74,187,27,132,103,122,139,165,214,120,158,18,104,148,65,76,25],"signature":[92,213,174,209,83,196,175,199,100,26,241,68,150,220,89,224,87,196,169,73,234,232,74,212,191,3,116,4,138,189,221,44,177,140,139,161,19,139,164,49,224,197,190,25,144,134,90,157,255,86,184,5,184,94,70,127,22,40,43,34,200,182,65,8]}}';
+  const DEFAULT_SUBDUCTION_PEER_ID =
+    "9wnFjBlRu4N12ZSVsrlASrsbhGd6i6XWeJ4SaJRBTBk=" as PeerId;
+
+  // const KEYHIVE_SYNC_CONTACT_CARD =
+  //   '{"Rotate":{"payload":{"old":[73,163,230,244,111,233,153,119,133,211,134,237,111,36,52,131,22,50,54,144,150,45,227,235,128,36,33,217,190,198,55,75],"new":[109,115,204,144,178,114,182,238,113,124,4,139,249,76,220,44,128,104,194,68,187,184,82,241,94,145,104,198,159,122,186,43]},"issuer":[215,244,30,111,15,78,235,218,7,241,63,222,141,131,33,22,234,116,180,208,97,235,210,55,202,209,170,178,98,37,223,159],"signature":[178,64,85,76,51,199,196,151,129,14,191,53,127,191,34,223,97,238,95,109,118,179,152,17,205,188,204,177,116,166,147,231,192,201,48,137,19,214,180,45,108,104,34,8,14,63,115,139,215,142,4,179,233,89,150,218,174,168,107,23,8,109,228,6]}}';
+  // const KEYHIVE_SYNC_PEER_ID =
+  //   "1/Qebw9O69oH8T/ejYMhFup0tNBh69I3ytGqsmIl358=" as PeerId;
+
   const serverContactCardJson =
-    '{"Rotate":{"payload":{"old":[73,163,230,244,111,233,153,119,133,211,134,237,111,36,52,131,22,50,54,144,150,45,227,235,128,36,33,217,190,198,55,75],"new":[109,115,204,144,178,114,182,238,113,124,4,139,249,76,220,44,128,104,194,68,187,184,82,241,94,145,104,198,159,122,186,43]},"issuer":[215,244,30,111,15,78,235,218,7,241,63,222,141,131,33,22,234,116,180,208,97,235,210,55,202,209,170,178,98,37,223,159],"signature":[178,64,85,76,51,199,196,151,129,14,191,53,127,191,34,223,97,238,95,109,118,179,152,17,205,188,204,177,116,166,147,231,192,201,48,137,19,214,180,45,108,104,34,8,14,63,115,139,215,142,4,179,233,89,150,218,174,168,107,23,8,109,228,6]}}';
-  const serverPeerIdHardcoded = "1/Qebw9O69oH8T/ejYMhFup0tNBh69I3ytGqsmIl358=" as PeerId;
+    options.serverContactCardJson ?? DEFAULT_SUBDUCTION_CONTACT_CARD;
+  const serverPeerIdHardcoded = options.serverPeerId ?? DEFAULT_SUBDUCTION_PEER_ID;
+  console.warn(
+    `[bootstrapKeyhive] sync server peerId=${serverPeerIdHardcoded}` +
+      `${options.serverPeerId ? " (override)" : " (default subduction.sync)"}`
+  );
 
   console.warn(`[bootstrapKeyhive] before syncServerFromContactCard`);
   const syncServer = await syncServerFromContactCard(
@@ -213,6 +237,10 @@ export async function initializeAutomergeRepoKeyhive(options: {
   retryPendingFromStorage?: boolean;
   enableCompaction?: boolean;
   archiveThreshold?: number;
+  /** Override the sync server's contact card (JSON). Defaults to subduction.sync. */
+  serverContactCardJson?: string;
+  /** Override the sync server's keyhive peer id. Defaults to subduction.sync. */
+  serverPeerId?: PeerId;
 }): Promise<AutomergeRepoKeyhive> {
   const {
     automaticArchiveIngestion = true,
@@ -291,6 +319,14 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
    * dev server with its own `--ready-file`.
    */
   remotePeerId?: PeerId;
+  /**
+   * Override the sync server's contact card (JSON). Defaults to subduction.sync.
+   * Pass with a matching `serverPeerId` (or `remotePeerId`) to target another
+   * server identity.
+   */
+  serverContactCardJson?: string;
+  /** Override the sync server's keyhive peer id. Defaults to subduction.sync. */
+  serverPeerId?: PeerId;
   keyPair?: CryptoKeyPair;
   automaticArchiveIngestion?: boolean;
   cachingMode?: "none" | "standard" | "periodic";
