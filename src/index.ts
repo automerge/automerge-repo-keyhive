@@ -37,6 +37,7 @@ export {
   initializeAutomergeRepoKeyhiveRust,
   KeyhiveStorage,
 } from "./keyhive/keyhive.js";
+export type { SyncServerIdentity, SyncServerSelection } from "./keyhive/keyhive.js";
 export { KeyhiveNetworkAdapter } from "./network-adapter/network-adapter.js";
 export {
   KeyhiveRustAdapter,
