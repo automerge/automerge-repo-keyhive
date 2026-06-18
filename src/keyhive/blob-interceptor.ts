@@ -8,7 +8,7 @@ import {
 import { blake3 } from "@noble/hashes/blake3.js";
 import { PromiseQueue } from "../network-adapter/pending.js";
 import { arraysEqual } from "../utilities.js";
-import { KEYHIVE_DB_KEY } from "./keyhive.js";
+import { KEYHIVE_DB_KEY, KEYHIVE_LEAF_SECRETS_KEY } from "./keyhive.js";
 
 const PCS_KEY_HASHES_STORAGE_KEY = "/pcs-key-hashes";
 
@@ -39,6 +39,39 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     } catch {
       // Ignore invalid persisted data.
     }
+  }
+
+  // Hashes of leaf-secret storage entries already imported into this keyhive,
+  // so a miss only imports entries it hasn't seen.
+  #importedLeafSecrets: Set<string> = new Set();
+
+  // Import leaf secrets that another instance of this identity wrote to shared
+  // storage (e.g. after a forcePcsUpdate on the tab) but this instance has not
+  // yet seen. Returns true if any new secret was imported. Called only on an
+  // encrypt/decrypt miss, so the common path pays nothing.
+  async #importNewLeafSecrets(): Promise<{
+    imported: boolean;
+    total: number;
+    newlyImported: number;
+  }> {
+    if (!this.#storage) return { imported: false, total: 0, newlyImported: 0 };
+    let newlyImported = 0;
+    let total = 0;
+    try {
+      const chunks = await this.#storage.loadRange([KEYHIVE_DB_KEY, KEYHIVE_LEAF_SECRETS_KEY]);
+      for (const chunk of chunks) {
+        if (!chunk.data) continue;
+        total++;
+        const hashKey = chunk.key[chunk.key.length - 1] as string;
+        if (this.#importedLeafSecrets.has(hashKey)) continue;
+        await this.#keyhive.importPrekeySecrets(chunk.data);
+        this.#importedLeafSecrets.add(hashKey);
+        newlyImported++;
+      }
+    } catch (e) {
+      console.error("[KeyhiveBlobInterceptor] importNewLeafSecrets failed:", e);
+    }
+    return { imported: newlyImported > 0, total, newlyImported };
   }
 
   #queuePersist(): void {
@@ -78,12 +111,15 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     if (legacy) return blob;
     return this.#queue.run(async () => {
       const doc = await this.#keyhive.getDocument(new KeyhiveDocumentId(binaryDocumentId));
-      if (!doc) {
-        return null;
-      }
-      const pcsHash = await this.#keyhive.tryPcsKeyHash(doc);
+      // No keyhive doc yet: drop the outgoing blob (nothing stored or pushed).
+      if (!doc) return null;
+      let pcsHash = await this.#keyhive.tryPcsKeyHash(doc);
       if (!pcsHash) {
-        return null;
+        // A sibling instance (e.g. the tab) may have rotated the key and written
+        // the new leaf secret to shared storage. Import and retry once.
+        await this.#importNewLeafSecrets();
+        pcsHash = await this.#keyhive.tryPcsKeyHash(doc);
+        if (!pcsHash) return null;
       }
       const contentRef = new ChangeId(blake3(blob));
       const result = await this.#keyhive.tryEncrypt(doc, contentRef, [], blob);
@@ -108,9 +144,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     if (legacy) return blob;
     return this.#queue.run(async () => {
       const doc = await this.#keyhive.getDocument(new KeyhiveDocumentId(binaryDocumentId));
-      if (!doc) {
-        return null;
-      }
+      if (!doc) return null;
       let encrypted: Encrypted;
       try {
         encrypted = Encrypted.fromBytes(blob);
@@ -120,6 +154,15 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       try {
         return await this.#keyhive.tryDecrypt(doc, encrypted);
       } catch {
+        // Miss: a sibling instance may have rotated the key. Import any new leaf
+        // secrets from shared storage and retry once before giving up.
+        if ((await this.#importNewLeafSecrets()).imported) {
+          try {
+            return await this.#keyhive.tryDecrypt(doc, encrypted);
+          } catch {
+            // fall through
+          }
+        }
         return null;
       }
     });

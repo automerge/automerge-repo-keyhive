@@ -27,6 +27,11 @@ import {
   peerIdToRust,
 } from "./codec.js";
 
+// Cadence of the full-sync fallback. A forced full request bypasses the
+// lightweight sync-check, recovering from a stale syncpoint that would
+// otherwise keep the check short-circuiting. Matches KeyhiveNetworkAdapter.
+const FULL_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+
 const KEYHIVE_MESSAGE_TYPES: ReadonlySet<string> = new Set<KeyhiveMessageType>([
   "keyhive-sync-request",
   "keyhive-sync-response",
@@ -78,6 +83,7 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
   private readonly syncRequestInterval: number;
   private periodicSyncEnabled: boolean;
   private syncIntervalId?: ReturnType<typeof setInterval>;
+  private fullSyncIntervalId?: ReturnType<typeof setInterval>;
   private periodicCacheRefreshId?: ReturnType<typeof setInterval>;
   /**
    * Tracks whether the underlying transport currently has an active connection
@@ -189,6 +195,12 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
       this.syncIntervalId = setInterval(() => {
         this.syncProtocol.requestKeyhiveSync();
       }, syncRequestInterval);
+      // Fallback: periodically force a full sync request so a stale syncpoint
+      // can't keep the lightweight sync-check short-circuiting indefinitely.
+      // Mirrors KeyhiveNetworkAdapter.
+      this.fullSyncIntervalId = setInterval(() => {
+        this.syncProtocol.requestFullKeyhiveSync();
+      }, FULL_SYNC_INTERVAL_MS);
     }
 
     // Surface a peer-candidate immediately so consumers tracking
@@ -217,6 +229,9 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     this.syncIntervalId = setInterval(() => {
       this.syncProtocol.requestKeyhiveSync();
     }, this.syncRequestInterval);
+    this.fullSyncIntervalId = setInterval(() => {
+      this.syncProtocol.requestFullKeyhiveSync();
+    }, FULL_SYNC_INTERVAL_MS);
   }
 
   /**
@@ -234,6 +249,10 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     if (this.syncIntervalId) {
       clearInterval(this.syncIntervalId);
       this.syncIntervalId = undefined;
+    }
+    if (this.fullSyncIntervalId) {
+      clearInterval(this.fullSyncIntervalId);
+      this.fullSyncIntervalId = undefined;
     }
     if (this.periodicCacheRefreshId) {
       clearInterval(this.periodicCacheRefreshId);

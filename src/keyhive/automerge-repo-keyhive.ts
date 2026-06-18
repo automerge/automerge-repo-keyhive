@@ -101,8 +101,14 @@ export abstract class AutomergeRepoKeyhiveBase {
       console.error(`[AMRepoKeyhive] Failed to add member: doc not found for id ${docId}`);
       return;
     }
-    await this.keyhive.addMember(agent, doc.toMembered(), access, []);
-    await this.keyhive.forcePcsUpdate(doc);
+    // Adding a reader to a non-forward-secret doc auto-rekeys inside addMember,
+    // returning the rotation's new leaf secret. Persist it so a sibling instance
+    // of this identity (e.g. the SharedWorker that encrypts) can install it and
+    // derive the rotated key without a full bundle re-import.
+    const update = await this.keyhive.addMember(agent, doc.toMembered(), access, []);
+    if (update.leafSecrets) {
+      await this.keyhiveStorage.saveLeafSecret(update.leafSecrets);
+    }
   }
 
   async revokeMemberFromDoc(docUrl: AutomergeUrl, hexId: string) {
@@ -138,8 +144,13 @@ export abstract class AutomergeRepoKeyhiveBase {
       return;
     }
 
-    await this.keyhive.addMember(agent, doc.toMembered(), access, []);
-    await this.keyhive.forcePcsUpdate(doc);
+    // Adding Public as a reader to a non-forward-secret doc auto-rekeys inside
+    // addMember, returning the rotation's new leaf secret. Persist it so a
+    // sibling instance of this identity can install it.
+    const update = await this.keyhive.addMember(agent, doc.toMembered(), access, []);
+    if (update.leafSecrets) {
+      await this.keyhiveStorage.saveLeafSecret(update.leafSecrets);
+    }
   }
 
   async getPublicAccess(docUrl: AutomergeUrl): Promise<Access | undefined> {
@@ -363,13 +374,6 @@ export function keyhiveIdFactory(_keyhiveNetworkAdapter: KeyhiveNetworkAdapter, 
  */
 export class AutomergeRepoKeyhiveRust extends AutomergeRepoKeyhiveBase {
   #linkRepoSchedule: (() => void) | null = null;
-  // Debounced trigger for the membership-nudge check. Fired only for
-  // same-agent keyhive changes (via notifySameAgentKeyhiveChange).
-  #scheduleMembershipNudge: (() => void) | null = null;
-  // Per-doc set of member ids (hex of Agent.id) seen at the last check.
-  // On a local keyhive change, a nudge fires for a doc whose membership has
-  // grown beyond this set.
-  #lastSeenMembers: Map<string, Set<string>> = new Map();
 
   constructor(
     active: Active,
@@ -422,67 +426,19 @@ export class AutomergeRepoKeyhiveRust extends AutomergeRepoKeyhiveBase {
     this.#linkRepoSchedule = schedule;
     this.emitter.on("update", schedule);
     (this.networkAdapter as any).on("ingest-remote", schedule);
-
-    // Separate debounce for nudge creation, fired only via
-    // notifySameAgentKeyhiveChange.
-    let nudgeTimer: ReturnType<typeof setTimeout> | null = null;
-    let nudgePending = false;
-    this.#scheduleMembershipNudge = () => {
-      nudgePending = true;
-      if (nudgeTimer) return;
-      nudgeTimer = setTimeout(async () => {
-        nudgeTimer = null;
-        if (!nudgePending) return;
-        nudgePending = false;
-        await this.#checkForMembershipNudges(repo);
-      }, debounceMs);
-    };
   }
 
   /**
    * Signal a keyhive change that originated from this same agent (membership
-   * or content). This drives nudge creation.
+   * or content), scheduling a debounced `shareConfigChanged()`.
+   *
+   * Newly-added members no longer need a content "nudge" to read history: with
+   * forward secrecy disabled, the CGKA predecessor key chain on update
+   * operations gives a later member access to the document's prior history, and
+   * adding a reader auto-rekeys.
    */
   notifySameAgentKeyhiveChange(): void {
     this.#linkRepoSchedule?.();
-    this.#scheduleMembershipNudge?.();
-  }
-
-  /**
-   * Create a refresh edit (`_pcsRefresh`) for any tracked doc whose membership
-   * has grown since it was last seen. This gives a newly-added member a
-   * content commit encrypted under the current key and carrying the predecessor key
-   * chain.
-   */
-  async #checkForMembershipNudges(repo: Repo) {
-    const trackedDocs = this.blobInterceptor.trackedDocIds;
-    for (const documentId of trackedDocs) {
-      try {
-        const keyhiveDocId = docIdFromAutomergeUrl(`automerge:${documentId}` as AutomergeUrl);
-        const doc = await this.keyhive.getDocument(keyhiveDocId);
-        if (!doc) continue;
-        const members = await doc.members();
-        const currentIds = new Set(members.map(c => uint8ArrayToHex(c.who.id.toBytes())));
-        const lastSeen = this.#lastSeenMembers.get(documentId);
-        if (!lastSeen) {
-          // First time we've checked this doc. Record its current members as
-          // the baseline and don't nudge: we can't tell which of these were
-          // just added, so we only nudge for members added after this point.
-          this.#lastSeenMembers.set(documentId, currentIds);
-          continue;
-        }
-        const hasNewMember = [...currentIds].some(id => !lastSeen.has(id));
-        if (!hasNewMember) continue;
-        const handle = await repo.find<{ _pcsRefresh?: number }>(`automerge:${documentId}` as AutomergeUrl);
-        // Write a nudge edit to force a content commit under the
-        // current key. This way, a newly-added member has a way to decrypt
-        // and access the predecessor key chain for the document.
-        handle.change((d) => { d._pcsRefresh = Date.now(); });
-        this.#lastSeenMembers.set(documentId, currentIds);
-      } catch {
-        // Per-doc isolation: a failure on one doc should not block the rest.
-      }
-    }
   }
 
   async addSyncServerRelayToDoc(docUrl: AutomergeUrl) {

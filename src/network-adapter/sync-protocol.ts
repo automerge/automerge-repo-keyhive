@@ -24,6 +24,33 @@ export interface SyncProtocolConfig {
   minSyncResponseInterval: number;
 }
 
+// Order-independent XOR-fold of a pairwise op-hash set, reduced to 8 bytes.
+// XOR is commutative, so the result is independent of iteration order. The
+// subduction server computes the identical digest (protocol.rs::pair_set_digest)
+// over the same 32-byte hashes, so a sync check can compare op-*sets*, not just
+// counts: equal counts on crossed syncpoints no longer false-pass as in-sync.
+// An empty set folds to all zeros, matching a peer that sends no digest.
+function pairSetDigest(hashes: Map<string, Uint8Array>): Uint8Array {
+  const acc = new Uint8Array(32);
+  for (const bytes of hashes.values()) {
+    const n = Math.min(bytes.length, 32);
+    for (let i = 0; i < n; i++) acc[i] ^= bytes[i];
+  }
+  const out = new Uint8Array(8);
+  for (let i = 0; i < 32; i++) out[i % 8] ^= acc[i];
+  return out;
+}
+
+function digestHex(d: Uint8Array): string {
+  return Array.from(d, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+function digestsEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 export interface SyncProtocolDeps {
   keyhive: Keyhive;
   keyhiveStorage: KeyhiveStorage;
@@ -261,6 +288,7 @@ export class SyncProtocol {
             const data = encode({
               senderTotal,
               senderSyncpoint: peer.syncpoint,
+              senderDigest: pairSetDigest(hashes),
             });
             const message = {
               type: "keyhive-sync-check",
@@ -610,6 +638,7 @@ export class SyncProtocol {
     const checkData = decode(message.data as Uint8Array);
     const theirTotalForUs: number = checkData.senderTotal;
     const theirSyncpoint: number = checkData.senderSyncpoint;
+    const theirDigest: Uint8Array = checkData.senderDigest ?? new Uint8Array(8);
 
     metrics.recordSyncCheckReceived();
 
@@ -633,22 +662,34 @@ export class SyncProtocol {
       const hashes = await this.getHashesForPeerPair(peerId, message.senderId);
       const ourTotalForThem = hashes.size + pendingOpHashes.length;
 
-      // Sync check conditions
+      // Sync check conditions. The digest comparison guards against a count
+      // collision: on crossed syncpoints the totals can cross-match even when
+      // the op-sets differ, which would wrongly short-circuit and wedge a
+      // membership change. Requiring equal digests forces a full sync instead.
+      const ourDigest = pairSetDigest(hashes);
       const ourSyncpointMatchesTheirTotal = peer.syncpoint !== null &&
         peer.syncpoint === theirTotalForUs;
       const theirSyncpointMatchesOurTotal = theirSyncpoint === ourTotalForThem;
+      const digestsMatch = digestsEqual(ourDigest, theirDigest);
 
-      if (ourSyncpointMatchesTheirTotal && theirSyncpointMatchesOurTotal) {
+      if (ourSyncpointMatchesTheirTotal && theirSyncpointMatchesOurTotal && digestsMatch) {
         console.debug(
-          `[AMRepoKeyhive] Sync check passed for ${message.senderId}: both totals match (ours=${ourTotalForThem}, theirs=${theirTotalForUs})`
+          `[AMRepoKeyhive] Sync check PASS (short-circuit) for ${message.senderId}: ` +
+            `ourTotalForThem=${ourTotalForThem} theirTotalForUs=${theirTotalForUs} ` +
+            `ourSyncpoint=${peer.syncpoint ?? "null"} theirSyncpoint=${theirSyncpoint} ` +
+            `digest=${digestHex(ourDigest)} pending=${pendingOpHashes.length}`
         );
         metrics.recordSyncCheckShortCircuited();
         return;
       }
 
-      // Totals mismatch. Start full sync request
+      // Counts or digest mismatch. Start full sync request
       console.debug(
-        `[AMRepoKeyhive] Sync check failed for ${message.senderId}: mismatch (ourActual=${ourTotalForThem}, theirSyncpoint=${theirSyncpoint}, theirTotalForUs=${theirTotalForUs}, ourSyncpoint=${peer.syncpoint ?? "null"}). Falling back to full sync.`
+        `[AMRepoKeyhive] Sync check FALLBACK (full-sync) for ${message.senderId}: ` +
+          `ourTotalForThem=${ourTotalForThem} theirTotalForUs=${theirTotalForUs} ` +
+          `ourSyncpoint=${peer.syncpoint ?? "null"} theirSyncpoint=${theirSyncpoint} ` +
+          `digestsMatch=${digestsMatch} ourDigest=${digestHex(ourDigest)} ` +
+          `theirDigest=${digestHex(theirDigest)} pending=${pendingOpHashes.length}`
       );
       metrics.recordSyncCheckFallback();
 

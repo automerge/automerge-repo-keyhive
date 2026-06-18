@@ -20,9 +20,9 @@
   },
   "dependencies": {
     "@automerge/automerge-repo": "link:../automerge-repo/packages/automerge-repo",
-    "@automerge/automerge-repo-network-websocket": "2.6.0-subduction.22",
+    "@automerge/automerge-repo-network-websocket": "2.6.0-subduction.31",
     "@automerge/automerge-subduction": "0.15.0",
-    "@keyhive/keyhive": "file:/Users/jtfmumm/dev/keyhive/keyhive_wasm/keyhive-keyhive-0.0.0-alpha.58.tgz",
+    "@keyhive/keyhive": "file:/Users/jtfmumm/dev/keyhive/keyhive_wasm/keyhive-keyhive-0.0.0-alpha.61.tgz",
     "@noble/hashes": "^2.2.0",
     "cbor-x": "^1.6.0",
     "eventemitter3": "^5.0.1",

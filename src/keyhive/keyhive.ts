@@ -33,6 +33,7 @@ export const KEYHIVE_DB_KEY = "keyhive-db";
 export const KEYHIVE_ARCHIVES_KEY = "/archives/";
 export const KEYHIVE_EVENTS_KEY = "/ops/";
 export const KEYHIVE_PREKEY_SECRETS_KEY = "/prekey-secrets";
+export const KEYHIVE_LEAF_SECRETS_KEY = "/leaf-secrets/";
 
 export function docIdFromAutomergeUrl(url: AutomergeUrl): KeyhiveDocumentId {
   const { binaryDocumentId } = parseAutomergeUrl(url);
@@ -580,6 +581,20 @@ export class KeyhiveStorage {
     );
   }
 
+  // Persist a single rotated leaf secret (the bytes returned by
+  // `forcePcsUpdate`) as one content-addressed entry, so a sibling instance of
+  // this identity can pick up just the new secret on an encrypt/decrypt miss.
+  async saveLeafSecret(secretBytes: Uint8Array): Promise<string> {
+    const canonical = new Uint8Array(secretBytes);
+    const hash = await crypto.subtle.digest("SHA-256", canonical);
+    const hashHex = uint8ArrayToHex(new Uint8Array(hash));
+    await this.storage.save(
+      [KEYHIVE_DB_KEY, KEYHIVE_LEAF_SECRETS_KEY, hashHex],
+      canonical
+    );
+    return hashHex;
+  }
+
   async savePrekeySecrets(kh: Keyhive): Promise<void> {
     try {
       // Load existing secrets first so we don't overwrite secrets saved by another
@@ -822,10 +837,14 @@ export class KeyhiveStorage {
       }
     }
 
-    // No archives in storage. Create new keyhive
+    // No archives in storage. Create new keyhive.
+    // forward_secrecy = false: TPW's model is post-compromise security without
+    // forward secrecy, so documents carry the CGKA predecessor key chain (a
+    // member added later reads the whole prior history) and adding a reader
+    // auto-rekeys.
     const store = CiphertextStore.newInMemory();
     console.log(`[AMRepoKeyhive] Initializing new Keyhive`);
-    const kh = await Keyhive.init(signer, store, event_handler);
+    const kh = await Keyhive.init(signer, store, event_handler, false);
     await this.loadPrekeySecrets(kh);
 
     if (eventsBytes.length > 0) {
