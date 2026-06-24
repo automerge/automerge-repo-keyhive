@@ -4,13 +4,16 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@automerge/automerge-repo': file:../automerge-repo/packages/automerge-repo
+
 importers:
 
   .:
     dependencies:
       '@automerge/automerge-repo':
-        specifier: 2.6.0-subduction.34
-        version: 2.6.0-subduction.34
+        specifier: file:../automerge-repo/packages/automerge-repo
+        version: file:../automerge-repo/packages/automerge-repo
       '@automerge/automerge-repo-network-websocket':
         specifier: 2.6.0-subduction.34
         version: 2.6.0-subduction.34
@@ -18,8 +21,8 @@ importers:
         specifier: 0.16.0
         version: 0.16.0
       '@keyhive/keyhive':
-        specifier: 0.1.0-alpha.3
-        version: 0.1.0-alpha.3
+        specifier: file:../keyhive/keyhive_wasm/keyhive-keyhive-0.1.0-alpha.3.tgz
+        version: file:../keyhive/keyhive_wasm/keyhive-keyhive-0.1.0-alpha.3.tgz
       '@noble/hashes':
         specifier: ^2.2.0
         version: 2.2.0
@@ -70,8 +73,8 @@ packages:
     resolution: {integrity: sha512-m+e46/+T74SnV39FCHaujyH5lKL85/Q35vdPv1D7tg7uSB68+0UVDShdLX7e7jcK0xBhYxuxQoksDz3ky2TjBQ==}
     engines: {node: '>=22.13'}
 
-  '@automerge/automerge-repo@2.6.0-subduction.34':
-    resolution: {integrity: sha512-haobq94PQ1Z74DsXMfMFfWAowR6cdoTAjfUAqJQQIevzuOVn2oioTctPp7t0FvVsdGHR5L3Im107L57WYOtJCA==}
+  '@automerge/automerge-repo@file:../automerge-repo/packages/automerge-repo':
+    resolution: {directory: ../automerge-repo/packages/automerge-repo, type: directory}
     engines: {node: '>=22.13'}
 
   '@automerge/automerge-subduction@0.16.0':
@@ -339,8 +342,9 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@keyhive/keyhive@0.1.0-alpha.3':
-    resolution: {integrity: sha512-nDwhd7Uff7SgyuLXPioJ5MD8rOBS+aja592ix/OvQcANHTTW+sbBoinHIgV8RYKOa3zZanYVF0jumFSSp3a/5g==}
+  '@keyhive/keyhive@file:../keyhive/keyhive_wasm/keyhive-keyhive-0.1.0-alpha.3.tgz':
+    resolution: {integrity: sha512-t8lkZgcktAoWLRMp7g0xZ3E6MtQDLq9AOIZTwycmSlpBp9qQKrJGfe6Tggs92/PwCiIuMwNKbcK1+wvihrZpPQ==, tarball: file:../keyhive/keyhive_wasm/keyhive-keyhive-0.1.0-alpha.3.tgz}
+    version: 0.1.0-alpha.3
 
   '@noble/ed25519@3.0.0':
     resolution: {integrity: sha512-QyteqMNm0GLqfa5SoYbSC3+Pvykwpn95Zgth4MFVSMKBB75ELl9tX1LAVsN4c3HXOrakHsF2gL4zWDAYCcsnzg==}
@@ -1196,7 +1200,7 @@ snapshots:
 
   '@automerge/automerge-repo-network-websocket@2.6.0-subduction.34':
     dependencies:
-      '@automerge/automerge-repo': 2.6.0-subduction.34
+      '@automerge/automerge-repo': file:../automerge-repo/packages/automerge-repo
       cbor-x: 1.6.4
       debug: 4.4.3
       eventemitter3: 5.0.4
@@ -1206,7 +1210,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@automerge/automerge-repo@2.6.0-subduction.34':
+  '@automerge/automerge-repo@file:../automerge-repo/packages/automerge-repo':
     dependencies:
       '@automerge/automerge': 3.3.0-fragments.1
       '@automerge/automerge-subduction': 0.16.0
@@ -1396,7 +1400,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@keyhive/keyhive@0.1.0-alpha.3': {}
+  '@keyhive/keyhive@file:../keyhive/keyhive_wasm/keyhive-keyhive-0.1.0-alpha.3.tgz': {}
 
   '@noble/ed25519@3.0.0': {}
 

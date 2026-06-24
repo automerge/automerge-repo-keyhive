@@ -838,13 +838,9 @@ export class KeyhiveStorage {
     }
 
     // No archives in storage. Create new keyhive.
-    // forward_secrecy = false: TPW's model is post-compromise security without
-    // forward secrecy, so documents carry the CGKA predecessor key chain (a
-    // member added later reads the whole prior history) and adding a reader
-    // auto-rekeys.
     const store = CiphertextStore.newInMemory();
     console.log(`[AMRepoKeyhive] Initializing new Keyhive`);
-    const kh = await Keyhive.init(signer, store, event_handler, false);
+    const kh = await Keyhive.init(signer, store, event_handler);
     await this.loadPrekeySecrets(kh);
 
     if (eventsBytes.length > 0) {

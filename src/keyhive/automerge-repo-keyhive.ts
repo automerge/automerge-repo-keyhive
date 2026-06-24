@@ -101,14 +101,7 @@ export abstract class AutomergeRepoKeyhiveBase {
       console.error(`[AMRepoKeyhive] Failed to add member: doc not found for id ${docId}`);
       return;
     }
-    // Adding a reader to a non-forward-secret doc auto-rekeys inside addMember,
-    // returning the rotation's new leaf secret. Persist it so a sibling instance
-    // of this identity (e.g. the SharedWorker that encrypts) can install it and
-    // derive the rotated key without a full bundle re-import.
-    const update = await this.keyhive.addMember(agent, doc.toMembered(), access, []);
-    if (update.leafSecrets) {
-      await this.keyhiveStorage.saveLeafSecret(update.leafSecrets);
-    }
+    await this.keyhive.addMember(agent, doc.toMembered(), access, []);
   }
 
   async revokeMemberFromDoc(docUrl: AutomergeUrl, hexId: string) {
@@ -144,13 +137,7 @@ export abstract class AutomergeRepoKeyhiveBase {
       return;
     }
 
-    // Adding Public as a reader to a non-forward-secret doc auto-rekeys inside
-    // addMember, returning the rotation's new leaf secret. Persist it so a
-    // sibling instance of this identity can install it.
-    const update = await this.keyhive.addMember(agent, doc.toMembered(), access, []);
-    if (update.leafSecrets) {
-      await this.keyhiveStorage.saveLeafSecret(update.leafSecrets);
-    }
+    await this.keyhive.addMember(agent, doc.toMembered(), access, []);
   }
 
   async getPublicAccess(docUrl: AutomergeUrl): Promise<Access | undefined> {
@@ -374,6 +361,11 @@ export function keyhiveIdFactory(_keyhiveNetworkAdapter: KeyhiveNetworkAdapter, 
  */
 export class AutomergeRepoKeyhiveRust extends AutomergeRepoKeyhiveBase {
   #linkRepoSchedule: (() => void) | null = null;
+  #repo: Repo | null = null;
+  // Per-doc set of member-id hexes already seen. A membership *increase* caused
+  // by our own agent triggers a single rotation + nudge edit, giving the new
+  // member an entry point into the document's predecessor-secret chain.
+  #anchoredMembers: Map<string, Set<string>> = new Map();
 
   constructor(
     active: Active,
@@ -420,9 +412,12 @@ export class AutomergeRepoKeyhiveRust extends AutomergeRepoKeyhiveBase {
         } catch (e) {
           console.error(`[AMRepoKeyhiveRust] shareConfigChanged() threw:`, e);
         }
+        // Membership may have changed; nudge any reader our agent just added.
+        void this.#checkForMembershipNudges();
       }, debounceMs);
     };
 
+    this.#repo = repo;
     this.#linkRepoSchedule = schedule;
     this.emitter.on("update", schedule);
     (this.networkAdapter as any).on("ingest-remote", schedule);
@@ -430,15 +425,78 @@ export class AutomergeRepoKeyhiveRust extends AutomergeRepoKeyhiveBase {
 
   /**
    * Signal a keyhive change that originated from this same agent (membership
-   * or content), scheduling a debounced `shareConfigChanged()`.
-   *
-   * Newly-added members no longer need a content "nudge" to read history: with
-   * forward secrecy disabled, the CGKA predecessor key chain on update
-   * operations gives a later member access to the document's prior history, and
-   * adding a reader auto-rekeys.
+   * or content), scheduling a debounced `shareConfigChanged()` (which also runs
+   * the membership-nudge check).
    */
   notifySameAgentKeyhiveChange(): void {
     this.#linkRepoSchedule?.();
+  }
+
+  /**
+   * Give any reader our agent just added a way into the document's history.
+   *
+   * A bare add leaves the new member with no derivable epoch key, so we rotate
+   * the PCS key (`forcePcsUpdate`) and then write a tiny nudge edit under it.
+   * That edit encrypts under the post-rotation key and carries the
+   * predecessor-secret chain back through the current heads, so the new member
+   * can CGKA-derive the nudge's key once and then walk the whole prior history.
+   *
+   * Only the encrypting instance runs this (it is the one that holds the repo
+   * and the blob interceptor), and only for members WE added — a remote add is
+   * the adder's responsibility to nudge.
+   */
+  async #checkForMembershipNudges(): Promise<void> {
+    const repo = this.#repo;
+    if (!repo) return;
+    // Zero-padded 64-hex id, matching the members' `who.id` / `verifyingKey`
+    // hexes. `keyhive.idString` is not zero-padded, so it must not be used here.
+    const ourIdHex = uint8ArrayToHex(this.keyhive.id.bytes);
+    for (const documentId of this.blobInterceptor.trackedDocIds) {
+      try {
+        const doc = await this.keyhive.getDocument(
+          docIdFromAutomergeUrl(`automerge:${documentId}` as AutomergeUrl),
+        );
+        if (!doc) continue;
+        const members = await doc.members();
+        const currentIds = new Set(
+          members.map((c) => uint8ArrayToHex(c.who.id.toBytes())),
+        );
+        // First sighting: seed the baseline with only members we did NOT add,
+        // so our own adds present at first sight are still nudged below (seeding
+        // the full membership would swallow a create-then-share in one window).
+        const baseline =
+          this.#anchoredMembers.get(documentId) ??
+          new Set(
+            members
+              .filter((c) => uint8ArrayToHex(c.proof.verifyingKey) !== ourIdHex)
+              .map((c) => uint8ArrayToHex(c.who.id.toBytes())),
+          );
+        let addedByUs = 0;
+        for (const c of members) {
+          const idHex = uint8ArrayToHex(c.who.id.toBytes());
+          if (idHex === ourIdHex) continue; // never nudge for our own membership
+          if (baseline.has(idHex)) continue; // not new
+          if (uint8ArrayToHex(c.proof.verifyingKey) === ourIdHex) addedByUs++;
+        }
+        // Record the new membership regardless, so a given add nudges once.
+        this.#anchoredMembers.set(documentId, currentIds);
+        if (addedByUs === 0) continue;
+
+        // Rotate (so the new member has a derivable current key), persist the
+        // rotated leaf secret for any sibling instance, then write the nudge.
+        const leafSecret = await this.keyhive.forcePcsUpdate(doc);
+        await this.keyhiveStorage.saveLeafSecret(leafSecret);
+        const handle = await repo.find(`automerge:${documentId}` as AutomergeUrl);
+        handle.change((d: any) => {
+          d._lastAddMember = Date.now();
+        });
+      } catch (e) {
+        console.error(
+          `[AMRepoKeyhiveRust] membership nudge check failed for ${documentId}:`,
+          e,
+        );
+      }
+    }
   }
 
   async addSyncServerRelayToDoc(docUrl: AutomergeUrl) {
