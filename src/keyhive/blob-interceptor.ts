@@ -166,7 +166,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
         if (!pcsHash) return null;
       }
       const contentRef = new ChangeId(blake3(blob));
-      const result = await this.#keyhive.tryEncrypt(doc, contentRef, [], blob);
+      const result = await this.#keyhive.tryEncryptKeyed(doc, contentRef, [], blob);
       this.#onEncrypted?.();
       const encrypted = result.encrypted_content();
       const selfKey = result.applicationSecret;
@@ -175,7 +175,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       // key: the external predecessor-secret chain. If a parent's key is not in
       // the in-memory cache (cold after a restart, or encrypted by a sibling
       // instance), recover it by decrypting the parent's stored blob rather than
-      // skipping the link — a skipped link permanently strands that parent for
+      // skipping the link. A skipped link permanently strands that parent for
       // any reader that can only reach it through the chain (e.g. a public or
       // late-joining reader). Re-derivation stores no keys at rest.
       const entries: Uint8Array[] = [];
@@ -352,12 +352,12 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     encrypted: Encrypted
   ): Promise<{ plaintext: Uint8Array; applicationSecret: Uint8Array } | null> {
     try {
-      const res = await this.#keyhive.tryDecryptWithKey(doc!, encrypted);
+      const res = await this.#keyhive.tryDecryptKeyed(doc!, encrypted);
       return { plaintext: res.plaintext, applicationSecret: res.applicationSecret };
     } catch {
       if ((await this.#importNewLeafSecrets()).imported) {
         try {
-          const res = await this.#keyhive.tryDecryptWithKey(doc!, encrypted);
+          const res = await this.#keyhive.tryDecryptKeyed(doc!, encrypted);
           return { plaintext: res.plaintext, applicationSecret: res.applicationSecret };
         } catch {
           return null;

@@ -222,6 +222,45 @@ describe("rust-transport codec", () => {
       expect(inner.senderSyncpoint).toBeUndefined();
     });
 
+    it("emits sender_digest as the raw 32-byte op-set XOR (no 8-byte fold)", () => {
+      // The Rust side deserializes sender_digest into a fixed [u8; 32], so the
+      // wire value must be exactly the 32-byte XOR, not the old folded 8 bytes.
+      const digest = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
+      const cbor = encodeRustKeyhiveMessage({
+        type: "keyhive-sync-check",
+        senderId,
+        targetId,
+        inlineDataCbor: cborEncode({
+          senderTotal: 42,
+          senderSyncpoint: 41,
+          senderDigest: digest,
+        }),
+      });
+      const raw = cborDecode(cbor) as Record<string, Record<string, unknown>>;
+      const wireDigest = raw.SyncCheck.sender_digest;
+      expect(wireDigest).toBeInstanceOf(Uint8Array);
+      expect((wireDigest as Uint8Array).length).toBe(32);
+      expect(Array.from(wireDigest as Uint8Array)).toEqual(Array.from(digest));
+    });
+
+    it("defaults an absent sender_digest to 32 zero bytes", () => {
+      // A SyncCheck built without a digest must still carry a 32-byte
+      // all-zero field, so an old Rust peer never receives a short byte
+      // string it would reject, and an all-zero digest never matches a
+      // non-empty op-set.
+      const cbor = encodeRustKeyhiveMessage({
+        type: "keyhive-sync-check",
+        senderId,
+        targetId,
+        inlineDataCbor: cborEncode({ senderTotal: 42, senderSyncpoint: 41 }),
+      });
+      const raw = cborDecode(cbor) as Record<string, Record<string, unknown>>;
+      const wireDigest = raw.SyncCheck.sender_digest as Uint8Array;
+      expect(wireDigest).toBeInstanceOf(Uint8Array);
+      expect(wireDigest.length).toBe(32);
+      expect(wireDigest.every((b) => b === 0)).toBe(true);
+    });
+
     it("renames sync-confirmation field (confirmerTotal → confirmer_total)", () => {
       const cbor = encodeRustKeyhiveMessage({
         type: "keyhive-sync-confirmation",

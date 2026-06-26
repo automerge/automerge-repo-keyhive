@@ -30,7 +30,7 @@
 //   { "RequestContactCard": { sender_id, target_id } }
 //   { "MissingContactCard": { sender_id, target_id } }
 //   { "SyncCheck":          { sender_id, target_id, sender_total, sender_syncpoint,
-//                             sender_digest (8-byte byte string) } }
+//                             sender_digest (32-byte byte string) } }
 //   { "SyncConfirmation":   { sender_id, target_id, confirmer_total } }
 //
 // KeyhivePeerId (CBOR map):
@@ -225,7 +225,7 @@ const TYPE_BY_RUST_VARIANT: Record<string, KeyhiveMessageType> = Object.fromEntr
 // Sent for a SyncCheck whose op-set digest is absent (a peer predating the
 // digest field). All-zero never matches a non-empty pair-set digest, so the
 // receiver falls back to a full sync rather than wrongly short-circuiting.
-const ZERO_DIGEST = new Uint8Array(8);
+const ZERO_DIGEST = new Uint8Array(32);
 
 /**
  * The fields-only shape used in the existing TS adapter (camelCase) for

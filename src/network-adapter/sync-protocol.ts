@@ -24,21 +24,19 @@ export interface SyncProtocolConfig {
   minSyncResponseInterval: number;
 }
 
-// Order-independent XOR-fold of a pairwise op-hash set, reduced to 8 bytes.
+// Order-independent XOR of a pairwise op-hash set into a single 32-byte digest.
 // XOR is commutative, so the result is independent of iteration order. The
 // subduction server computes the identical digest (protocol.rs::pair_set_digest)
 // over the same 32-byte hashes, so a sync check can compare op-*sets*, not just
 // counts: equal counts on crossed syncpoints no longer false-pass as in-sync.
-// An empty set folds to all zeros, matching a peer that sends no digest.
+// An empty set yields all zeros, matching a peer that sends no digest.
 function pairSetDigest(hashes: Map<string, Uint8Array>): Uint8Array {
   const acc = new Uint8Array(32);
   for (const bytes of hashes.values()) {
     const n = Math.min(bytes.length, 32);
     for (let i = 0; i < n; i++) acc[i] ^= bytes[i];
   }
-  const out = new Uint8Array(8);
-  for (let i = 0; i < 32; i++) out[i % 8] ^= acc[i];
-  return out;
+  return acc;
 }
 
 function digestHex(d: Uint8Array): string {
@@ -638,7 +636,7 @@ export class SyncProtocol {
     const checkData = decode(message.data as Uint8Array);
     const theirTotalForUs: number = checkData.senderTotal;
     const theirSyncpoint: number = checkData.senderSyncpoint;
-    const theirDigest: Uint8Array = checkData.senderDigest ?? new Uint8Array(8);
+    const theirDigest: Uint8Array = checkData.senderDigest ?? new Uint8Array(32);
 
     metrics.recordSyncCheckReceived();
 
