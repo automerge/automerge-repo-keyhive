@@ -1,3 +1,4 @@
+import { log } from "../logging.js";
 export class Metrics {
   private msgTypeCounts: Record<string, number> = {};
   private totalPayloadBytes = 0;
@@ -109,7 +110,7 @@ export class Metrics {
     const countsStr = Object.entries(this.msgTypeCounts)
       .map(([type, count]) => `${type}=${count}`)
       .join(", ");
-    console.debug(
+    log.debug(
       `[${label}] ${this.messageCount} keyhive messages from ${this.uniqueSenders.size} peers at ${new Date().toLocaleTimeString("en-GB")}. ` +
       `${this.droppedSyncRequests} duplicate sync requests dropped. ` +
       `${this.nonKeyhiveCount} non-keyhive messages. ` +
@@ -119,7 +120,7 @@ export class Metrics {
     const perTypeStr = Object.entries(this.processingTimeByType)
       .map(([type, ms]) => `${type}=${ms}ms`)
       .join(", ");
-    console.debug(
+    log.debug(
       `[${label}+] Per-type: ${perTypeStr}. ` +
       `Lookups: hash=${this.hashLookupTimeMs}ms, event=${this.eventLookupTimeMs}ms. ` +
       `Cache: ${this.cacheHits}/${this.cacheMisses} hit/miss. ` +

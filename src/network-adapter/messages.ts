@@ -1,3 +1,4 @@
+import { log } from "../logging.js";
 import { type Message, type PeerId } from "@automerge/automerge-repo/slim";
 import { encode, decode } from "cbor-x";
 
@@ -34,7 +35,7 @@ export function decodeKeyhiveMessageData(
     };
 
     if (decoded.contactCard !== "") {
-      console.debug(
+      log.debug(
         "[AMRepoKeyhive] decodeKeyhiveMessageData: parsing contact card from message"
       );
     }
@@ -66,7 +67,7 @@ export async function signData(
         signed,
       });
     } catch(error) {
-      console.error("[AMRepoKeyhive] Error during signing:", error);
+      log.error("[AMRepoKeyhive] Error during signing:", error);
       throw error;
     }
   }
@@ -76,11 +77,11 @@ export function verifyData(peerId: PeerId, data: KeyhiveMessageData): boolean {
   try {
     const verifyingKeyPeerId = verifyingKeyPeerIdWithoutSuffix(peerId);
     if (peerIdFromSigned(data.signed) !== verifyingKeyPeerId) {
-      console.debug(
+      log.debug(
         "[AMRepoKeyhive] Peer id on Signed does not match provided peer id"
       );
-      console.debug("[AMRepoKeyhive] Expected: " + peerId);
-      console.debug("[AMRepoKeyhive] Found: " + peerIdFromSigned(data.signed));
+      log.debug("[AMRepoKeyhive] Expected: " + peerId);
+      log.debug("[AMRepoKeyhive] Found: " + peerIdFromSigned(data.signed));
       return false;
     }
 
@@ -90,7 +91,7 @@ export function verifyData(peerId: PeerId, data: KeyhiveMessageData): boolean {
       return false;
     }
   } catch (error) {
-    console.error("[AMRepoKeyhive] Failed to verify signed data:", error);
+    log.error("[AMRepoKeyhive] Failed to verify signed data:", error);
     return false;
   }
 }

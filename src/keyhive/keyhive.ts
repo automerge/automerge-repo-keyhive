@@ -1,3 +1,5 @@
+import { log } from "../logging.js";
+import { initKeyhiveWasm } from "../wasm.js";
 import {
   AutomergeUrl,
   NetworkAdapter,
@@ -22,11 +24,11 @@ import {
 import { syncServerFromContactCard, SyncServer } from "../sync-server.js";
 import { Active, createActive, loadOrCreateSigner, storeActiveKeyPair } from "./active.js";
 import { KeyhiveNetworkAdapter } from "../network-adapter/network-adapter.js";
-import { KeyhiveRustAdapter } from "../network-adapter/rust-transport/keyhive-rust-adapter.js";
+import { KeyhiveSubductionAdapter } from "../network-adapter/subduction-transport/keyhive-subduction-adapter.js";
 import type { Subduction } from "@automerge/automerge-subduction/slim";
 import { PromiseQueue } from "../network-adapter/pending.js";
 import { KeyhiveEventEmitter } from "./emitter.js";
-import { AutomergeRepoKeyhive, AutomergeRepoKeyhiveRust, generateDoc, keyhiveIdFactory } from "./automerge-repo-keyhive.js";
+import { LegacyAutomergeRepoKeyhive, AutomergeRepoKeyhive, type CreateKeyhiveNetworkAdapter, generateDoc, keyhiveIdFactory } from "./automerge-repo-keyhive.js";
 import { KeyhiveBlobInterceptor } from "./blob-interceptor.js";
 
 export const KEYHIVE_DB_KEY = "keyhive-db";
@@ -49,10 +51,12 @@ export interface SyncServerIdentity {
 /**
  * Selects which sync server to register as the relay.
  *
- * Pass `"subduction"` (the default) or `"keyhive"` to use a known server, or
- * pass an explicit {@link SyncServerIdentity} to target a custom server.
+ * Pass `"subduction"` or `"keyhive"` to use a known server, an explicit
+ * {@link SyncServerIdentity} to target a custom server, or `"none"` to run
+ * without a sync server. `"none"` is only supported on the network-adapter
+ * path (peer-to-peer adapters, tests).
  */
-export type SyncServerSelection = "subduction" | "keyhive" | SyncServerIdentity;
+export type SyncServerSelection = "subduction" | "keyhive" | "none" | SyncServerIdentity;
 
 /**
  * Shared keyhive context: signer, storage, keyhive instance, active,
@@ -67,8 +71,10 @@ interface KeyhiveContext {
   keyhiveQueue: PromiseQueue;
   keyPair: CryptoKeyPair;
   signer: Signer;
-  syncServer: SyncServer;
-  serverPeerIdHardcoded: PeerId;
+  /** Null when the selection is "none". */
+  syncServer: SyncServer | null;
+  /** Null when the selection is "none". */
+  serverPeerIdHardcoded: PeerId | null;
 }
 
 // TODO: these sync-server identities are temporarily hardcoded.
@@ -81,7 +87,7 @@ export const KEYHIVE_SYNC_SERVER_PEER_ID =
   "1/Qebw9O69oH8T/ejYMhFup0tNBh69I3ytGqsmIl358=" as PeerId;
 
 /** subduction.sync.inkandswitch.com keyhive contact card (issuer f709c58c…),
- * captured over the wire from its MissingContactCard at rust-transport/codec.ts. */
+ * captured over the wire from its MissingContactCard at subduction-transport/codec.ts. */
 export const SUBDUCTION_SYNC_SERVER_CONTACT_CARD_JSON =
   '{"Rotate":{"payload":{"old":[33,137,111,238,179,125,3,30,133,139,50,112,178,153,171,132,174,170,136,174,242,17,131,192,37,125,253,108,91,65,84,110],"new":[34,214,236,200,87,89,211,226,207,54,34,177,181,49,195,126,244,174,192,163,6,174,225,45,147,0,82,73,79,78,196,60]},"issuer":[247,9,197,140,25,81,187,131,117,217,148,149,178,185,64,74,187,27,132,103,122,139,165,214,120,158,18,104,148,65,76,25],"signature":[92,213,174,209,83,196,175,199,100,26,241,68,150,220,89,224,87,196,169,73,234,232,74,212,191,3,116,4,138,189,221,44,177,140,139,161,19,139,164,49,224,197,190,25,144,134,90,157,255,86,184,5,184,94,70,127,22,40,43,34,200,182,65,8]}}';
 /** subduction.sync.inkandswitch.com subduction peer id. */
@@ -101,10 +107,20 @@ const SYNC_SERVERS: Record<"subduction" | "keyhive", SyncServerIdentity> = {
   },
 };
 
-/** Resolve a {@link SyncServerSelection} to its card + peer id. */
+/** Resolve a {@link SyncServerSelection} to its card + peer id (null for "none"). */
 function resolveSyncServer(
-  selection: SyncServerSelection = "subduction"
-): SyncServerIdentity {
+  selection?: SyncServerSelection
+): SyncServerIdentity | null {
+  if (selection === undefined) {
+    log.warn(
+      "[AMRepoKeyhive] No syncServer selection was passed; defaulting to the " +
+        "subduction.sync.inkandswitch.com identity. Pass syncServer " +
+        '("subduction", "keyhive", "none", or a custom identity) explicitly. ' +
+        "The identity must match the server the repo actually connects to."
+    );
+    return SYNC_SERVERS.subduction;
+  }
+  if (selection === "none") return null;
   return typeof selection === "string" ? SYNC_SERVERS[selection] : selection;
 }
 
@@ -117,10 +133,13 @@ async function bootstrapKeyhive(options: {
 }): Promise<KeyhiveContext> {
   const { keyPair, signer } = await loadOrCreateKeyPairAndSigner(options.storage, options.keyPair)
   const emitter = new KeyhiveEventEmitter();
+  // Append a random component so concurrent peers sharing an identity (for
+  // example, several tabs) never collide, even with the same label.
+  const peerIdSuffix = `${options.peerIdSuffix}-${Math.random().toString(36).slice(2, 10)}`;
   const uniqueIdHash = new Uint8Array(
     await crypto.subtle.digest(
       "SHA-256",
-      new TextEncoder().encode(options.peerIdSuffix)
+      new TextEncoder().encode(peerIdSuffix)
     )
   );
   const keyhiveStorage = new KeyhiveStorage(uniqueIdHash, options.storage);
@@ -130,17 +149,18 @@ async function bootstrapKeyhive(options: {
     emitter.handleKeyhiveEvent
   );
   const active = await createActive(keyPair, signer, keyhive);
-  const peerId = peerIdFromSigner(active.signer, options.peerIdSuffix);
+  const peerId = peerIdFromSigner(active.signer, peerIdSuffix);
 
-  const { contactCardJson: serverContactCardJson, peerId: serverPeerIdHardcoded } =
-    resolveSyncServer(options.syncServer);
-
-  const syncServer = await syncServerFromContactCard(
-    serverContactCardJson,
-    serverPeerIdHardcoded,
-    keyhive,
-    keyhiveStorage
-  );
+  const serverIdentity = resolveSyncServer(options.syncServer);
+  const serverPeerIdHardcoded = serverIdentity?.peerId ?? null;
+  const syncServer = serverIdentity
+    ? await syncServerFromContactCard(
+        serverIdentity.contactCardJson,
+        serverIdentity.peerId,
+        keyhive,
+        keyhiveStorage
+      )
+    : null;
 
   return {
     active,
@@ -211,7 +231,7 @@ function setupEventFlushListener(
         pendingSync = false;
 
         if (eventsToSave.length > 0) {
-          console.debug(
+          log.debug(
             `[AMRepoKeyhive] Keyhive updated. Saving ${eventsToSave.length} events.`
           );
           for (const eventBytes of eventsToSave) {
@@ -237,20 +257,21 @@ function setupEventFlushListener(
           }, 1000);
         }
       }).catch((error) =>
-        console.error("[AMRepoKeyhive] Event flush failed:", error)
+        log.error("[AMRepoKeyhive] Event flush failed:", error)
       );
     }
   });
 }
 
-export async function initializeAutomergeRepoKeyhive(options: {
+/** Build the hive for the legacy network adapter path (no repo wiring). */
+async function buildLegacyHive(options: {
   storage: StorageAdapterInterface;
   peerIdSuffix: string;
   networkAdapter: NetworkAdapter;
   automaticArchiveIngestion?: boolean;
-  onlyShareWithHardcodedServerPeerId?: boolean;
+  restrictKeyhiveSyncToSyncServer?: boolean;
   periodicallyRequestSync?: boolean;
-  cachingMode?: "none" | "standard" | "periodic";
+  cachingMode?: "none" | "periodic";
   keyPair?: CryptoKeyPair;
   syncServer?: SyncServerSelection;
   syncRequestInterval?: number;
@@ -258,12 +279,12 @@ export async function initializeAutomergeRepoKeyhive(options: {
   retryPendingFromStorage?: boolean;
   enableCompaction?: boolean;
   archiveThreshold?: number;
-}): Promise<AutomergeRepoKeyhive> {
+}): Promise<LegacyAutomergeRepoKeyhive> {
   const {
     automaticArchiveIngestion = true,
-    onlyShareWithHardcodedServerPeerId = false,
+    restrictKeyhiveSyncToSyncServer = false,
     periodicallyRequestSync = true,
-    cachingMode = "none" as "none" | "standard" | "periodic",
+    cachingMode = "none" as "none" | "periodic",
     syncRequestInterval = 2000,
     batchInterval,
     retryPendingFromStorage = true,
@@ -274,10 +295,21 @@ export async function initializeAutomergeRepoKeyhive(options: {
   const bootstrap = await bootstrapKeyhive(options);
   const { active, keyhive, keyhiveStorage, peerId, emitter, keyhiveQueue, syncServer, serverPeerIdHardcoded } = bootstrap;
 
-  const createKeyhiveNetworkAdapter = (networkAdapter: NetworkAdapter, onlyShareWithHardcodedServerPeerId: boolean, periodicallyRequestSync: boolean, syncRequestInterval: number, batchIntervalOverride?: number, archiveThresholdOverride?: number) => {
-    let hardcodedServerPeerId = null;
-    if (onlyShareWithHardcodedServerPeerId) {
-      hardcodedServerPeerId = serverPeerIdHardcoded
+  const createKeyhiveNetworkAdapter: CreateKeyhiveNetworkAdapter = (
+    networkAdapter,
+    wrapOptions = {},
+  ) => {
+    const {
+      restrictKeyhiveSyncToSyncServer: restrictToServer = false,
+      periodicallyRequestSync: periodicSync = false,
+      syncRequestInterval: interval = 2000,
+      batchInterval: batchIntervalOverride,
+      archiveThreshold: archiveThresholdOverride,
+    } = wrapOptions;
+    if (restrictToServer && !serverPeerIdHardcoded) {
+      throw new Error(
+        'restrictKeyhiveSyncToSyncServer requires a configured sync server (syncServer is "none")'
+      );
     }
 
     return new KeyhiveNetworkAdapter({
@@ -286,10 +318,10 @@ export async function initializeAutomergeRepoKeyhive(options: {
       keyhive,
       keyhiveStorage,
       keyhiveQueue,
-      periodicallyRequestSync,
+      periodicallyRequestSync: periodicSync,
       cachingMode,
-      hardcodedRemoteId: hardcodedServerPeerId,
-      syncRequestInterval,
+      hardcodedRemoteId: restrictToServer ? serverPeerIdHardcoded : null,
+      syncRequestInterval: interval,
       batchInterval: batchIntervalOverride,
       retryPendingFromStorage,
       enableCompaction,
@@ -297,13 +329,19 @@ export async function initializeAutomergeRepoKeyhive(options: {
     })
   };
 
-  const keyhiveNetworkAdapter = createKeyhiveNetworkAdapter(options.networkAdapter, onlyShareWithHardcodedServerPeerId, periodicallyRequestSync, syncRequestInterval, batchInterval, archiveThreshold);
+  const keyhiveNetworkAdapter = createKeyhiveNetworkAdapter(options.networkAdapter, {
+    restrictKeyhiveSyncToSyncServer,
+    periodicallyRequestSync,
+    syncRequestInterval,
+    batchInterval,
+    archiveThreshold,
+  });
 
   setupEventFlushListener(bootstrap, keyhiveNetworkAdapter, { automaticArchiveIngestion });
 
   await keyhiveStorage.savePrekeySecrets(keyhive);
 
-  return new AutomergeRepoKeyhive(
+  return new LegacyAutomergeRepoKeyhive(
     active,
     keyhive,
     keyhiveStorage,
@@ -317,10 +355,10 @@ export async function initializeAutomergeRepoKeyhive(options: {
 }
 
 /**
- * Build a keyhive instance and a `KeyhiveRustAdapter` backed by subduction.
- * Use this for peers that talk to a Rust subduction-keyhive sync server.
+ * Build the hive for the subduction path (no repo wiring): a keyhive
+ * instance and a `KeyhiveSubductionAdapter` backed by subduction.
  */
-export async function initializeAutomergeRepoKeyhiveRust(options: {
+async function buildHive(options: {
   storage: StorageAdapterInterface;
   peerIdSuffix: string;
   subduction: Subduction | Promise<Subduction>;
@@ -328,27 +366,34 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
   keyPair?: CryptoKeyPair;
   syncServer?: SyncServerSelection;
   automaticArchiveIngestion?: boolean;
-  cachingMode?: "none" | "standard" | "periodic";
+  cachingMode?: "none" | "periodic";
   syncRequestInterval?: number;
   periodicallyRequestSync?: boolean;
-}): Promise<AutomergeRepoKeyhiveRust> {
+}): Promise<AutomergeRepoKeyhive> {
   const {
     automaticArchiveIngestion = true,
-    cachingMode = "standard" as "none" | "standard" | "periodic",
+    cachingMode = "periodic" as "none" | "periodic",
     syncRequestInterval = 2000,
     periodicallyRequestSync = true,
   } = options;
   const bootstrap = await bootstrapKeyhive(options);
   const { active, keyhive, keyhiveStorage, peerId, emitter, keyhiveQueue, serverPeerIdHardcoded } = bootstrap;
 
-  const networkAdapter = new KeyhiveRustAdapter({
+  const remotePeerId = options.remotePeerId ?? serverPeerIdHardcoded;
+  if (!remotePeerId) {
+    throw new Error(
+      'initializeAutomergeRepoKeyhive: the subduction path syncs against a single remote, so syncServer "none" requires an explicit remotePeerId'
+    );
+  }
+
+  const networkAdapter = new KeyhiveSubductionAdapter({
     subduction: options.subduction,
     keyhive,
     keyhiveStorage,
     keyhiveQueue,
     contactCard: active.contactCard,
     localPeerId: peerId,
-    remotePeerId: options.remotePeerId ?? serverPeerIdHardcoded,
+    remotePeerId,
     cachingMode,
     syncRequestInterval,
     periodicallyRequestSync,
@@ -360,27 +405,27 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
 
   networkAdapter.syncKeyhive(true);
 
-  const createKeyhiveNetworkAdapter = (
-    legacyAdapter: NetworkAdapter,
-    onlyShareWithHardcodedServerPeerId: boolean,
-    periodicallyRequestSyncFlag: boolean,
-    syncRequestIntervalArg: number,
-    batchIntervalOverride?: number,
-    archiveThresholdOverride?: number,
-  ): KeyhiveNetworkAdapter => {
-    const hardcodedRemoteId = onlyShareWithHardcodedServerPeerId
-      ? serverPeerIdHardcoded
-      : null;
+  const createKeyhiveNetworkAdapter: CreateKeyhiveNetworkAdapter = (
+    legacyAdapter,
+    wrapOptions = {},
+  ) => {
+    const {
+      restrictKeyhiveSyncToSyncServer: restrictToServer = false,
+      periodicallyRequestSync: periodicSync = false,
+      syncRequestInterval: interval = 2000,
+      batchInterval: batchIntervalOverride,
+      archiveThreshold: archiveThresholdOverride,
+    } = wrapOptions;
     const adapter = new KeyhiveNetworkAdapter({
       networkAdapter: legacyAdapter,
       contactCard: active.contactCard,
       keyhive,
       keyhiveStorage,
       keyhiveQueue,
-      periodicallyRequestSync: periodicallyRequestSyncFlag,
+      periodicallyRequestSync: periodicSync,
       cachingMode,
-      hardcodedRemoteId,
-      syncRequestInterval: syncRequestIntervalArg,
+      hardcodedRemoteId: restrictToServer ? serverPeerIdHardcoded : null,
+      syncRequestInterval: interval,
       batchInterval: batchIntervalOverride,
       retryPendingFromStorage: true,
       enableCompaction: true,
@@ -406,7 +451,7 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
   }, options.storage);
   await blobInterceptor.loadPersistedPcsKeyHashes();
 
-  return new AutomergeRepoKeyhiveRust(
+  return new AutomergeRepoKeyhive(
     active,
     keyhive,
     keyhiveStorage,
@@ -419,22 +464,50 @@ export async function initializeAutomergeRepoKeyhiveRust(options: {
   );
 }
 
-// Construct a keyhive and its `Repo` together.
-export async function initializeAutomergeRepoKeyhiveWithRepo(
-  options: Parameters<typeof initializeAutomergeRepoKeyhive>[0] & {
+/** Options shared by both init functions for wiring the hive to its repo. */
+interface InitRepoLinkOptions {
+  /**
+   * Debounce interval for propagating keyhive membership changes to
+   * `repo.shareConfigChanged()`. Default 2000 ms.
+   */
+  shareConfigDebounceMs?: number;
+  /** Called immediately before each (debounced) `repo.shareConfigChanged()`. */
+  onBeforeShareConfigChanged?: () => void;
+}
+
+/**
+ * Construct a keyhive and its Automerge `Repo` together, for peers syncing
+ * keyhive state over an automerge-repo network adapter.
+ *
+ * Initializes the keyhive WASM module, builds the hive, passes a repo config
+ * with the hive-derived `network`, `peerId`, and `idFactory` to `createRepo`,
+ * and links the resulting repo to the hive.
+ */
+export async function initializeLegacyAutomergeRepoKeyhive(
+  options: Parameters<typeof buildLegacyHive>[0] & InitRepoLinkOptions & {
     createRepo: (config: RepoConfig) => Repo;
     repo?: Omit<RepoConfig, "peerId" | "idFactory" | "network">;
   },
-): Promise<{ hive: AutomergeRepoKeyhive; repo: Repo }> {
-  const { createRepo, repo: repoOptions, ...hiveOptions } = options;
-  const hive = await initializeAutomergeRepoKeyhive(hiveOptions);
+): Promise<{ hive: LegacyAutomergeRepoKeyhive; repo: Repo }> {
+  initKeyhiveWasm();
+  const {
+    createRepo,
+    repo: repoOptions,
+    shareConfigDebounceMs,
+    onBeforeShareConfigChanged,
+    ...hiveOptions
+  } = options;
+  const hive = await buildLegacyHive(hiveOptions);
   const repo = createRepo({
     ...repoOptions,
     network: [hive.networkAdapter],
     peerId: hive.peerId,
     idFactory: hive.idFactory,
   });
-  hive.linkRepo(repo);
+  hive.linkRepo(repo, {
+    debounceMs: shareConfigDebounceMs,
+    onBeforeShareConfigChanged,
+  });
   return { hive, repo };
 }
 
@@ -442,24 +515,31 @@ export async function initializeAutomergeRepoKeyhiveWithRepo(
  * Construct a keyhive and its Automerge `Repo` (connected to a Rust subduction
  * sync server) together.
  *
- * The hive's network adapter needs the repo's subduction instance, but the repo
- * needs the hive first. This function injects the hive-derived `signer`, `peerId`,
- * `idFactory`, and `subductionBlobInterceptor` into the repo, passes
- * `repo.subduction` back to the hive, and calls `linkRepo`.
+ * Initializes the keyhive WASM module and resolves the circular dependency
+ * between hive and repo: the hive's network adapter needs the repo's
+ * subduction instance, but the repo needs the hive first. This function
+ * injects the hive-derived `signer`, `peerId`, `idFactory`, and
+ * `subductionBlobInterceptor` into the repo config passed to `createRepo`,
+ * hands `repo.subduction` back to the hive, and links the repo to the hive.
  */
-export async function initializeAutomergeRepoKeyhiveRustWithRepo(
-  options: Omit<
-    Parameters<typeof initializeAutomergeRepoKeyhiveRust>[0],
-    "subduction"
-  > & {
-    createRepo: (config: RepoConfig) => Repo;
-    repo?: Omit<
-      RepoConfig,
-      "peerId" | "idFactory" | "signer" | "subductionBlobInterceptor"
-    >;
-  },
-): Promise<{ hive: AutomergeRepoKeyhiveRust; repo: Repo }> {
-  const { createRepo, repo: repoOptions, ...hiveOptions } = options;
+export async function initializeAutomergeRepoKeyhive(
+  options: Omit<Parameters<typeof buildHive>[0], "subduction"> &
+    InitRepoLinkOptions & {
+      createRepo: (config: RepoConfig) => Repo;
+      repo?: Omit<
+        RepoConfig,
+        "peerId" | "idFactory" | "signer" | "subductionBlobInterceptor"
+      >;
+    },
+): Promise<{ hive: AutomergeRepoKeyhive; repo: Repo }> {
+  initKeyhiveWasm();
+  const {
+    createRepo,
+    repo: repoOptions,
+    shareConfigDebounceMs,
+    onBeforeShareConfigChanged,
+    ...hiveOptions
+  } = options;
 
   // Hand the hive a deferred subduction promise, build the repo, then resolve
   // it from `repo.subduction`.
@@ -468,7 +548,7 @@ export async function initializeAutomergeRepoKeyhiveRustWithRepo(
     resolveSubduction = resolve;
   });
 
-  const hive = await initializeAutomergeRepoKeyhiveRust({
+  const hive = await buildHive({
     ...hiveOptions,
     subduction: subductionPromise,
   });
@@ -482,7 +562,10 @@ export async function initializeAutomergeRepoKeyhiveRustWithRepo(
   });
 
   repo.subduction.then(resolveSubduction as (s: unknown) => void);
-  hive.linkRepo(repo);
+  hive.linkRepo(repo, {
+    debounceMs: shareConfigDebounceMs,
+    onBeforeShareConfigChanged,
+  });
 
   return { hive, repo };
 }
@@ -494,10 +577,10 @@ export async function receiveContactCard(keyhive: Keyhive, contactCard: ContactC
     return await keyhive.getIndividual(contactCard.individualId);
   } else {
     if (contactCard.op) {
-      console.debug(`[AMRepoKeyhive] Saving Contact Card event: ${contactCard.op}`);
+      log.debug(`[AMRepoKeyhive] Saving Contact Card event: ${contactCard.op}`);
       await keyhiveStorage.saveEventWithHash(contactCard.op);
     } else {
-      console.error(`[AMRepoKeyhive] No op found for ${contactCard.toJson()}`);
+      log.error(`[AMRepoKeyhive] No op found for ${contactCard.toJson()}`);
     }
     return await keyhive.receiveContactCard(contactCard);
   }
@@ -555,7 +638,7 @@ export class KeyhiveStorage {
   async saveKeyhiveWithHash(kh: Keyhive) {
     const khBytes = (await kh.toArchive()).toBytes();
     const hash = uint8ArrayToHex(this.keyhiveStorageId);
-    console.debug(`[AMRepoKeyhive] Saving keyhive archive. Hash: ${hash}`);
+    log.debug(`[AMRepoKeyhive] Saving keyhive archive. Hash: ${hash}`);
     await this.storage.save(
       [KEYHIVE_DB_KEY, KEYHIVE_ARCHIVES_KEY, hash],
       khBytes
@@ -605,7 +688,7 @@ export class KeyhiveStorage {
       const bytes = await kh.exportPrekeySecrets();
       await this.storage.save([KEYHIVE_DB_KEY, KEYHIVE_PREKEY_SECRETS_KEY], bytes);
     } catch (error) {
-      console.error("[AMRepoKeyhive] Failed to export prekey secrets:", error);
+      log.error("[AMRepoKeyhive] Failed to export prekey secrets:", error);
     }
   }
 
@@ -631,7 +714,7 @@ export class KeyhiveStorage {
       return;
     }
 
-    console.debug(
+    log.debug(
       `[AMRepoKeyhive] Compacting: ${keyhiveArchiveChunks.length} archives, ${keyhiveEventsChunks.length} events`
     );
 
@@ -641,7 +724,7 @@ export class KeyhiveStorage {
         try {
           await kh.ingestArchive(new Archive(chunk.data));
         } catch (error) {
-          console.warn(
+          log.warn(
             `[AMRepoKeyhive] Failed to ingest archive during compaction:`,
             error
           );
@@ -671,7 +754,7 @@ export class KeyhiveStorage {
           .map((bytes: Uint8Array) => dataToKey.get(bytes.toString()))
           .filter((key): key is StorageKey => key !== undefined);
       } catch (error) {
-        console.warn(
+        log.warn(
           `[AMRepoKeyhive] Failed to ingest events during compaction:`,
           error
         );
@@ -692,7 +775,7 @@ export class KeyhiveStorage {
     // Remove events that are not pending
     await this.removeNonPendingEvents(keyhiveEventsChunks, pendingKeys);
 
-    console.debug(
+    log.debug(
       `[AMRepoKeyhive] Compaction complete. ${pendingKeys.length} pending events retained.`
     );
   }
@@ -710,13 +793,13 @@ export class KeyhiveStorage {
     // Ingest all archives
     for (const chunk of keyhiveArchiveChunks) {
       if (chunk.data) {
-        console.debug(
+        log.debug(
           `[AMRepoKeyhive] Ingesting archive from storage. Hash: ${chunk.key[2]}`
         );
         try {
           await kh.ingestArchive(new Archive(chunk.data));
         } catch (error) {
-          console.warn(
+          log.warn(
             `[AMRepoKeyhive] Failed to re-ingest archive during recovery:`,
             error
           );
@@ -730,20 +813,20 @@ export class KeyhiveStorage {
       .filter((data): data is Uint8Array => data !== undefined);
 
     if (eventsBytes.length > 0) {
-      console.debug(
+      log.debug(
         `[AMRepoKeyhive] Ingesting ${eventsBytes.length} events from storage`
       );
       try {
         await kh.ingestEventsBytes(eventsBytes);
       } catch (error) {
-        console.warn(
+        log.warn(
           `[AMRepoKeyhive] Failed to ingest events during recovery:`,
           error
         );
       }
     }
 
-    console.debug("[AMRepoKeyhive] Reading from storage completed");
+    log.debug("[AMRepoKeyhive] Reading from storage completed");
   }
 
   async loadOrCreateKeyhive(
@@ -779,10 +862,10 @@ export class KeyhiveStorage {
       if (firstChunk.data) {
         const firstArchive = new Archive(firstChunk.data);
         try {
-          console.log("[AMRepoKeyhive] Attempting to load Keyhive archive");
+          log.info("[AMRepoKeyhive] Attempting to load Keyhive archive");
           let store = CiphertextStore.newInMemory();
           const chunk_count = keyhiveArchiveChunks.length;
-          console.log(
+          log.info(
             `[AMRepoKeyhive] Ingesting archive from storage (1 of ${chunk_count}). Hash: ${firstChunk.key[2]}`
           );
 
@@ -796,7 +879,7 @@ export class KeyhiveStorage {
           for (let idx = 1; idx < keyhiveArchiveChunks.length; idx++) {
             const chunk = keyhiveArchiveChunks[idx];
             if (chunk.data) {
-              console.log(
+              log.info(
                 `[AMRepoKeyhive] Ingesting archive from storage (${idx + 1} of ${chunk_count}). Hash: ${chunk.key[2]}`
               );
               await kh.ingestArchive(new Archive(chunk.data));
@@ -804,7 +887,7 @@ export class KeyhiveStorage {
           }
 
           // Ingest individual events
-          console.log(
+          log.info(
             `[AMRepoKeyhive] Ingesting ${eventsBytes.length} keyhive events from storage.`
           );
           let pendingKeys: StorageKey[] = [];
@@ -815,7 +898,7 @@ export class KeyhiveStorage {
           }
 
           await this.loadPrekeySecrets(kh);
-          console.log(
+          log.info(
             "[AMRepoKeyhive] Successfully loaded Keyhive from archive"
           );
           await this.saveKeyhiveWithHash(kh);
@@ -828,7 +911,7 @@ export class KeyhiveStorage {
           await this.removeNonPendingEvents(keyhiveEventsChunks, pendingKeys);
           return kh;
         } catch (error: unknown) {
-          console.error(
+          log.error(
             "[AMRepoKeyhive] Failed to load Keyhive archive:",
             unwrapWasmError(error)
           );
@@ -838,12 +921,12 @@ export class KeyhiveStorage {
 
     // No archives in storage. Create new keyhive.
     const store = CiphertextStore.newInMemory();
-    console.log(`[AMRepoKeyhive] Initializing new Keyhive`);
+    log.info(`[AMRepoKeyhive] Initializing new Keyhive`);
     const kh = await Keyhive.init(signer, store, event_handler);
     await this.loadPrekeySecrets(kh);
 
     if (eventsBytes.length > 0) {
-      console.log(
+      log.info(
         `[AMRepoKeyhive] Ingesting ${eventsBytes.length} keyhive events from storage.`
       );
       try {
@@ -855,7 +938,7 @@ export class KeyhiveStorage {
         await this.removeNonPendingEvents(keyhiveEventsChunks, pendingKeys);
         return kh;
       } catch (e: unknown) {
-        console.error(
+        log.error(
           `[AMRepoKeyhive] Failed to ingest keyhive events from storage:`,
           unwrapWasmError(e)
         );

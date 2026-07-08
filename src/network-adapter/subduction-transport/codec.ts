@@ -105,16 +105,16 @@ export function decodeSukFrame(bytes: Uint8Array): Uint8Array {
  * Wire shape of the outer SignedMessage map. `signed` is bincode bytes,
  * `contactCard` is a JSON string (empty string when absent).
  */
-export interface RustSignedMessage {
+export interface SubductionSignedMessage {
   contactCard: string;
   signed: Uint8Array;
 }
 
-export function encodeSignedMessage(msg: RustSignedMessage): Uint8Array {
+export function encodeSignedMessage(msg: SubductionSignedMessage): Uint8Array {
   return encode(msg);
 }
 
-export function decodeSignedMessage(bytes: Uint8Array): RustSignedMessage {
+export function decodeSignedMessage(bytes: Uint8Array): SubductionSignedMessage {
   const obj = decode(bytes) as { contactCard?: unknown; signed?: unknown };
   if (typeof obj?.contactCard !== "string") {
     throw new SukFrameError(
@@ -147,7 +147,7 @@ export function decodeSignedMessage(bytes: Uint8Array): RustSignedMessage {
 /**
  * Decoded form of `KeyhivePeerId` from the Rust crate.
  */
-export interface RustPeerId {
+export interface SubductionPeerId {
   verifying_key: Uint8Array; // 32 bytes
   suffix: string | null;
 }
@@ -162,7 +162,7 @@ export interface RustPeerId {
  * suffix that wasn't introduced via its own connection bridge. We drop
  * the suffix on the wire so the server's lookup succeeds.
  */
-export function peerIdToRust(peerId: PeerId): RustPeerId {
+export function peerIdToSubduction(peerId: PeerId): SubductionPeerId {
   const dashIdx = peerId.indexOf("-");
   const b64 = dashIdx === -1 ? peerId : peerId.slice(0, dashIdx);
 
@@ -180,11 +180,11 @@ export function peerIdToRust(peerId: PeerId): RustPeerId {
 /**
  * Convert a Rust-shape `KeyhivePeerId` back into a TS PeerId string.
  *
- * The wire form has no suffix (see {@link peerIdToRust}). We mirror that
+ * The wire form has no suffix (see {@link peerIdToSubduction}). We mirror that
  * here. Incoming messages always produce a no-suffix PeerId, matching
  * what the SyncProtocol's `verifyingKeyPeer` comparisons expect.
  */
-export function peerIdFromRust(rust: RustPeerId): PeerId {
+export function peerIdFromSubduction(rust: SubductionPeerId): PeerId {
   if (rust.verifying_key.length !== 32) {
     throw new SukFrameError(
       `Rust peer-id verifying_key length: expected 32, got ${rust.verifying_key.length}`
@@ -249,7 +249,7 @@ export type TsInnerData =
   | { senderTotal: number; senderSyncpoint: number; senderDigest?: Uint8Array } // sync-check
   | { confirmerTotal: number }; // sync-confirmation
 
-export interface RustEncodeInput {
+export interface SubductionEncodeInput {
   type: KeyhiveMessageType;
   senderId: PeerId;
   targetId: PeerId;
@@ -257,7 +257,7 @@ export interface RustEncodeInput {
   inlineDataCbor: Uint8Array;
 }
 
-export interface RustDecodeOutput {
+export interface SubductionDecodeOutput {
   type: KeyhiveMessageType;
   senderId: PeerId;
   targetId: PeerId;
@@ -272,9 +272,9 @@ export interface RustDecodeOutput {
  * Performs camelCase→snake_case conversion for the inline fields and
  * splices in the sender/target ids.
  */
-export function encodeRustKeyhiveMessage(input: RustEncodeInput): Uint8Array {
-  const sender = peerIdToRust(input.senderId);
-  const target = peerIdToRust(input.targetId);
+export function encodeSubductionKeyhiveMessage(input: SubductionEncodeInput): Uint8Array {
+  const sender = peerIdToSubduction(input.senderId);
+  const target = peerIdToSubduction(input.targetId);
   const inner = decodeInlineForType(input.type, input.inlineDataCbor);
   const variant = RUST_VARIANT_BY_TYPE[input.type];
 
@@ -291,7 +291,7 @@ export function encodeRustKeyhiveMessage(input: RustEncodeInput): Uint8Array {
  * Decode a Rust-shape KeyhiveMessage CBOR payload into the TS Message-like
  * shape the SyncProtocol expects.
  */
-export function decodeRustKeyhiveMessage(payload: Uint8Array): RustDecodeOutput {
+export function decodeSubductionKeyhiveMessage(payload: Uint8Array): SubductionDecodeOutput {
   const obj = decode(payload) as Record<string, unknown>;
   const variants = Object.keys(obj);
   if (variants.length !== 1) {
@@ -308,8 +308,8 @@ export function decodeRustKeyhiveMessage(payload: Uint8Array): RustDecodeOutput 
   if (!v || typeof v !== "object") {
     throw new SukFrameError(`variant ${variant} payload is not a map`);
   }
-  const senderId = peerIdFromRust(v.sender_id as RustPeerId);
-  const targetId = peerIdFromRust(v.target_id as RustPeerId);
+  const senderId = peerIdFromSubduction(v.sender_id as SubductionPeerId);
+  const targetId = peerIdFromSubduction(v.target_id as SubductionPeerId);
   const inlineDataCbor = encodeInlineForType(type, v);
   return { type, senderId, targetId, inlineDataCbor };
 }

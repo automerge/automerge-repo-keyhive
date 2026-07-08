@@ -1,3 +1,4 @@
+import { log } from "../logging.js";
 import { type AutomergeUrl, type BlobInterceptor, type DocumentId, type StorageAdapterInterface, parseAutomergeUrl } from "@automerge/automerge-repo/slim";
 import {
   ChangeId,
@@ -10,7 +11,7 @@ import {
 import { blake3 } from "@noble/hashes/blake3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { PromiseQueue } from "../network-adapter/pending.js";
-import { arraysEqual, isLegacyDocId } from "../utilities.js";
+import { arraysEqual, isUnprotectedDocId } from "../utilities.js";
 import { KEYHIVE_DB_KEY, KEYHIVE_LEAF_SECRETS_KEY, KEYHIVE_PREKEY_SECRETS_KEY } from "./keyhive.js";
 
 const PCS_KEY_HASHES_STORAGE_KEY = "/pcs-key-hashes";
@@ -26,6 +27,8 @@ const ENVELOPE_VERSION = 1;
 const COMMIT_ID_BYTES = 32;
 const PRED_ENTRY_BYTES = COMMIT_ID_BYTES + 32;
 
+type KeyhiveDoc = NonNullable<Awaited<ReturnType<Keyhive["getDocument"]>>>;
+
 export class KeyhiveBlobInterceptor implements BlobInterceptor {
   #keyhive: Keyhive;
   #queue: PromiseQueue;
@@ -33,6 +36,13 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   #storage?: StorageAdapterInterface;
   #lastPcsKeyHash: Map<string, Uint8Array> = new Map();
   #persistQueued = false;
+
+  // Hashes of leaf-secret storage entries already imported into this keyhive,
+  // so a miss only imports entries it hasn't seen.
+  #importedLeafSecrets: Set<string> = new Set();
+  // Byte-length of the prekey-secrets archive blob last imported, so a miss
+  // only re-imports it when a sibling instance has rewritten it.
+  #importedPrekeyArchiveLen = -1;
 
   // commitId hex -> the 32-byte application secret used to encrypt/decrypt that
   // blob. Populated on every encrypt and decrypt. On encrypt it lets us attach
@@ -69,13 +79,6 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     }
   }
 
-  // Hashes of leaf-secret storage entries already imported into this keyhive,
-  // so a miss only imports entries it hasn't seen.
-  #importedLeafSecrets: Set<string> = new Set();
-  // Byte-length of the prekey-secrets archive blob last imported, so a miss
-  // only re-imports it when a sibling instance has rewritten it.
-  #importedPrekeyArchiveLen = -1;
-
   // Import secrets another instance of this identity wrote to shared storage but
   // this instance has not yet seen. Both stores hold `importPrekeySecrets`-shaped
   // blobs ("leaf secret" == prekey secret); they are the archive/events split:
@@ -86,19 +89,13 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   //     too (not just init/refresh) to pick up a prekey a sibling just created.
   // Returns true if any new secret was imported. Called only on an
   // encrypt/decrypt miss, so the common path pays nothing.
-  async #importNewLeafSecrets(): Promise<{
-    imported: boolean;
-    total: number;
-    newlyImported: number;
-  }> {
-    if (!this.#storage) return { imported: false, total: 0, newlyImported: 0 };
+  async #importNewLeafSecrets(): Promise<boolean> {
+    if (!this.#storage) return false;
     let newlyImported = 0;
-    let total = 0;
     try {
       const chunks = await this.#storage.loadRange([KEYHIVE_DB_KEY, KEYHIVE_LEAF_SECRETS_KEY]);
       for (const chunk of chunks) {
         if (!chunk.data) continue;
-        total++;
         const hashKey = chunk.key[chunk.key.length - 1] as string;
         if (this.#importedLeafSecrets.has(hashKey)) continue;
         await this.#keyhive.importPrekeySecrets(chunk.data);
@@ -111,15 +108,14 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       // secrets, so a different length means a sibling added one.
       const archive = await this.#storage.load([KEYHIVE_DB_KEY, KEYHIVE_PREKEY_SECRETS_KEY]);
       if (archive && archive.byteLength !== this.#importedPrekeyArchiveLen) {
-        total++;
         await this.#keyhive.importPrekeySecrets(archive);
         this.#importedPrekeyArchiveLen = archive.byteLength;
         newlyImported++;
       }
     } catch (e) {
-      console.error("[KeyhiveBlobInterceptor] importNewLeafSecrets failed:", e);
+      log.error("[KeyhiveBlobInterceptor] importNewLeafSecrets failed:", e);
     }
-    return { imported: newlyImported > 0, total, newlyImported };
+    return newlyImported > 0;
   }
 
   #queuePersist(): void {
@@ -128,7 +124,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     queueMicrotask(() => {
       this.#persistQueued = false;
       void this.#persistPcsKeyHashes().catch((e) => {
-        console.error("[KeyhiveBlobInterceptor] persisting PCS key hashes failed:", e);
+        log.error("[KeyhiveBlobInterceptor] persisting PCS key hashes failed:", e);
       });
     });
   }
@@ -158,19 +154,32 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     blob: Uint8Array,
     loadBlob?: (commitIdHex: string) => Promise<Uint8Array | null>
   ): Promise<Uint8Array | null> {
-    const { binaryDocumentId, legacy } = parseDocId(documentId);
-    if (legacy) return blob;
+    const { binaryDocumentId, unprotected } = parseDocId(documentId);
+    if (unprotected) return blob;
     return this.#queue.run(async () => {
       const doc = await this.#keyhive.getDocument(new KeyhiveDocumentId(binaryDocumentId));
       // No keyhive doc yet: drop the outgoing blob (nothing stored or pushed).
-      if (!doc) return null;
+      if (!doc) {
+        log.debug(
+          `[KeyhiveBlobInterceptor] transformOutgoing: no keyhive document for ${documentId}; dropping outgoing blob (a later save retries)`
+        );
+        return null;
+      }
       let pcsHash = await this.#keyhive.tryPcsKeyHash(doc);
       if (!pcsHash) {
         // A sibling instance (e.g. the tab) may have rotated the key and written
         // the new leaf secret to shared storage. Import and retry once.
         await this.#importNewLeafSecrets();
         pcsHash = await this.#keyhive.tryPcsKeyHash(doc);
-        if (!pcsHash) return null;
+        if (!pcsHash) {
+          // Either a sibling's rotation we cannot see yet or a member add
+          // that invalidated the key (the membership nudge rotation restores
+          // the key in that case).
+          log.debug(
+            `[KeyhiveBlobInterceptor] transformOutgoing: no derivable PCS key for ${documentId} (even after importing leaf secrets); dropping outgoing blob (a later save retries)`
+          );
+          return null;
+        }
       }
       const contentRef = new ChangeId(blake3(blob));
       const result = await this.#keyhive.tryEncryptKeyed(doc, contentRef, [], blob);
@@ -199,6 +208,11 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
         entry.set(parentKey, COMMIT_ID_BYTES);
         entries.push(entry);
       }
+      // The commit id rides along as "associated data", but it is never
+      // authenticated or checked on decrypt. Its only effect is as one input
+      // to the deterministic nonce derivation (key, plaintext, associated
+      // data). The derived nonce is carried in the sealed blob, so
+      // symmetricDecrypt reads it from there and needs no associated data.
       const predsCipher = symmetricEncrypt(
         selfKey,
         concatBytes(entries),
@@ -224,8 +238,8 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     blob: Uint8Array,
     loadBlob?: (commitIdHex: string) => Promise<Uint8Array | null>
   ): Promise<Uint8Array | null> {
-    const { binaryDocumentId, legacy } = parseDocId(documentId);
-    if (legacy) return blob;
+    const { binaryDocumentId, unprotected } = parseDocId(documentId);
+    if (unprotected) return blob;
     return this.#queue.run(async () => {
       const doc = await this.#keyhive.getDocument(new KeyhiveDocumentId(binaryDocumentId));
       if (!doc) return null;
@@ -248,34 +262,45 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   // (this blob first, then ancestors) into `out`. Returns false only when this
   // blob cannot be decrypted (the caller leaves it pending for a later pass).
   async #decryptAndWalk(
-    doc: Awaited<ReturnType<Keyhive["getDocument"]>>,
+    doc: KeyhiveDoc,
     commitId: string,
     blob: Uint8Array,
     loadBlob: ((commitIdHex: string) => Promise<Uint8Array | null>) | undefined,
     out: Uint8Array[],
     seen: Set<string>
   ): Promise<boolean> {
-    const envelope = decodeOuterEnvelope(blob);
-    if (!envelope) return false;
-    let encrypted: Encrypted;
-    try {
-      encrypted = Encrypted.fromBytes(envelope.inner);
-    } catch {
+    const parsed = parseEnvelope(blob);
+    if (!parsed) {
+      log.debug(
+        `[KeyhiveBlobInterceptor] unrecognized blob envelope${
+          commitId ? ` for commit ${commitId}` : " during bulk document load"
+        }; leaving pending`
+      );
       return false;
     }
+    const { envelope, encrypted } = parsed;
 
     // Resolve this blob's application secret: from the chain map if a
     // descendant already supplied it (keyed by commit id), otherwise via a
-    // single CGKA dive (the entry point). The bulk path passes an empty commit
-    // id, so a cold entry point is reached only through the CGKA dive.
-    let selfKey = commitId ? this.#blobKeys.get(commitId) : undefined;
-    let plaintext: Uint8Array;
-    if (selfKey) {
+    // single CGKA lookup (the entry point). The bulk path passes an empty commit
+    // id, so a cold entry point is reached only through the CGKA lookup. If a
+    // cached key fails to decrypt, we fall back to a CGKA lookup.
+    const cachedKey = commitId ? this.#blobKeys.get(commitId) : undefined;
+    let decrypted: Uint8Array | undefined;
+    if (cachedKey) {
       try {
-        plaintext = encrypted.decryptWithKey(selfKey);
+        decrypted = encrypted.decryptWithKey(cachedKey);
       } catch {
-        return false;
+        log.debug(
+          `[KeyhiveBlobInterceptor] cached key failed for commit ${commitId}; retrying via CGKA`
+        );
       }
+    }
+    let plaintext: Uint8Array;
+    let selfKey: Uint8Array;
+    if (decrypted !== undefined && cachedKey) {
+      plaintext = decrypted;
+      selfKey = cachedKey;
     } else {
       const viaCgka = await this.#decryptViaCgka(doc, encrypted);
       if (!viaCgka) return false;
@@ -321,7 +346,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   // the parent's own predecessor keys it carries. Returns undefined if the blob
   // is absent or cannot be decrypted (then the link is skipped as before).
   async #recoverParentKey(
-    doc: Awaited<ReturnType<Keyhive["getDocument"]>>,
+    doc: KeyhiveDoc,
     parentHex: string,
     loadBlob: (commitIdHex: string) => Promise<Uint8Array | null>
   ): Promise<Uint8Array | undefined> {
@@ -332,14 +357,9 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       return undefined;
     }
     if (!parentBlob) return undefined;
-    const envelope = decodeOuterEnvelope(parentBlob);
-    if (!envelope) return undefined;
-    let encrypted: Encrypted;
-    try {
-      encrypted = Encrypted.fromBytes(envelope.inner);
-    } catch {
-      return undefined;
-    }
+    const parsed = parseEnvelope(parentBlob);
+    if (!parsed) return undefined;
+    const { envelope, encrypted } = parsed;
     const viaCgka = await this.#decryptViaCgka(doc, encrypted);
     if (!viaCgka) return undefined;
     const key = viaCgka.applicationSecret;
@@ -359,21 +379,29 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   // Recover a blob's application secret through keyhive/CGKA (the chain entry
   // point), importing sibling-written leaf secrets and retrying once on a miss.
   async #decryptViaCgka(
-    doc: Awaited<ReturnType<Keyhive["getDocument"]>>,
+    doc: KeyhiveDoc,
     encrypted: Encrypted
   ): Promise<{ plaintext: Uint8Array; applicationSecret: Uint8Array } | null> {
     try {
-      const res = await this.#keyhive.tryDecryptKeyed(doc!, encrypted);
+      const res = await this.#keyhive.tryDecryptKeyed(doc, encrypted);
       return { plaintext: res.plaintext, applicationSecret: res.applicationSecret };
-    } catch {
-      if ((await this.#importNewLeafSecrets()).imported) {
+    } catch (firstError) {
+      if (await this.#importNewLeafSecrets()) {
         try {
-          const res = await this.#keyhive.tryDecryptKeyed(doc!, encrypted);
+          const res = await this.#keyhive.tryDecryptKeyed(doc, encrypted);
           return { plaintext: res.plaintext, applicationSecret: res.applicationSecret };
-        } catch {
+        } catch (retryError) {
+          log.debug(
+            "[KeyhiveBlobInterceptor] CGKA decrypt failed after importing new leaf secrets; leaving pending:",
+            retryError
+          );
           return null;
         }
       }
+      log.debug(
+        "[KeyhiveBlobInterceptor] CGKA decrypt failed (no new leaf secrets to import); leaving pending:",
+        firstError
+      );
       return null;
     }
   }
@@ -413,6 +441,20 @@ function decodeOuterEnvelope(
   };
 }
 
+// Decode the outer envelope and parse its inner keyhive content envelope.
+// Null for any blob this interceptor did not produce.
+function parseEnvelope(
+  blob: Uint8Array
+): { envelope: { inner: Uint8Array; predsCipher: Uint8Array }; encrypted: Encrypted } | null {
+  const envelope = decodeOuterEnvelope(blob);
+  if (!envelope) return null;
+  try {
+    return { envelope, encrypted: Encrypted.fromBytes(envelope.inner) };
+  } catch {
+    return null;
+  }
+}
+
 function decodePreds(plain: Uint8Array): Array<{ idHex: string; key: Uint8Array }> {
   const out: Array<{ idHex: string; key: Uint8Array }> = [];
   for (let off = 0; off + PRED_ENTRY_BYTES <= plain.length; off += PRED_ENTRY_BYTES) {
@@ -425,8 +467,8 @@ function decodePreds(plain: Uint8Array): Array<{ idHex: string; key: Uint8Array 
 }
 
 // Parse the document id once, returning both the raw bytes (for building a
-// KeyhiveDocumentId) and whether it is a legacy id.
-function parseDocId(documentId: DocumentId): { binaryDocumentId: Uint8Array; legacy: boolean } {
+// KeyhiveDocumentId) and whether it is an unprotected id.
+function parseDocId(documentId: DocumentId): { binaryDocumentId: Uint8Array; unprotected: boolean } {
   const { binaryDocumentId } = parseAutomergeUrl(`automerge:${documentId}` as AutomergeUrl);
-  return { binaryDocumentId, legacy: isLegacyDocId(binaryDocumentId) };
+  return { binaryDocumentId, unprotected: isUnprotectedDocId(binaryDocumentId) };
 }

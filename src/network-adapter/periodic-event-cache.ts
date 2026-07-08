@@ -1,3 +1,4 @@
+import { log } from "../logging.js";
 import { Identifier, Keyhive } from "@keyhive/keyhive/slim";
 import { PeerId } from "@automerge/automerge-repo/slim";
 import { cborByteString } from "./cbor-builder.js";
@@ -84,7 +85,7 @@ export class PeriodicEventCache implements EventCache {
       return periodicResult;
     }
 
-    console.debug(`[AMRepoKeyhive] PeriodicEventCache miss for ${hashStrings.size} hashes, falling back to EventBytesCache/WASM API`);
+    log.debug(`[AMRepoKeyhive] PeriodicEventCache miss for ${hashStrings.size} hashes, falling back to EventBytesCache/WASM API`);
 
     // Fall back to event bytes cache and keyhive WASM API
     const { events, cborEvents, missingHashes } = this.eventBytesCache.getBytesFor(hashStrings);

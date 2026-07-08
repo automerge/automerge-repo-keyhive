@@ -5,16 +5,16 @@ import { encode as cborEncode, decode as cborDecode } from "cbor-x";
 import { initKeyhiveWasm } from "../src/index.js";
 import { peerIdFromVerifyingKey } from "../src/network-adapter/messages.js";
 import {
-  decodeRustKeyhiveMessage,
+  decodeSubductionKeyhiveMessage,
   decodeSukFrame,
-  encodeRustKeyhiveMessage,
+  encodeSubductionKeyhiveMessage,
   encodeSignedMessage,
   encodeSukFrame,
-  peerIdFromRust,
-  peerIdToRust,
+  peerIdFromSubduction,
+  peerIdToSubduction,
   SUK_SCHEMA,
-  type RustEncodeInput,
-} from "../src/network-adapter/rust-transport/index.js";
+  type SubductionEncodeInput,
+} from "../src/network-adapter/subduction-transport/index.js";
 
 // Rust source of truth for the wire shape:
 //   subduction_keyhive/src/wire.rs              SUK\0 + 4B BE length frame
@@ -26,7 +26,7 @@ import {
 // invariants match those Rust types, not just that we're internally
 // self-consistent.
 
-describe("rust-transport codec", () => {
+describe("subduction-transport codec", () => {
   beforeAll(() => {
     initKeyhiveWasm();
   });
@@ -97,7 +97,7 @@ describe("rust-transport codec", () => {
     it("base64-decodes the verifying key bytes and preserves them through Rust shape", () => {
       const signer = Signer.generateMemory();
       const peerId = peerIdFromVerifyingKey(signer.verifyingKey);
-      const rust = peerIdToRust(peerId);
+      const rust = peerIdToSubduction(peerId);
       // The Rust shape carries the raw 32-byte Ed25519 verifying key,
       // not the base64 form. Bytes must match the signer's key exactly.
       expect(rust.verifying_key.length).toBe(32);
@@ -106,13 +106,13 @@ describe("rust-transport codec", () => {
       );
       expect(rust.suffix).toBe(null);
       // Round-trip back to TS PeerId.
-      expect(peerIdFromRust(rust)).toBe(peerId);
+      expect(peerIdFromSubduction(rust)).toBe(peerId);
     });
 
     it("drops the dash-suffix from the wire form (suffix is local-only)", () => {
       const signer = Signer.generateMemory();
       const peerId = peerIdFromVerifyingKey(signer.verifyingKey, "my-suffix");
-      const rust = peerIdToRust(peerId);
+      const rust = peerIdToSubduction(peerId);
       // The verifying-key bytes must be the raw key, not include the suffix.
       expect(rust.verifying_key.length).toBe(32);
       expect(Array.from(rust.verifying_key)).toEqual(
@@ -121,14 +121,14 @@ describe("rust-transport codec", () => {
       // The Rust server keys peers by verifying_key alone; we must not put
       // the TS-only suffix on the wire or its peer registry rejects us.
       expect(rust.suffix).toBe(null);
-      // Round-trip drops the suffix. peerIdFromRust returns the no-suffix
+      // Round-trip drops the suffix. peerIdFromSubduction returns the no-suffix
       // form regardless of what was originally encoded.
-      expect(peerIdFromRust(rust)).toBe(peerIdFromVerifyingKey(signer.verifyingKey));
+      expect(peerIdFromSubduction(rust)).toBe(peerIdFromVerifyingKey(signer.verifyingKey));
     });
 
     it("rejects an obviously-malformed base64 portion", () => {
       // Two base64 chars decode to ~1 byte, far short of the 32 required.
-      expect(() => peerIdToRust("AB" as PeerId)).toThrow(
+      expect(() => peerIdToSubduction("AB" as PeerId)).toThrow(
         /verifying-key length/,
       );
     });
@@ -148,7 +148,7 @@ describe("rust-transport codec", () => {
     });
 
     it("emits the externally-tagged variant name as the sole top-level CBOR map key", () => {
-      const cbor = encodeRustKeyhiveMessage({
+      const cbor = encodeSubductionKeyhiveMessage({
         type: "keyhive-sync-request",
         senderId,
         targetId,
@@ -161,7 +161,7 @@ describe("rust-transport codec", () => {
     });
 
     it("places sender_id/target_id INSIDE the variant (matching the Rust enum), with raw key bytes", () => {
-      const cbor = encodeRustKeyhiveMessage({
+      const cbor = encodeSubductionKeyhiveMessage({
         type: "keyhive-sync-request",
         senderId,
         targetId,
@@ -185,7 +185,7 @@ describe("rust-transport codec", () => {
     });
 
     it("renames camelCase inline-data totals into snake_case on the Rust wire", () => {
-      const cbor = encodeRustKeyhiveMessage({
+      const cbor = encodeSubductionKeyhiveMessage({
         type: "keyhive-sync-response",
         senderId,
         targetId,
@@ -208,7 +208,7 @@ describe("rust-transport codec", () => {
     });
 
     it("renames sync-check fields (senderTotal/senderSyncpoint → sender_total/sender_syncpoint)", () => {
-      const cbor = encodeRustKeyhiveMessage({
+      const cbor = encodeSubductionKeyhiveMessage({
         type: "keyhive-sync-check",
         senderId,
         targetId,
@@ -226,7 +226,7 @@ describe("rust-transport codec", () => {
       // The Rust side deserializes sender_digest into a fixed [u8; 32], so the
       // wire value must be exactly the 32-byte XOR, not the old folded 8 bytes.
       const digest = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
-      const cbor = encodeRustKeyhiveMessage({
+      const cbor = encodeSubductionKeyhiveMessage({
         type: "keyhive-sync-check",
         senderId,
         targetId,
@@ -248,7 +248,7 @@ describe("rust-transport codec", () => {
       // all-zero field, so an old Rust peer never receives a short byte
       // string it would reject, and an all-zero digest never matches a
       // non-empty op-set.
-      const cbor = encodeRustKeyhiveMessage({
+      const cbor = encodeSubductionKeyhiveMessage({
         type: "keyhive-sync-check",
         senderId,
         targetId,
@@ -262,7 +262,7 @@ describe("rust-transport codec", () => {
     });
 
     it("renames sync-confirmation field (confirmerTotal → confirmer_total)", () => {
-      const cbor = encodeRustKeyhiveMessage({
+      const cbor = encodeSubductionKeyhiveMessage({
         type: "keyhive-sync-confirmation",
         senderId,
         targetId,
@@ -275,7 +275,7 @@ describe("rust-transport codec", () => {
     });
 
     it("contact-card variants carry no extra fields besides sender/target", () => {
-      const cbor = encodeRustKeyhiveMessage({
+      const cbor = encodeSubductionKeyhiveMessage({
         type: "keyhive-sync-request-contact-card",
         senderId,
         targetId,
@@ -290,7 +290,7 @@ describe("rust-transport codec", () => {
 
     it("decode of an unknown variant tag is rejected (not silently coerced)", () => {
       const bogus = cborEncode({ "NotARealVariant": { sender_id: { verifying_key: new Uint8Array(32), suffix: null }, target_id: { verifying_key: new Uint8Array(32), suffix: null } } });
-      expect(() => decodeRustKeyhiveMessage(bogus)).toThrow(
+      expect(() => decodeSubductionKeyhiveMessage(bogus)).toThrow(
         /unknown KeyhiveMessage variant/,
       );
     });
@@ -308,7 +308,7 @@ describe("rust-transport codec", () => {
           sync_requester_total: 3,
         },
       });
-      const out = decodeRustKeyhiveMessage(rustWireBytes);
+      const out = decodeSubductionKeyhiveMessage(rustWireBytes);
       expect(out.type).toBe("keyhive-sync-response");
       expect(out.senderId).toBe(senderId);
       expect(out.targetId).toBe(targetId);
