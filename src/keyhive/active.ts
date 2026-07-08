@@ -1,3 +1,4 @@
+import { log } from "../logging.js";
 import {
   PeerId,
   StorageAdapterInterface,
@@ -21,8 +22,7 @@ async function serializeKeyPair(keyPair: CryptoKeyPair): Promise<Uint8Array> {
 
 async function deserializeKeyPair(bytes: Uint8Array): Promise<CryptoKeyPair> {
   const decoded = new TextDecoder().decode(bytes);
-  const { publicKey: publicKeyStr, privateKey: privateKeyStr } =
-    JSON.parse(decoded);
+  const { publicKey: publicKeyStr, privateKey: privateKeyStr } = JSON.parse(decoded);
   const publicKey = await crypto.subtle.importKey(
     "jwk",
     publicKeyStr,
@@ -71,7 +71,7 @@ export async function loadOrCreateSigner(db: StorageAdapterInterface): Promise<{
       signer = await Signer.webCryptoSigner(keyPair);
       await storeActiveKeyPair(keyPair, db);
     } catch (error) {
-      console.error("[AMRepoKeyhive] Error creating signer: ", error);
+      log.error("[AMRepoKeyhive] Error creating signer: ", error);
       throw error;
     }
   }

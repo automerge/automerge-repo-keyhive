@@ -1,3 +1,4 @@
+import { log } from "../../logging.js";
 // Keyhive sync over subduction (SUK frames). Translates between the TS
 // Message shape and the Rust `KeyhiveMessage` wire format, driving
 // `SyncProtocol` for the actual sync logic.
@@ -13,18 +14,17 @@ import { Pending, PromiseQueue } from "../pending.js";
 import { SyncProtocol } from "../sync-protocol.js";
 import { EventCache } from "../event-cache.js";
 import { EventBytesOnlyEventCache } from "../event-bytes-only-event-cache.js";
-import { StandardEventCache } from "../standard-event-cache.js";
 import { PeriodicEventCache } from "../periodic-event-cache.js";
 import { peerIdFromVerifyingKey } from "../messages.js";
 import { KeyhiveStorage, receiveContactCard } from "../../keyhive/keyhive.js";
 
 import {
   KeyhiveMessageType,
-  decodeRustKeyhiveMessage,
+  decodeSubductionKeyhiveMessage,
   decodeSignedMessage,
-  encodeRustKeyhiveMessage,
+  encodeSubductionKeyhiveMessage,
   encodeSignedMessage,
-  peerIdToRust,
+  peerIdToSubduction,
 } from "./codec.js";
 
 // Cadence of the full-sync fallback. A forced full request bypasses the
@@ -42,7 +42,7 @@ const KEYHIVE_MESSAGE_TYPES: ReadonlySet<string> = new Set<KeyhiveMessageType>([
   "keyhive-sync-confirmation",
 ]);
 
-export interface KeyhiveRustAdapterOptions {
+export interface KeyhiveSubductionAdapterOptions {
   subduction: Subduction | Promise<Subduction>;
   keyhive: Keyhive;
   keyhiveStorage: KeyhiveStorage;
@@ -52,12 +52,12 @@ export interface KeyhiveRustAdapterOptions {
   localPeerId: PeerId;
   /** The remote (Rust server) peer id, learned from the subduction handshake. */
   remotePeerId: PeerId;
-  cachingMode?: "none" | "standard" | "periodic";
+  cachingMode?: "none" | "periodic";
   syncRequestInterval?: number;
   periodicallyRequestSync?: boolean;
 }
 
-export interface KeyhiveRustAdapterEvents {
+export interface KeyhiveSubductionAdapterEvents {
   "peer-candidate": (payload: { peerId: PeerId }) => void;
   "peer-disconnected": (payload: { peerId: PeerId }) => void;
   "ingest-remote": () => void;
@@ -67,7 +67,7 @@ export interface KeyhiveRustAdapterEvents {
  * Sync the local keyhive against a single Rust subduction-keyhive peer
  * using SUK-framed wire messages.
  */
-export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
+export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdapterEvents> {
   readonly localPeerId: PeerId;
   readonly remotePeerId: PeerId;
 
@@ -92,7 +92,7 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
    */
   private _connected = false;
 
-  constructor(options: KeyhiveRustAdapterOptions) {
+  constructor(options: KeyhiveSubductionAdapterOptions) {
     super();
     this.keyhive = options.keyhive;
     this.keyhiveStorage = options.keyhiveStorage;
@@ -103,7 +103,7 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
 
     // Get a PeerId instance from subduction's own module to avoid
     // cross-module wasm-bindgen instanceof failures.
-    const remotePeerBytes = peerIdToRust(options.remotePeerId).verifying_key;
+    const remotePeerBytes = peerIdToSubduction(options.remotePeerId).verifying_key;
     this.subductionReady = Promise.resolve(options.subduction).then(
       async (subduction) => {
         const wasmPeerId = await waitForPeer(subduction, remotePeerBytes);
@@ -115,7 +115,7 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     this.peers.set(this.remotePeerId, new Peer());
 
     const cachingMode = options.cachingMode ?? "periodic";
-    const syncRequestInterval = options.syncRequestInterval ?? 5000;
+    const syncRequestInterval = options.syncRequestInterval ?? 2000;
     this.syncRequestInterval = syncRequestInterval;
     this.periodicSyncEnabled = options.periodicallyRequestSync ?? false;
 
@@ -127,8 +127,8 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
         void this.keyhiveQueue
           .run(() => periodicCache.refresh(this.keyhive))
           .catch((err) =>
-            console.error(
-              "[KeyhiveRustAdapter] PeriodicEventCache refresh failed:",
+            log.error(
+              "[KeyhiveSubductionAdapter] PeriodicEventCache refresh failed:",
               err,
             ),
           );
@@ -136,13 +136,11 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
       void this.keyhiveQueue
         .run(() => periodicCache.refresh(this.keyhive))
         .catch((err) =>
-          console.error(
-            "[KeyhiveRustAdapter] Initial PeriodicEventCache refresh failed:",
+          log.error(
+            "[KeyhiveSubductionAdapter] Initial PeriodicEventCache refresh failed:",
             err,
           ),
         );
-    } else if (cachingMode === "standard") {
-      cache = new StandardEventCache();
     } else {
       cache = new EventBytesOnlyEventCache();
     }
@@ -177,8 +175,8 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
       subduction.registerFrameHandler({
         onMessage: (payload: Uint8Array, _peerId: any) => {
           void this.handleInbound(payload).catch((err) =>
-            console.error(
-              "[KeyhiveRustAdapter] inbound SUK handler failed:",
+            log.error(
+              "[KeyhiveSubductionAdapter] inbound SUK handler failed:",
               err,
             ),
           );
@@ -264,8 +262,8 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
 
   private send(message: Message, contactCard?: ContactCard): void {
     if (!message.type || !KEYHIVE_MESSAGE_TYPES.has(message.type)) {
-      console.warn(
-        `[KeyhiveRustAdapter] dropping non-keyhive message type=${message.type}`,
+      log.warn(
+        `[KeyhiveSubductionAdapter] dropping non-keyhive message type=${message.type}`,
       );
       return;
     }
@@ -281,15 +279,15 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
               subduction.sendKeyhiveMessage(bytes, wasmPeerId),
             )
             .catch((err: any) =>
-              console.warn(
-                "[KeyhiveRustAdapter] sendKeyhiveMessage failed:",
+              log.warn(
+                "[KeyhiveSubductionAdapter] sendKeyhiveMessage failed:",
                 err,
               ),
             );
         });
       } catch (err) {
-        console.error(
-          `[KeyhiveRustAdapter] failed to sign+frame (type=${message.type}):`,
+        log.error(
+          `[KeyhiveSubductionAdapter] failed to sign+frame (type=${message.type}):`,
           err,
         );
         this.pending.cancel(seqNumber);
@@ -310,7 +308,7 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     const senderId = message.senderId as PeerId;
     const targetId = message.targetId as PeerId;
 
-    const payload = encodeRustKeyhiveMessage({
+    const payload = encodeSubductionKeyhiveMessage({
       type: messageType,
       senderId,
       targetId,
@@ -331,7 +329,7 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     try {
       signedMessage = decodeSignedMessage(payload);
     } catch (err) {
-      console.error("[KeyhiveRustAdapter] bad SignedMessage CBOR:", err);
+      log.error("[KeyhiveSubductionAdapter] bad SignedMessage CBOR:", err);
       return;
     }
 
@@ -339,21 +337,21 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     try {
       signed = Signed.fromBytes(signedMessage.signed);
     } catch (err) {
-      console.error("[KeyhiveRustAdapter] Signed.fromBytes failed:", err);
+      log.error("[KeyhiveSubductionAdapter] Signed.fromBytes failed:", err);
       return;
     }
 
     if (!signed.verify()) {
-      console.error("[KeyhiveRustAdapter] signature verification failed");
+      log.error("[KeyhiveSubductionAdapter] signature verification failed");
       return;
     }
 
-    let decoded: ReturnType<typeof decodeRustKeyhiveMessage>;
+    let decoded: ReturnType<typeof decodeSubductionKeyhiveMessage>;
     try {
-      decoded = decodeRustKeyhiveMessage(signed.payload);
+      decoded = decodeSubductionKeyhiveMessage(signed.payload);
     } catch (err) {
-      console.error(
-        "[KeyhiveRustAdapter] Rust KeyhiveMessage decode failed:",
+      log.error(
+        "[KeyhiveSubductionAdapter] Rust KeyhiveMessage decode failed:",
         err,
       );
       return;
@@ -361,8 +359,8 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
 
     const verifyingKeyPeer = peerIdFromVerifyingKey(signed.verifyingKey);
     if (decoded.senderId !== verifyingKeyPeer) {
-      console.error(
-        "[KeyhiveRustAdapter] sender mismatch: payload says",
+      log.error(
+        "[KeyhiveSubductionAdapter] sender mismatch: payload says",
         decoded.senderId,
         "verifyingKey says",
         verifyingKeyPeer,
@@ -377,7 +375,7 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
           receiveContactCard(this.keyhive, contactCard, this.keyhiveStorage),
         );
       } catch (err) {
-        console.error("[KeyhiveRustAdapter] contactCard ingest failed:", err);
+        log.error("[KeyhiveSubductionAdapter] contactCard ingest failed:", err);
         // Continue. The rest of the message may still be valid.
       }
     }
@@ -396,8 +394,8 @@ export class KeyhiveRustAdapter extends EventEmitter<KeyhiveRustAdapterEvents> {
     try {
       await this.syncProtocol.dispatchByType(message, this.metrics);
     } catch (err) {
-      console.error(
-        `[KeyhiveRustAdapter] dispatchByType failed (type=${decoded.type}):`,
+      log.error(
+        `[KeyhiveSubductionAdapter] dispatchByType failed (type=${decoded.type}):`,
         err,
       );
     }

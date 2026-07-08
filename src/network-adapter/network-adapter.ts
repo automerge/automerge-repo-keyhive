@@ -1,9 +1,12 @@
+import { log } from "../logging.js";
 import {
   Message,
   NetworkAdapter,
+  type NetworkAdapterEvents,
   PeerId,
   PeerMetadata,
 } from "@automerge/automerge-repo/slim";
+import type { EventEmitter } from "eventemitter3";
 import { ContactCard, Keyhive } from "@keyhive/keyhive/slim";
 import {
   decodeKeyhiveMessageData,
@@ -13,7 +16,6 @@ import {
 import { PromiseQueue, Pending } from "./pending.js";
 import { Metrics } from "./metrics.js";
 import type { EventCache } from "./event-cache.js";
-import { StandardEventCache } from "./standard-event-cache.js";
 import { EventBytesOnlyEventCache } from "./event-bytes-only-event-cache.js";
 import { PeriodicEventCache } from "./periodic-event-cache.js";
 import { MessageBatch, BatchProcessor } from "./batch.js";
@@ -30,7 +32,7 @@ export interface KeyhiveNetworkAdapterOptions {
   keyhiveStorage: KeyhiveStorage;
   keyhiveQueue: PromiseQueue;
   periodicallyRequestSync: boolean;
-  cachingMode?: "none" | "standard" | "periodic";
+  cachingMode?: "none" | "periodic";
   // TODO: Replace with dynamic configuration
   hardcodedRemoteId?: PeerId | null;
   syncRequestInterval: number;
@@ -40,6 +42,27 @@ export interface KeyhiveNetworkAdapterOptions {
   archiveThreshold?: number;
 }
 
+// Adds the keyhive-specific "ingest-remote" event (fired when remote keyhive
+// ops are ingested) to the inherited NetworkAdapter event surface.
+export interface KeyhiveNetworkAdapter {
+  on(event: "ingest-remote", listener: () => void): this;
+  on<T extends EventEmitter.EventNames<NetworkAdapterEvents>>(
+    event: T,
+    listener: EventEmitter.EventListener<NetworkAdapterEvents, T>,
+  ): this;
+  off(event: "ingest-remote", listener: () => void): this;
+  off<T extends EventEmitter.EventNames<NetworkAdapterEvents>>(
+    event: T,
+    listener?: EventEmitter.EventListener<NetworkAdapterEvents, T>,
+  ): this;
+  emit(event: "ingest-remote"): boolean;
+  emit<T extends EventEmitter.EventNames<NetworkAdapterEvents>>(
+    event: T,
+    ...args: EventEmitter.EventArgs<NetworkAdapterEvents, T>
+  ): boolean;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class KeyhiveNetworkAdapter extends NetworkAdapter {
   private pending = new Pending();
   private peers: Map<PeerId, Peer> = new Map();
@@ -98,15 +121,13 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
       // Periodic refresh at the same interval as sync requests
       this.periodicCacheRefreshId = setInterval(() => {
         void this.keyhiveQueue.run(() => periodicCache.refresh(this.keyhive)).catch((error) =>
-          console.error("[AMRepoKeyhive] PeriodicEventCache refresh failed:", error)
+          log.error("[AMRepoKeyhive] PeriodicEventCache refresh failed:", error)
         );
       }, syncRequestInterval);
       // Initial refresh
       void this.keyhiveQueue.run(() => periodicCache.refresh(this.keyhive)).catch((error) =>
-        console.error("[AMRepoKeyhive] Initial PeriodicEventCache refresh failed:", error)
+        log.error("[AMRepoKeyhive] Initial PeriodicEventCache refresh failed:", error)
       );
-    } else if (cachingMode === "standard") {
-      cache = new StandardEventCache();
     } else {
       cache = new EventBytesOnlyEventCache();
     }
@@ -156,10 +177,10 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
 
     networkAdapter.on("peer-candidate", (payload) => {
       if (this.peerId && payload.peerId === this.peerId) {
-        console.warn(`[AMRepoKeyhive] Received peer-candidate msg with our own peerID`);
+        log.warn(`[AMRepoKeyhive] Received peer-candidate msg with our own peerID`);
         return;
       }
-      console.debug(`[AMRepoKeyhive] peer-candidate: ${payload.peerId}`);
+      log.debug(`[AMRepoKeyhive] peer-candidate: ${payload.peerId}`);
       this.emit("peer-candidate", payload);
       this.peers.set(payload.peerId, new Peer());
     });
@@ -201,7 +222,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   }
 
   connect(peerId: PeerId, peerMetadata?: PeerMetadata): void {
-    console.log(`[AMRepoKeyhive] connect: peerId=${peerId}`);
+    log.info(`[AMRepoKeyhive] connect: peerId=${peerId}`);
     this.peerId = peerId;
     this.peerMetadata = peerMetadata;
     this.networkAdapter.connect(peerId, peerMetadata);
@@ -257,7 +278,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     }
     if (message.type?.startsWith("keyhive-")) {
       void this.signAndSend(message, contactCard).catch((error) =>
-        console.error(`[AMRepoKeyhive] Failed to sign and send (type=${message.type}):`, error)
+        log.error(`[AMRepoKeyhive] Failed to sign and send (type=${message.type}):`, error)
       );
     } else {
       this.networkAdapter.send(message);
@@ -286,7 +307,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         this.networkAdapter.send(message);
       });
     } catch (error) {
-      console.error(
+      log.error(
         `[AMRepoKeyhive] asyncSignAndSend FAILED for seq=${seqNumber}, type=${message.type}:`,
         error
       );
@@ -300,7 +321,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         this.hardcodedRemoteId &&
         message.senderId !== this.hardcodedRemoteId
       ) {
-        console.debug(
+        log.debug(
           `[AMRepoKeyhive] Unknown remote peer ${message.senderId}. Ignoring message!`
         );
         return;
@@ -341,11 +362,11 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
                 this.emit("message", message);
               }
             }).catch((error) =>
-              console.error(`[AMRepoKeyhive] Error handling message (type=${message.type}, from=${message.senderId}):`, error)
+              log.error(`[AMRepoKeyhive] Error handling message (type=${message.type}, from=${message.senderId}):`, error)
             );
           }
         } else {
-          console.error(
+          log.error(
             `[AMRepoKeyhive] verifyData FAILED for type=${message.type} from=${message.senderId} doc=${(message as any).documentId}`
           );
         }
@@ -353,7 +374,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         this.emit("message", message);
       }
     } catch (e) {
-      console.error("[AMRepoKeyhive] Could not decode signed message:", e);
+      log.error("[AMRepoKeyhive] Could not decode signed message:", e);
       return;
     }
   }
@@ -374,7 +395,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
     void this.keyhiveQueue.run(async () => {
       await this.keyhiveStorage.compact(this.keyhive);
     }).catch((error) =>
-      console.error("[AMRepoKeyhive] Compaction failed:", error)
+      log.error("[AMRepoKeyhive] Compaction failed:", error)
     );
   }
 }

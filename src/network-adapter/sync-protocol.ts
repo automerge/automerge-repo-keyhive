@@ -1,3 +1,4 @@
+import { log } from "../logging.js";
 import {
   Message,
   PeerId,
@@ -151,7 +152,7 @@ export class SyncProtocol {
       includeContactCard,
       attemptRecovery
     ).catch((error) =>
-      console.error("[AMRepoKeyhive] Sync initiation failed:", error)
+      log.error("[AMRepoKeyhive] Sync initiation failed:", error)
     );
   }
 
@@ -165,7 +166,7 @@ export class SyncProtocol {
     }
     this.syncRequestQueued = true;
     void this.initiateKeyhiveSync(peerId, false, false).catch((error) =>
-      console.error("[AMRepoKeyhive] Periodic sync failed:", error)
+      log.error("[AMRepoKeyhive] Periodic sync failed:", error)
     ).finally(() => {
       this.syncRequestQueued = false;
     });
@@ -181,7 +182,7 @@ export class SyncProtocol {
     }
     this.fullSyncRequestQueued = true;
     void this.initiateKeyhiveSync(peerId, false, false, true).catch((error) =>
-      console.error("[AMRepoKeyhive] Full sync failed:", error)
+      log.error("[AMRepoKeyhive] Full sync failed:", error)
     ).finally(() => {
       this.fullSyncRequestQueued = false;
     });
@@ -212,7 +213,7 @@ export class SyncProtocol {
 
     await this.keyhiveQueue.run(async () => {
       if (attemptRecovery) {
-        console.debug(
+        log.debug(
           "[AMRepoKeyhive] Preparing for keyhive sync. Reading from storage"
         );
         try {
@@ -225,7 +226,7 @@ export class SyncProtocol {
             this.emitEvent("ingest-remote");
           }
         } catch (error) {
-          console.error(`[AMRepoKeyhive] Unable to ingest from storage: ${error}`);
+          log.error(`[AMRepoKeyhive] Unable to ingest from storage: ${error}`);
         }
       }
       let senderId: PeerId;
@@ -237,17 +238,17 @@ export class SyncProtocol {
 
       let maybeContactCard: ContactCard | undefined;
       if (includeContactCard) {
-        console.debug("[AMRepoKeyhive] Including Contact Card in sync message.")
+        log.debug("[AMRepoKeyhive] Including Contact Card in sync message.")
         maybeContactCard = this.contactCard;
       }
 
-      console.debug(`[AMRepoKeyhive] Syncing with ${this.peers.size} peers`);
+      log.debug(`[AMRepoKeyhive] Syncing with ${this.peers.size} peers`);
       for (const targetId of this.peers.keys()) {
         if (targetId === senderId || targetId === peerId) {
           continue;
         }
         if (!this.readyToSendKeyhiveRequest(targetId)) {
-          console.debug(`[AMRepoKeyhive] Attempted to send keyhive sync request to ${targetId} too soon. Ignoring.`);
+          log.debug(`[AMRepoKeyhive] Attempted to send keyhive sync request to ${targetId} too soon. Ignoring.`);
           continue;
         }
 
@@ -255,7 +256,7 @@ export class SyncProtocol {
         const targetKeyhiveId = keyhiveIdentifierFromPeerId(targetId);
         const targetAgent = await this.keyhive.getAgent(targetKeyhiveId);
         if (!targetAgent) {
-          console.debug(`[AMRepoKeyhive] Requesting ContactCard from ${targetId}`);
+          log.debug(`[AMRepoKeyhive] Requesting ContactCard from ${targetId}`);
           if (!maybeContactCard) {
             maybeContactCard = this.contactCard;
           }
@@ -283,7 +284,7 @@ export class SyncProtocol {
               targetId: targetId,
               data: data,
             };
-            console.debug(
+            log.debug(
               `[AMRepoKeyhive] Sending keyhive sync check to ${targetId} from ${senderId}: senderTotal=${senderTotal}, senderSyncpoint=${peer.syncpoint}`
             );
             this.getMetrics().recordSyncCheckSent();
@@ -303,7 +304,7 @@ export class SyncProtocol {
               targetId: targetId,
               data: data,
             };
-            console.debug(
+            log.debug(
               `[AMRepoKeyhive] Sending keyhive sync request to ${targetId} from ${senderId} with ${opHashes.length} local operations and ${pendingOpHashes.length} pending operations.`
             );
             this.sendMessage(message, maybeContactCard);
@@ -323,11 +324,11 @@ export class SyncProtocol {
   // peer.
   private async sendKeyhiveSyncResponse(message: Message, metrics: Metrics): Promise<void> {
     if (!("data" in message) || !message.data) {
-      console.error("[AMRepoKeyhive] Expected data in keyhive-sync-request");
+      log.error("[AMRepoKeyhive] Expected data in keyhive-sync-request");
       return;
     }
     if (message.type !== "keyhive-sync-request") {
-      console.error(
+      log.error(
         `[AMRepoKeyhive] Expected keyhive-sync-request, but got ${message.type}`
       );
       return;
@@ -338,7 +339,7 @@ export class SyncProtocol {
     const peerFoundHashes: Uint8Array[] = requestData.found || [];
     const peerPendingHashes: Uint8Array[] = requestData.pending || [];
 
-    console.debug(
+    log.debug(
       `[AMRepoKeyhive] Received keyhive sync request from ${message.senderId} with ${peerFoundHashes.length} found hashes, ${peerPendingHashes.length} pending hashes`
     );
 
@@ -346,7 +347,7 @@ export class SyncProtocol {
     await this.keyhiveQueue.run(async () => {
       metrics.recordQueueWait(Date.now() - queueEnterTime);
       if (!this.readyToSendKeyhiveResponse(message.senderId)) {
-        console.debug(`[AMRepoKeyhive] Received next keyhive sync request too soon from ${message.senderId}. Ignoring.`);
+        log.debug(`[AMRepoKeyhive] Received next keyhive sync request too soon from ${message.senderId}. Ignoring.`);
         return;
       }
 
@@ -354,7 +355,7 @@ export class SyncProtocol {
       const senderKeyhiveId = keyhiveIdentifierFromPeerId(message.senderId);
       const senderAgent = await this.keyhive.getAgent(senderKeyhiveId);
       if (!senderAgent) {
-        console.debug(
+        log.debug(
           `[AMRepoKeyhive] No agent found for ${message.senderId}, sending keyhive-sync-request-contact-card`
         );
         const response = {
@@ -366,7 +367,7 @@ export class SyncProtocol {
       } else {
         const localHashes = await this.getHashesForPeerPair(peerId, message.senderId, metrics);
         const pendingOpHashes = await this.cache.getPendingOpHashes(this.keyhive, metrics);
-        console.debug(
+        log.debug(
           `[AMRepoKeyhive] asyncSendKeyhiveSyncResponse: Found ${localHashes.size} total local operation hashes for ${message.senderId} and ${pendingOpHashes.length} total pending hashes`
         );
 
@@ -407,7 +408,7 @@ export class SyncProtocol {
         metrics.recordOpsSent(foundResult.events.length);
         metrics.recordOpsRequested(requested.length);
 
-        console.debug(
+        log.debug(
           `[AMRepoKeyhive] Found ${foundResult.events.length} ops to send to and ${requested.length} ops to request from ${message.senderId}`
         );
 
@@ -421,7 +422,7 @@ export class SyncProtocol {
           targetId: message.senderId,
           data,
         };
-        console.debug(
+        log.debug(
           `[AMRepoKeyhive] Sending keyhive sync response to ${message.senderId} from ${peerId}`
         );
         this.sendMessage(response);
@@ -437,11 +438,11 @@ export class SyncProtocol {
   // for the requested hashes and send them to the requesting peer.
   private async sendKeyhiveSyncOps(message: Message, metrics: Metrics): Promise<void> {
     if (!("data" in message) || !message.data) {
-      console.error("[AMRepoKeyhive] Expected data in keyhive-sync-response");
+      log.error("[AMRepoKeyhive] Expected data in keyhive-sync-response");
       return;
     }
     if (message.type !== "keyhive-sync-response") {
-      console.error(
+      log.error(
         `[AMRepoKeyhive] Expected keyhive-sync-response, but got ${message.type}`
       );
       return;
@@ -454,7 +455,7 @@ export class SyncProtocol {
     const syncResponderTotal: number | undefined = responseData.syncResponderTotal;
     const syncRequesterTotal: number | undefined = responseData.syncRequesterTotal;
 
-    console.debug(
+    log.debug(
       `[AMRepoKeyhive] Received keyhive sync response from ${message.senderId}: ${foundEvents.length} ops found, ${requestedHashes.length} ops requested`
     );
 
@@ -472,20 +473,20 @@ export class SyncProtocol {
         const requestedResult = await this.cache.getEventBytesForPeer(this.keyhive, peerId, requestedHashStrings, metrics);
 
         if (requestedResult.events.length === 0) {
-          console.debug(
+          log.debug(
             `[AMRepoKeyhive] 0 ops requested by ${message.senderId}`
           );
           // Fall through to confirmation below
         } else {
           if (requestedResult.events.length < requestedHashes.length) {
-            console.warn(
+            log.warn(
               `[AMRepoKeyhive] ${requestedHashes.length} keyhive events requested, ${requestedResult.events.length} found.`
             );
           }
 
           metrics.recordOpsSent(requestedResult.events.length);
 
-          console.debug(
+          log.debug(
             `[AMRepoKeyhive] Sending ${requestedResult.events.length} requested ops to ${message.senderId}`
           );
 
@@ -530,14 +531,14 @@ export class SyncProtocol {
     message: Message
   ): Promise<void> {
     if (message.type !== "keyhive-sync-request-contact-card") {
-      console.error(
+      log.error(
         `[AMRepoKeyhive] Expected keyhive-sync-request-contact-card, but got ${message.type}`
       );
       return;
     }
     const peerId = this.requirePeerId();
 
-    console.debug(
+    log.debug(
       `[AMRepoKeyhive] Sending keyhive-sync-missing-contact-card to ${message.senderId}`
     );
 
@@ -552,11 +553,11 @@ export class SyncProtocol {
   // Receive ops sent by a peer.
   private async receiveKeyhiveSyncOps(message: Message, metrics: Metrics): Promise<void> {
     if (!("data" in message) || !message.data) {
-      console.error("[AMRepoKeyhive] Expected data in keyhive-sync-ops");
+      log.error("[AMRepoKeyhive] Expected data in keyhive-sync-ops");
       return;
     }
     if (message.type !== "keyhive-sync-ops") {
-      console.error(
+      log.error(
         `[AMRepoKeyhive] Expected keyhive-sync-ops, but got ${message.type}`
       );
       return;
@@ -577,7 +578,7 @@ export class SyncProtocol {
       syncRequesterTotal = decoded.syncRequesterTotal;
     }
 
-    console.debug(
+    log.debug(
       `[AMRepoKeyhive] Received ${receivedEvents.length} keyhive events`
     );
 
@@ -617,7 +618,7 @@ export class SyncProtocol {
     metrics: Metrics,
   ): Promise<void> {
     if (!("data" in message) || !message.data) {
-      console.error("[AMRepoKeyhive] Expected data in keyhive-sync-check");
+      log.error("[AMRepoKeyhive] Expected data in keyhive-sync-check");
       return;
     }
     const peerId = this.requirePeerId();
@@ -637,7 +638,7 @@ export class SyncProtocol {
       if (!peer) {
         // Auto-register the peer if we receive a sync check from an unknown
         // sender.
-        console.debug(
+        log.debug(
           `[AMRepoKeyhive] Auto-registering peer from sync-check: ${message.senderId}`
         );
         peer = new Peer();
@@ -655,7 +656,7 @@ export class SyncProtocol {
       const digestsMatch = arraysEqual(ourDigest, theirDigest);
 
       if (ourSyncpointMatchesTheirTotal && theirSyncpointMatchesOurTotal && digestsMatch) {
-        console.debug(
+        log.debug(
           `[AMRepoKeyhive] Sync check PASS (short-circuit) for ${message.senderId}: ` +
             `ourTotalForThem=${ourTotalForThem} theirTotalForUs=${theirTotalForUs} ` +
             `ourSyncpoint=${peer.syncpoint ?? "null"} theirSyncpoint=${theirSyncpoint} ` +
@@ -666,7 +667,7 @@ export class SyncProtocol {
       }
 
       // Counts or digest mismatch. Start full sync request
-      console.debug(
+      log.debug(
         `[AMRepoKeyhive] Sync check FALLBACK (full-sync) for ${message.senderId}: ` +
           `ourTotalForThem=${ourTotalForThem} theirTotalForUs=${theirTotalForUs} ` +
           `ourSyncpoint=${peer.syncpoint ?? "null"} theirSyncpoint=${theirSyncpoint} ` +
@@ -697,7 +698,7 @@ export class SyncProtocol {
     metrics: Metrics,
   ): Promise<void> {
     if (!("data" in message) || !message.data) {
-      console.error("[AMRepoKeyhive] Expected data in keyhive-sync-confirmation");
+      log.error("[AMRepoKeyhive] Expected data in keyhive-sync-confirmation");
       return;
     }
 
@@ -709,7 +710,7 @@ export class SyncProtocol {
     const peer = this.peers.get(message.senderId);
     if (peer) {
       peer.syncpoint = confirmerTotal;
-      console.debug(
+      log.debug(
         `[AMRepoKeyhive] Updated syncpoint for ${message.senderId}: ${confirmerTotal}`
       );
     }
@@ -718,7 +719,7 @@ export class SyncProtocol {
   // Returns true if ingestion succeeded (even if some events are still pending).
   // Returns false if ingestion threw an unrecoverable error.
   private async ingestAndRetry(events: Uint8Array[], senderId: PeerId, metrics: Metrics): Promise<boolean> {
-    console.debug(
+    log.debug(
       `[AMRepoKeyhive] Ingesting ${events.length} keyhive events from ${senderId}`
     );
 
@@ -729,12 +730,12 @@ export class SyncProtocol {
           this.keyhive.ingestEventsBytes(events)
         );
       } catch (error) {
-        console.error(`[AMRepoKeyhive] Error ingesting events: ${error}`);
+        log.error(`[AMRepoKeyhive] Error ingesting events: ${error}`);
       }
 
       if (pendingEvents) {
         metrics.recordIngestion(events.length, pendingEvents.length);
-        console.debug(
+        log.debug(
           `[AMRepoKeyhive] After ingestion: ${pendingEvents.length} pending events`
         );
       }
@@ -744,7 +745,7 @@ export class SyncProtocol {
       // by a separate tab in a browser).
       if (!pendingEvents || pendingEvents.length > 0) {
         if (pendingEvents) {
-          console.warn(
+          log.warn(
             `[AMRepoKeyhive] ${pendingEvents.length} events stuck in pending${this.retryPendingFromStorage ? ". Reading from storage" : ""}`
           );
         }
@@ -757,16 +758,16 @@ export class SyncProtocol {
               this.keyhive.ingestEventsBytes(events)
             );
             if (retryPending.length === 0) {
-              console.debug(
+              log.debug(
                 `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
               );
             } else {
-              console.warn(
+              log.warn(
                 `[AMRepoKeyhive] Still have ${retryPending.length} pending events after reading from storage`
               );
             }
           } catch (storageError) {
-            console.error(
+            log.error(
               `[AMRepoKeyhive] Failed while reading from storage:`,
               storageError
             );
@@ -776,15 +777,15 @@ export class SyncProtocol {
 
       // For large batches, write the full archive instead of individual events.
       if (events.length > this.archiveThreshold) {
-        console.debug(
+        log.debug(
           `[AMRepoKeyhive] Large batch (${events.length} > ${this.archiveThreshold}): saving full archive instead of individual events`
         );
         void this.keyhiveStorage.saveKeyhiveWithHash(this.keyhive).catch((error) =>
-          console.error("[AMRepoKeyhive] Failed to save archive after large batch:", error)
+          log.error("[AMRepoKeyhive] Failed to save archive after large batch:", error)
         );
       } else {
         void this.saveReceivedEvents(events).catch((error) =>
-          console.error("[AMRepoKeyhive] Failed to save received events:", error)
+          log.error("[AMRepoKeyhive] Failed to save received events:", error)
         );
       }
       this.cache.onKeyhiveChanged();
@@ -806,10 +807,10 @@ export class SyncProtocol {
       try {
         await this.keyhiveStorage.saveEventBytesWithHash(event);
       } catch (error) {
-        console.error("[AMRepoKeyhive] Failed to save received event:", error);
+        log.error("[AMRepoKeyhive] Failed to save received event:", error);
       }
     }
-    console.debug(
+    log.debug(
       `[AMRepoKeyhive] Saved ${events.length} received events to storage`
     );
   }
@@ -823,7 +824,7 @@ export class SyncProtocol {
     const errorMessage =
       jsError instanceof Error ? jsError.message : String(jsError);
 
-    console.error(
+    log.error(
       `[AMRepoKeyhive] Error while ingesting events from ${senderId}: ${errorMessage}`
     );
   }

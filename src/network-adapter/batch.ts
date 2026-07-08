@@ -1,3 +1,4 @@
+import { log } from "../logging.js";
 import type { Message } from "@automerge/automerge-repo/slim";
 import type { Keyhive } from "@keyhive/keyhive/slim";
 import type { KeyhiveMessageData, KeyhiveMessage } from "./messages.js";
@@ -70,7 +71,7 @@ export class BatchProcessor {
         await this.handleMessage(msg, data, batch.metrics);
         batch.metrics.recordProcessingTimeByType(msg.type ?? "unknown", Date.now() - msgStart);
       } catch (error) {
-        console.error(`[AMRepoKeyhive] Error processing batch message (type=${msg.type}, from=${msg.senderId}):`, error);
+        log.error(`[AMRepoKeyhive] Error processing batch message (type=${msg.type}, from=${msg.senderId}):`, error);
       }
     }
     batch.metrics.recordProcessingTime(Date.now() - startTime);
