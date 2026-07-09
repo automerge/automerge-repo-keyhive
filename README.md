@@ -36,8 +36,10 @@ const { hive, repo } = await initializeAutomergeRepoKeyhive({
   },
 });
 
-// Documents created through the repo are keyhive-protected.
-const handle = repo.create({ title: "hello" });
+// Documents created with `create2` use the repo's id factory, so they get a
+// keyhive document id and are keyhive-protected. `repo.create` bypasses the
+// id factory and produces an unprotected document.
+const handle = await repo.create2({ title: "hello" });
 
 // Let the sync server relay the (encrypted) document, then grant a
 // collaborator access using the contact card they shared with you.
