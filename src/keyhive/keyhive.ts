@@ -269,7 +269,7 @@ async function buildLegacyHive(options: {
   peerIdSuffix: string;
   networkAdapter: NetworkAdapter;
   automaticArchiveIngestion?: boolean;
-  restrictKeyhiveSyncToSyncServer?: boolean;
+  onlyShareWithSyncServer?: boolean;
   periodicallyRequestSync?: boolean;
   cachingMode?: "none" | "periodic";
   keyPair?: CryptoKeyPair;
@@ -282,7 +282,7 @@ async function buildLegacyHive(options: {
 }): Promise<LegacyAutomergeRepoKeyhive> {
   const {
     automaticArchiveIngestion = true,
-    restrictKeyhiveSyncToSyncServer = false,
+    onlyShareWithSyncServer = false,
     periodicallyRequestSync = true,
     cachingMode = "none" as "none" | "periodic",
     syncRequestInterval = 2000,
@@ -300,15 +300,15 @@ async function buildLegacyHive(options: {
     wrapOptions = {},
   ) => {
     const {
-      restrictKeyhiveSyncToSyncServer: restrictToServer = false,
+      onlyShareWithSyncServer: onlyServer = false,
       periodicallyRequestSync: periodicSync = false,
       syncRequestInterval: interval = 2000,
       batchInterval: batchIntervalOverride,
       archiveThreshold: archiveThresholdOverride,
     } = wrapOptions;
-    if (restrictToServer && !serverPeerIdHardcoded) {
+    if (onlyServer && !serverPeerIdHardcoded) {
       throw new Error(
-        'restrictKeyhiveSyncToSyncServer requires a configured sync server (syncServer is "none")'
+        'onlyShareWithSyncServer requires a configured sync server (syncServer is "none")'
       );
     }
 
@@ -320,7 +320,7 @@ async function buildLegacyHive(options: {
       keyhiveQueue,
       periodicallyRequestSync: periodicSync,
       cachingMode,
-      hardcodedRemoteId: restrictToServer ? serverPeerIdHardcoded : null,
+      hardcodedRemoteId: onlyServer ? serverPeerIdHardcoded : null,
       syncRequestInterval: interval,
       batchInterval: batchIntervalOverride,
       retryPendingFromStorage,
@@ -330,7 +330,7 @@ async function buildLegacyHive(options: {
   };
 
   const keyhiveNetworkAdapter = createKeyhiveNetworkAdapter(options.networkAdapter, {
-    restrictKeyhiveSyncToSyncServer,
+    onlyShareWithSyncServer,
     periodicallyRequestSync,
     syncRequestInterval,
     batchInterval,
@@ -410,7 +410,7 @@ async function buildHive(options: {
     wrapOptions = {},
   ) => {
     const {
-      restrictKeyhiveSyncToSyncServer: restrictToServer = false,
+      onlyShareWithSyncServer: onlyServer = false,
       periodicallyRequestSync: periodicSync = false,
       syncRequestInterval: interval = 2000,
       batchInterval: batchIntervalOverride,
@@ -424,7 +424,7 @@ async function buildHive(options: {
       keyhiveQueue,
       periodicallyRequestSync: periodicSync,
       cachingMode,
-      hardcodedRemoteId: restrictToServer ? serverPeerIdHardcoded : null,
+      hardcodedRemoteId: onlyServer ? serverPeerIdHardcoded : null,
       syncRequestInterval: interval,
       batchInterval: batchIntervalOverride,
       retryPendingFromStorage: true,

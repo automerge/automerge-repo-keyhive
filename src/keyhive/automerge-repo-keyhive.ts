@@ -33,8 +33,11 @@ import { KeyhiveSubductionAdapter } from "../network-adapter/subduction-transpor
 
 /** Options for wrapping an additional raw network adapter. */
 export interface WrapNetworkAdapterOptions {
-  /** Restrict keyhive sync on this adapter to the configured sync server. Default false. */
-  restrictKeyhiveSyncToSyncServer?: boolean;
+  /**
+   * Share only with the configured sync server. Messages from any other peer on
+   * this adapter are ignored, so nothing is exchanged with them. Default false.
+   */
+  onlyShareWithSyncServer?: boolean;
   /** Request keyhive sync from this adapter's peers on an interval. Default false. */
   periodicallyRequestSync?: boolean;
   /** Interval for periodic sync requests in ms. Default 2000. */
