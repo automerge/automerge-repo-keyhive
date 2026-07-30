@@ -263,6 +263,14 @@ export abstract class AutomergeRepoKeyhiveBase {
    */
   protected abstract syncServerIdentifierHex(): string | null;
 
+  /** Grant the configured sync server relay access to a document. */
+  abstract addSyncServerRelayToDoc(docUrl: AutomergeUrl): Promise<void>;
+
+  /** @deprecated */
+  async addSyncServerPullToDoc(docUrl: AutomergeUrl): Promise<void> {
+    return this.addSyncServerRelayToDoc(docUrl);
+  }
+
   async stats(): Promise<Stats> {
     return await this.keyhive.stats();
   }
