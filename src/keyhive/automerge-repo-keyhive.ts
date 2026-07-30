@@ -216,10 +216,27 @@ export abstract class AutomergeRepoKeyhiveBase {
     return await this.keyhive.accessForDoc(publicId, docId);
   }
 
+  /**
+   * The document's keyhive id. Accepts a `DocumentId` as well as an
+   * `AutomergeUrl` because tool bundles built against 0.3 still pass an
+   * `DocumentId`.
+   */
+  private toDocId(
+    docUrlOrId: AutomergeUrl | KeyhiveDocumentId
+  ): KeyhiveDocumentId {
+    return typeof docUrlOrId === "string"
+      ? docIdFromAutomergeUrl(docUrlOrId)
+      : docUrlOrId;
+  }
+
   /** `id`'s direct access to the document or undefined if none (including for unprotected docs). */
-  async accessForDoc(id: Identifier, docUrl: AutomergeUrl): Promise<Access | undefined> {
-    if (isUnprotectedDoc(docUrl)) return undefined;
-    return await this.keyhive.accessForDoc(id, docIdFromAutomergeUrl(docUrl));
+  async accessForDoc(
+    id: Identifier,
+    docUrl: AutomergeUrl | KeyhiveDocumentId
+  ): Promise<Access | undefined> {
+    const docId = this.toDocId(docUrl);
+    if (isUnprotectedDocId(docId.toBytes())) return undefined;
+    return await this.keyhive.accessForDoc(id, docId);
   }
 
   /**
@@ -232,9 +249,12 @@ export abstract class AutomergeRepoKeyhiveBase {
   }
 
   /** All member capabilities for the document (empty for unprotected docs). */
-  async docMemberCapabilities(docUrl: AutomergeUrl): Promise<Membership[]> {
-    if (isUnprotectedDoc(docUrl)) return [];
-    return await this.keyhive.docMemberCapabilities(docIdFromAutomergeUrl(docUrl));
+  async docMemberCapabilities(
+    docUrl: AutomergeUrl | KeyhiveDocumentId
+  ): Promise<Membership[]> {
+    const docId = this.toDocId(docUrl);
+    if (isUnprotectedDocId(docId.toBytes())) return [];
+    return await this.keyhive.docMemberCapabilities(docId);
   }
 
   /**
