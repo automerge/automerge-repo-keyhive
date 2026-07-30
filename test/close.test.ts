@@ -42,7 +42,7 @@ async function buildHive(debounceMs: number) {
     (() => {
       throw new Error("createKeyhiveNetworkAdapter is unused in this test");
     }) as any,
-    { trackedDocIds: [] as string[] } as any,
+    { trackedDocIds: [] as string[], docIdsAwaitingPcsKey: [] as string[] } as any,
   );
   hive.linkRepo(repo, { debounceMs });
 

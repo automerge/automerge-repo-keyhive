@@ -555,6 +555,8 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
     const docIds = new Set([
       ...this.blobInterceptor.trackedDocIds,
       ...this.#docsWithLocalMembershipChanges,
+      // Never encrypted, so absent from trackedDocIds.
+      ...this.blobInterceptor.docIdsAwaitingPcsKey,
     ]);
     for (const documentId of docIds) {
       try {

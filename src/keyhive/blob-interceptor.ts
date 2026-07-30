@@ -36,6 +36,8 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   #storage?: StorageAdapterInterface;
   #lastPcsKeyHash: Map<string, Uint8Array> = new Map();
   #persistQueued = false;
+  // Docs dropped because of a missing PCS key. A rotation will restore it.
+  #docsAwaitingPcsKey: Set<string> = new Set();
 
   // Hashes of leaf-secret storage entries already imported into this keyhive,
   // so a miss only imports entries it hasn't seen.
@@ -143,6 +145,10 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     return [...this.#lastPcsKeyHash.keys()];
   }
 
+  get docIdsAwaitingPcsKey(): string[] {
+    return [...this.#docsAwaitingPcsKey];
+  }
+
   lastPcsKeyHashForDoc(documentId: string): Uint8Array | undefined {
     return this.#lastPcsKeyHash.get(documentId);
   }
@@ -175,12 +181,14 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
           // Either a sibling's rotation we cannot see yet or a member add
           // that invalidated the key (the membership nudge rotation restores
           // the key in that case).
+          this.#docsAwaitingPcsKey.add(documentId);
           log.debug(
             `[KeyhiveBlobInterceptor] transformOutgoing: no derivable PCS key for ${documentId} (even after importing leaf secrets); dropping outgoing blob (a later save retries)`
           );
           return null;
         }
       }
+      this.#docsAwaitingPcsKey.delete(documentId);
       const contentRef = new ChangeId(blake3(blob));
       const result = await this.#keyhive.tryEncryptKeyed(doc, contentRef, [], blob);
       this.#onEncrypted?.();
