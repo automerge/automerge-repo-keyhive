@@ -103,5 +103,5 @@ export async function storeActiveKeyPair(
   keyPair: CryptoKeyPair,
   db: StorageAdapterInterface
 ): Promise<void> {
-  db.save([ACTIVE_DB_KEY], await serializeKeyPair(keyPair));
+  return db.save([ACTIVE_DB_KEY], await serializeKeyPair(keyPair));
 }
