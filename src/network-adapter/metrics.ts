@@ -28,7 +28,11 @@ export class Metrics {
   private syncConfirmationsSent = 0;
   private syncConfirmationsReceived = 0;
 
-  recordMessage(msgType: string | undefined, senderId: string | undefined, payloadBytes: number) {
+  recordMessage(
+    msgType: string | undefined,
+    senderId: string | undefined,
+    payloadBytes: number
+  ) {
     const type = msgType ?? "unknown";
     this.msgTypeCounts[type] = (this.msgTypeCounts[type] ?? 0) + 1;
     this.totalPayloadBytes += payloadBytes;
@@ -49,7 +53,8 @@ export class Metrics {
   }
 
   recordProcessingTimeByType(msgType: string, ms: number) {
-    this.processingTimeByType[msgType] = (this.processingTimeByType[msgType] ?? 0) + ms;
+    this.processingTimeByType[msgType] =
+      (this.processingTimeByType[msgType] ?? 0) + ms;
   }
 
   recordTotalOps(ops: bigint) {
@@ -94,12 +99,24 @@ export class Metrics {
     this.opsRequested += count;
   }
 
-  recordSyncCheckSent() { this.syncChecksSent++; }
-  recordSyncCheckReceived() { this.syncChecksReceived++; }
-  recordSyncCheckShortCircuited() { this.syncChecksShortCircuited++; }
-  recordSyncCheckFallback() { this.syncChecksFallback++; }
-  recordSyncConfirmationSent() { this.syncConfirmationsSent++; }
-  recordSyncConfirmationReceived() { this.syncConfirmationsReceived++; }
+  recordSyncCheckSent() {
+    this.syncChecksSent++;
+  }
+  recordSyncCheckReceived() {
+    this.syncChecksReceived++;
+  }
+  recordSyncCheckShortCircuited() {
+    this.syncChecksShortCircuited++;
+  }
+  recordSyncCheckFallback() {
+    this.syncChecksFallback++;
+  }
+  recordSyncConfirmationSent() {
+    this.syncConfirmationsSent++;
+  }
+  recordSyncConfirmationReceived() {
+    this.syncConfirmationsReceived++;
+  }
 
   hasActivity(): boolean {
     return this.messageCount > 0 || this.nonKeyhiveCount > 0;
@@ -112,25 +129,24 @@ export class Metrics {
       .join(", ");
     log.debug(
       `[${label}] ${this.messageCount} keyhive messages from ${this.uniqueSenders.size} peers at ${new Date().toLocaleTimeString("en-GB")}. ` +
-      `${this.droppedSyncRequests} duplicate sync requests dropped. ` +
-      `${this.nonKeyhiveCount} non-keyhive messages. ` +
-      `Breakdown: ${countsStr}. Total payload: ${this.totalPayloadBytes} bytes. ` +
-      `Processing: ${this.totalProcessingTimeMs}ms.`
+        `${this.droppedSyncRequests} duplicate sync requests dropped. ` +
+        `${this.nonKeyhiveCount} non-keyhive messages. ` +
+        `Breakdown: ${countsStr}. Total payload: ${this.totalPayloadBytes} bytes. ` +
+        `Processing: ${this.totalProcessingTimeMs}ms.`
     );
     const perTypeStr = Object.entries(this.processingTimeByType)
       .map(([type, ms]) => `${type}=${ms}ms`)
       .join(", ");
     log.debug(
       `[${label}+] Per-type: ${perTypeStr}. ` +
-      `Lookups: hash=${this.hashLookupTimeMs}ms, event=${this.eventLookupTimeMs}ms. ` +
-      `Cache: ${this.cacheHits}/${this.cacheMisses} hit/miss. ` +
-      `Queue wait: ${this.totalQueueWaitMs}ms. ` +
-      `Ingestion: ${this.ingestCount}x, ${this.eventsIngested} events, ${this.pendingAfterIngest} pending, ${this.storageRetries} retries. ` +
-      `Ops: ${this.opsSent} sent, ${this.opsRequested} requested. ` +
-      `Sync checks: ${this.syncChecksSent} sent, ${this.syncChecksReceived} rcvd, ${this.syncChecksShortCircuited} short-circuited, ${this.syncChecksFallback} fallback. ` +
-      `Confirmations: ${this.syncConfirmationsSent} sent, ${this.syncConfirmationsReceived} rcvd. ` +
-      `Total ops: ${this.totalOps}`
+        `Lookups: hash=${this.hashLookupTimeMs}ms, event=${this.eventLookupTimeMs}ms. ` +
+        `Cache: ${this.cacheHits}/${this.cacheMisses} hit/miss. ` +
+        `Queue wait: ${this.totalQueueWaitMs}ms. ` +
+        `Ingestion: ${this.ingestCount}x, ${this.eventsIngested} events, ${this.pendingAfterIngest} pending, ${this.storageRetries} retries. ` +
+        `Ops: ${this.opsSent} sent, ${this.opsRequested} requested. ` +
+        `Sync checks: ${this.syncChecksSent} sent, ${this.syncChecksReceived} rcvd, ${this.syncChecksShortCircuited} short-circuited, ${this.syncChecksFallback} fallback. ` +
+        `Confirmations: ${this.syncConfirmationsSent} sent, ${this.syncConfirmationsReceived} rcvd. ` +
+        `Total ops: ${this.totalOps}`
     );
   }
-
 }

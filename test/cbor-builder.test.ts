@@ -90,19 +90,32 @@ describe("buildCborByteStringArray", () => {
 describe("buildSyncResponseCbor", () => {
   it("decodes to empty response", () => {
     const manual = buildSyncResponseCbor([], []);
-    const decoded = decode(Buffer.from(manual)) as { requested: any[]; found: any[] };
+    const decoded = decode(Buffer.from(manual)) as {
+      requested: any[];
+      found: any[];
+    };
     expect(decoded.requested).toEqual([]);
     expect(decoded.found).toEqual([]);
   });
 
   it("decodes to same values as cbor-x encode", () => {
     const requested = [randomBytes(32, 10), randomBytes(32, 20)];
-    const found = [randomBytes(150, 30), randomBytes(200, 40), randomBytes(100, 50)];
+    const found = [
+      randomBytes(150, 30),
+      randomBytes(200, 40),
+      randomBytes(100, 50),
+    ];
     const cborFound = found.map(cborByteString);
 
     const manual = buildSyncResponseCbor(requested, cborFound);
-    const decoded = decode(Buffer.from(manual)) as { requested: Uint8Array[]; found: Uint8Array[] };
-    const reference = decode(encode({ requested, found })) as { requested: Uint8Array[]; found: Uint8Array[] };
+    const decoded = decode(Buffer.from(manual)) as {
+      requested: Uint8Array[];
+      found: Uint8Array[];
+    };
+    const reference = decode(encode({ requested, found })) as {
+      requested: Uint8Array[];
+      found: Uint8Array[];
+    };
 
     expect(decoded.requested.length).toBe(reference.requested.length);
     expect(decoded.found.length).toBe(reference.found.length);
@@ -117,7 +130,10 @@ describe("buildSyncResponseCbor", () => {
   it("handles only requested (no found)", () => {
     const requested = [randomBytes(32, 1), randomBytes(32, 2)];
     const manual = buildSyncResponseCbor(requested, []);
-    const decoded = decode(Buffer.from(manual)) as { requested: Uint8Array[]; found: any[] };
+    const decoded = decode(Buffer.from(manual)) as {
+      requested: Uint8Array[];
+      found: any[];
+    };
 
     expect(decoded.requested.length).toBe(2);
     for (let i = 0; i < requested.length; i++) {
@@ -130,7 +146,10 @@ describe("buildSyncResponseCbor", () => {
     const found = [randomBytes(300, 1), randomBytes(400, 2)];
     const cborFound = found.map(cborByteString);
     const manual = buildSyncResponseCbor([], cborFound);
-    const decoded = decode(Buffer.from(manual)) as { requested: any[]; found: Uint8Array[] };
+    const decoded = decode(Buffer.from(manual)) as {
+      requested: any[];
+      found: Uint8Array[];
+    };
 
     expect(decoded.requested).toEqual([]);
     expect(decoded.found.length).toBe(2);
@@ -141,11 +160,16 @@ describe("buildSyncResponseCbor", () => {
 
   it("handles many events (> 24)", () => {
     const requested = Array.from({ length: 5 }, (_, i) => randomBytes(32, i));
-    const found = Array.from({ length: 30 }, (_, i) => randomBytes(100 + i, i + 100));
+    const found = Array.from({ length: 30 }, (_, i) =>
+      randomBytes(100 + i, i + 100)
+    );
     const cborFound = found.map(cborByteString);
 
     const manual = buildSyncResponseCbor(requested, cborFound);
-    const decoded = decode(Buffer.from(manual)) as { requested: Uint8Array[]; found: Uint8Array[] };
+    const decoded = decode(Buffer.from(manual)) as {
+      requested: Uint8Array[];
+      found: Uint8Array[];
+    };
 
     expect(decoded.requested.length).toBe(5);
     expect(decoded.found.length).toBe(30);
@@ -158,7 +182,11 @@ describe("buildSyncResponseCbor", () => {
     const requested = [randomBytes(32, 1)];
 
     // 3 events from persistent map + 2 just fetched from WASM
-    const cachedEvents = [randomBytes(100, 10), randomBytes(150, 20), randomBytes(200, 30)];
+    const cachedEvents = [
+      randomBytes(100, 10),
+      randomBytes(150, 20),
+      randomBytes(200, 30),
+    ];
     const freshEvents = [randomBytes(120, 40), randomBytes(180, 50)];
     const allFound = [...cachedEvents, ...freshEvents];
 
@@ -167,7 +195,10 @@ describe("buildSyncResponseCbor", () => {
     const allCborFound = [...cachedCbor, ...freshCbor];
 
     const manual = buildSyncResponseCbor(requested, allCborFound);
-    const decoded = decode(Buffer.from(manual)) as { requested: Uint8Array[]; found: Uint8Array[] };
+    const decoded = decode(Buffer.from(manual)) as {
+      requested: Uint8Array[];
+      found: Uint8Array[];
+    };
 
     expectBytesEqual(decoded.requested[0], requested[0]);
     expect(decoded.found.length).toBe(5);

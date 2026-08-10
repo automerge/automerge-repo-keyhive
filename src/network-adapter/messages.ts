@@ -56,21 +56,21 @@ export function decodeKeyhiveMessageData(
 }
 
 export async function signData(
-    keyhive: Keyhive,
-    data: Uint8Array,
-    contactCard ?: ContactCard
-  ): Promise < Uint8Array > {
-    try {
-      const signed = await keyhive.trySign(data);
-      return encodeKeyhiveMessageData({
-        contactCard,
-        signed,
-      });
-    } catch(error) {
-      log.error("[AMRepoKeyhive] Error during signing:", error);
-      throw error;
-    }
+  keyhive: Keyhive,
+  data: Uint8Array,
+  contactCard?: ContactCard
+): Promise<Uint8Array> {
+  try {
+    const signed = await keyhive.trySign(data);
+    return encodeKeyhiveMessageData({
+      contactCard,
+      signed,
+    });
+  } catch (error) {
+    log.error("[AMRepoKeyhive] Error during signing:", error);
+    throw error;
   }
+}
 
 // Verifies the provided data has a valid signature.
 export function verifyData(peerId: PeerId, data: KeyhiveMessageData): boolean {

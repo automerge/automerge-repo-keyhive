@@ -5,7 +5,10 @@ import { cborByteString } from "./cbor-builder.js";
 import { getPendingOpHashes } from "../keyhive/keyhive.js";
 import { keyhiveIdentifierFromPeerId } from "../utilities.js";
 import { Metrics } from "./metrics.js";
-import { EventBytesCache, fetchAgentAndPublicEvents } from "./event-bytes-cache.js";
+import {
+  EventBytesCache,
+  fetchAgentAndPublicEvents,
+} from "./event-bytes-cache.js";
 import type { EventCache } from "./event-cache.js";
 import type { PeerHashes, EventBytesResult } from "./sync-data.js";
 
@@ -49,7 +52,10 @@ export class PeriodicEventCache implements EventCache {
     return agentIdStr;
   }
 
-  getPendingOpHashes(_keyhive: Keyhive, metrics?: Metrics): Promise<Uint8Array[]> {
+  getPendingOpHashes(
+    _keyhive: Keyhive,
+    metrics?: Metrics
+  ): Promise<Uint8Array[]> {
     metrics?.recordCacheHit();
     return Promise.resolve(this.pendingOpHashes);
   }
@@ -59,7 +65,11 @@ export class PeriodicEventCache implements EventCache {
     return Promise.resolve(this.publicHashes);
   }
 
-  getHashesForPeer(_keyhive: Keyhive, peerId: PeerId, metrics?: Metrics): Promise<PeerHashes | null> {
+  getHashesForPeer(
+    _keyhive: Keyhive,
+    peerId: PeerId,
+    metrics?: Metrics
+  ): Promise<PeerHashes | null> {
     const cached = this.agentHashes.get(this.agentIdStrForPeer(peerId));
     if (cached) {
       metrics?.recordCacheHit();
@@ -74,7 +84,7 @@ export class PeriodicEventCache implements EventCache {
     keyhive: Keyhive,
     peerId: PeerId,
     hashStrings: Set<string>,
-    metrics?: Metrics,
+    metrics?: Metrics
   ): Promise<EventBytesResult> {
     const eventLookupStart = Date.now();
 
@@ -85,10 +95,13 @@ export class PeriodicEventCache implements EventCache {
       return periodicResult;
     }
 
-    log.debug(`[AMRepoKeyhive] PeriodicEventCache miss for ${hashStrings.size} hashes, falling back to EventBytesCache/WASM API`);
+    log.debug(
+      `[AMRepoKeyhive] PeriodicEventCache miss for ${hashStrings.size} hashes, falling back to EventBytesCache/WASM API`
+    );
 
     // Fall back to event bytes cache and keyhive WASM API
-    const { events, cborEvents, missingHashes } = this.eventBytesCache.getBytesFor(hashStrings);
+    const { events, cborEvents, missingHashes } =
+      this.eventBytesCache.getBytesFor(hashStrings);
 
     if (missingHashes.size === 0) {
       metrics?.recordEventLookupTime(Date.now() - eventLookupStart);
@@ -97,7 +110,12 @@ export class PeriodicEventCache implements EventCache {
 
     const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
     const fetchedEvents = await fetchAgentAndPublicEvents(keyhive, keyhiveId);
-    this.eventBytesCache.storeAndCollect(fetchedEvents, missingHashes, events, cborEvents);
+    this.eventBytesCache.storeAndCollect(
+      fetchedEvents,
+      missingHashes,
+      events,
+      cborEvents
+    );
 
     metrics?.recordEventLookupTime(Date.now() - eventLookupStart);
     return { events, cborEvents };
@@ -131,23 +149,31 @@ export class PeriodicEventCache implements EventCache {
 
     // Build hash lookup: hashStr -> hashBytes
     const allHashes = new Map<string, Uint8Array>();
-    allAgentEvents.events.forEach((eventBytesVal: Uint8Array, hash: Uint8Array) => {
-      const hashStr = hash.toString();
-      allHashes.set(hashStr, hash);
-      if (!this.eventBytes.has(hashStr)) {
-        this.eventBytes.set(hashStr, eventBytesVal);
-        this.eventCborBytes.set(hashStr, cborByteString(eventBytesVal));
+    allAgentEvents.events.forEach(
+      (eventBytesVal: Uint8Array, hash: Uint8Array) => {
+        const hashStr = hash.toString();
+        allHashes.set(hashStr, hash);
+        if (!this.eventBytes.has(hashStr)) {
+          this.eventBytes.set(hashStr, eventBytesVal);
+          this.eventCborBytes.set(hashStr, cborByteString(eventBytesVal));
+        }
       }
-    });
+    );
 
     // Build source -> hashes indexes
     const prekeySourceHashes = buildSourceHashes(allAgentEvents.prekeySources);
-    const membershipSourceHashes = buildSourceHashes(allAgentEvents.membershipSources);
+    const membershipSourceHashes = buildSourceHashes(
+      allAgentEvents.membershipSources
+    );
     const cgkaSourceHashes = buildSourceHashes(allAgentEvents.cgkaSources);
 
     // Build agent -> sources indexes
-    const agentPrekeySources = buildAgentSources(allAgentEvents.agentPrekeySources);
-    const agentMembershipSources = buildAgentSources(allAgentEvents.agentMembershipSources);
+    const agentPrekeySources = buildAgentSources(
+      allAgentEvents.agentPrekeySources
+    );
+    const agentMembershipSources = buildAgentSources(
+      allAgentEvents.agentMembershipSources
+    );
     const agentCgkaSources = buildAgentSources(allAgentEvents.agentCgkaSources);
 
     // Pre-compute per-agent PeerHashes maps
@@ -160,9 +186,24 @@ export class PeriodicEventCache implements EventCache {
     for (const agentIdStr of allAgentIds) {
       const peerHashes: PeerHashes = new Map();
 
-      collectSourceHashes(agentPrekeySources.get(agentIdStr), prekeySourceHashes, allHashes, peerHashes);
-      collectSourceHashes(agentMembershipSources.get(agentIdStr), membershipSourceHashes, allHashes, peerHashes);
-      collectSourceHashes(agentCgkaSources.get(agentIdStr), cgkaSourceHashes, allHashes, peerHashes);
+      collectSourceHashes(
+        agentPrekeySources.get(agentIdStr),
+        prekeySourceHashes,
+        allHashes,
+        peerHashes
+      );
+      collectSourceHashes(
+        agentMembershipSources.get(agentIdStr),
+        membershipSourceHashes,
+        allHashes,
+        peerHashes
+      );
+      collectSourceHashes(
+        agentCgkaSources.get(agentIdStr),
+        cgkaSourceHashes,
+        allHashes,
+        peerHashes
+      );
 
       newAgentHashes.set(agentIdStr, peerHashes);
     }
@@ -178,7 +219,9 @@ export class PeriodicEventCache implements EventCache {
     return true;
   }
 
-  private getEventBytesFromPeriodicCache(hashStrings: Set<string>): EventBytesResult | null {
+  private getEventBytesFromPeriodicCache(
+    hashStrings: Set<string>
+  ): EventBytesResult | null {
     const events: Uint8Array[] = [];
     const cborEvents: Uint8Array[] = [];
     for (const hashStr of hashStrings) {
@@ -197,23 +240,31 @@ export class PeriodicEventCache implements EventCache {
 
 // Build source -> Set<hashStr> from a sources map
 function buildSourceHashes(
-  sourcesMap: Map<Uint8Array, Uint8Array[]>,
+  sourcesMap: Map<Uint8Array, Uint8Array[]>
 ): Map<string, Set<string>> {
   const result = new Map<string, Set<string>>();
   sourcesMap.forEach((hashes: Uint8Array[], sourceIdBytes: Uint8Array) => {
-    result.set(sourceIdBytes.toString(), new Set(hashes.map(h => h.toString())));
+    result.set(
+      sourceIdBytes.toString(),
+      new Set(hashes.map((h) => h.toString()))
+    );
   });
   return result;
 }
 
 // Build agent -> sourceKey[] from an agent-sources map
 function buildAgentSources(
-  agentSourcesMap: Map<Uint8Array, Uint8Array[]>,
+  agentSourcesMap: Map<Uint8Array, Uint8Array[]>
 ): Map<string, string[]> {
   const result = new Map<string, string[]>();
-  agentSourcesMap.forEach((sourceIdBytes: Uint8Array[], agentIdBytes: Uint8Array) => {
-    result.set(agentIdBytes.toString(), sourceIdBytes.map(id => id.toString()));
-  });
+  agentSourcesMap.forEach(
+    (sourceIdBytes: Uint8Array[], agentIdBytes: Uint8Array) => {
+      result.set(
+        agentIdBytes.toString(),
+        sourceIdBytes.map((id) => id.toString())
+      );
+    }
+  );
   return result;
 }
 
@@ -222,7 +273,7 @@ function collectSourceHashes(
   sourceKeys: string[] | undefined,
   sourceHashes: Map<string, Set<string>>,
   allHashes: Map<string, Uint8Array>,
-  peerHashes: PeerHashes,
+  peerHashes: PeerHashes
 ): void {
   if (!sourceKeys) return;
   for (const sourceKey of sourceKeys) {

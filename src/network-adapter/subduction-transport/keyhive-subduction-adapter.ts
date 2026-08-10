@@ -71,7 +71,10 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
   readonly localPeerId: PeerId;
   readonly remotePeerId: PeerId;
 
-  private readonly subductionReady: Promise<{ subduction: Subduction; wasmPeerId: any }>;
+  private readonly subductionReady: Promise<{
+    subduction: Subduction;
+    wasmPeerId: any;
+  }>;
   private readonly keyhive: Keyhive;
   private readonly keyhiveStorage: KeyhiveStorage;
   private readonly keyhiveQueue: PromiseQueue;
@@ -103,12 +106,14 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
 
     // Get a PeerId instance from subduction's own module to avoid
     // cross-module wasm-bindgen instanceof failures.
-    const remotePeerBytes = peerIdToSubduction(options.remotePeerId).verifying_key;
+    const remotePeerBytes = peerIdToSubduction(
+      options.remotePeerId
+    ).verifying_key;
     this.subductionReady = Promise.resolve(options.subduction).then(
       async (subduction) => {
         const wasmPeerId = await waitForPeer(subduction, remotePeerBytes);
         return { subduction, wasmPeerId };
-      },
+      }
     );
 
     this.peers = new Map<PeerId, Peer>();
@@ -129,8 +134,8 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
           .catch((err) =>
             log.error(
               "[KeyhiveSubductionAdapter] PeriodicEventCache refresh failed:",
-              err,
-            ),
+              err
+            )
           );
       }, syncRequestInterval);
       void this.keyhiveQueue
@@ -138,8 +143,8 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
         .catch((err) =>
           log.error(
             "[KeyhiveSubductionAdapter] Initial PeriodicEventCache refresh failed:",
-            err,
-          ),
+            err
+          )
         );
     } else {
       cache = new EventBytesOnlyEventCache();
@@ -168,26 +173,33 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
         retryPendingFromStorage: true,
         minSyncRequestInterval: 1000,
         minSyncResponseInterval: 1000,
-      },
+      }
     );
 
-    void this.subductionReady.then(({ subduction }) => {
-      subduction.registerFrameHandler({
-        onMessage: (payload: Uint8Array, _peerId: any) => {
-          void this.handleInbound(payload).catch((err) =>
-            log.error(
-              "[KeyhiveSubductionAdapter] inbound SUK handler failed:",
-              err,
-            ),
-          );
-        },
-        onPeerDisconnect: (_peerId: any) => {
-          this._connected = false;
-          this.syncProtocol.onPeerDisconnected(this.remotePeerId);
-          this.emit("peer-disconnected", { peerId: this.remotePeerId });
-        },
-      });
-    });
+    void this.subductionReady
+      .then(({ subduction }) =>
+        subduction.registerFrameHandler({
+          onMessage: (payload: Uint8Array, _peerId: any) => {
+            void this.handleInbound(payload).catch((err) =>
+              log.error(
+                "[KeyhiveSubductionAdapter] inbound SUK handler failed:",
+                err
+              )
+            );
+          },
+          onPeerDisconnect: (_peerId: any) => {
+            this._connected = false;
+            this.syncProtocol.onPeerDisconnected(this.remotePeerId);
+            this.emit("peer-disconnected", { peerId: this.remotePeerId });
+          },
+        })
+      )
+      .catch((err) =>
+        log.error(
+          "[KeyhiveSubductionAdapter] failed to register frame handler:",
+          err
+        )
+      );
 
     if (this.periodicSyncEnabled) {
       this.syncIntervalId = setInterval(() => {
@@ -256,14 +268,14 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
       this.periodicCacheRefreshId = undefined;
     }
     void this.subductionReady.then(({ subduction }) =>
-      subduction.registerFrameHandler(undefined),
+      subduction.registerFrameHandler(undefined)
     );
   }
 
   private send(message: Message, contactCard?: ContactCard): void {
     if (!message.type || !KEYHIVE_MESSAGE_TYPES.has(message.type)) {
       log.warn(
-        `[KeyhiveSubductionAdapter] dropping non-keyhive message type=${message.type}`,
+        `[KeyhiveSubductionAdapter] dropping non-keyhive message type=${message.type}`
       );
       return;
     }
@@ -271,24 +283,24 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
     void (async () => {
       try {
         const bytes = await this.keyhiveQueue.run(() =>
-          this.signAndEncode(message, contactCard),
+          this.signAndEncode(message, contactCard)
         );
         this.pending.fire(seqNumber, () => {
           void this.subductionReady
             .then(({ subduction, wasmPeerId }) =>
-              subduction.sendKeyhiveMessage(bytes, wasmPeerId),
+              subduction.sendKeyhiveMessage(bytes, wasmPeerId)
             )
             .catch((err: any) =>
               log.warn(
                 "[KeyhiveSubductionAdapter] sendKeyhiveMessage failed:",
-                err,
-              ),
+                err
+              )
             );
         });
       } catch (err) {
         log.error(
           `[KeyhiveSubductionAdapter] failed to sign+frame (type=${message.type}):`,
-          err,
+          err
         );
         this.pending.cancel(seqNumber);
       }
@@ -297,7 +309,7 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
 
   private async signAndEncode(
     message: Message,
-    contactCard?: ContactCard,
+    contactCard?: ContactCard
   ): Promise<Uint8Array> {
     const inlineDataCbor: Uint8Array =
       "data" in message && message.data instanceof Uint8Array
@@ -352,7 +364,7 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
     } catch (err) {
       log.error(
         "[KeyhiveSubductionAdapter] Rust KeyhiveMessage decode failed:",
-        err,
+        err
       );
       return;
     }
@@ -363,7 +375,7 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
         "[KeyhiveSubductionAdapter] sender mismatch: payload says",
         decoded.senderId,
         "verifyingKey says",
-        verifyingKeyPeer,
+        verifyingKeyPeer
       );
       return;
     }
@@ -372,7 +384,7 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
       try {
         const contactCard = ContactCard.fromJson(signedMessage.contactCard);
         await this.keyhiveQueue.run(() =>
-          receiveContactCard(this.keyhive, contactCard, this.keyhiveStorage),
+          receiveContactCard(this.keyhive, contactCard, this.keyhiveStorage)
         );
       } catch (err) {
         log.error("[KeyhiveSubductionAdapter] contactCard ingest failed:", err);
@@ -396,7 +408,7 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
     } catch (err) {
       log.error(
         `[KeyhiveSubductionAdapter] dispatchByType failed (type=${decoded.type}):`,
-        err,
+        err
       );
     }
   }
@@ -404,7 +416,7 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
 
 async function waitForPeer(
   subduction: Subduction,
-  remotePeerBytes: Uint8Array,
+  remotePeerBytes: Uint8Array
 ): Promise<any> {
   for (;;) {
     const peers = await subduction.getConnectedPeerIds();

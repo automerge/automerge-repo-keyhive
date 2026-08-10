@@ -8,7 +8,11 @@ import {
 } from "@keyhive/keyhive/slim";
 import { docIdFromAutomergeUrl } from "../src/keyhive/keyhive.js";
 import { stringifyAutomergeUrl } from "@automerge/automerge-repo/slim";
-import type { AutomergeUrl, PeerId, Repo } from "@automerge/automerge-repo/slim";
+import type {
+  AutomergeUrl,
+  PeerId,
+  Repo,
+} from "@automerge/automerge-repo/slim";
 import { initKeyhiveWasm } from "../src/index.js";
 import {
   AutomergeRepoKeyhive,
@@ -33,7 +37,7 @@ async function buildHive() {
   const keyhive = await Keyhive.init(
     signer,
     CiphertextStore.newInMemory(),
-    () => {},
+    () => {}
   );
 
   const nudges: Record<string, unknown>[] = [];
@@ -66,7 +70,7 @@ async function buildHive() {
     (() => {
       throw new Error("createKeyhiveNetworkAdapter is unused in this test");
     }) as any,
-    interceptor as any,
+    interceptor as any
   );
   hive.linkRepo(repo, { debounceMs: 0 });
 
@@ -81,7 +85,7 @@ async function buildHive() {
  */
 async function addPublicAccessOutsideHive(
   keyhive: Keyhive,
-  docUrl: AutomergeUrl,
+  docUrl: AutomergeUrl
 ): Promise<void> {
   const agent = await keyhive.getAgent(Identifier.publicId());
   const doc = await keyhive.getDocument(docIdFromAutomergeUrl(docUrl));

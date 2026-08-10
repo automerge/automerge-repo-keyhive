@@ -102,7 +102,7 @@ describe("subduction-transport codec", () => {
       // not the base64 form. Bytes must match the signer's key exactly.
       expect(rust.verifying_key.length).toBe(32);
       expect(Array.from(rust.verifying_key)).toEqual(
-        Array.from(signer.verifyingKey),
+        Array.from(signer.verifyingKey)
       );
       expect(rust.suffix).toBe(null);
       // Round-trip back to TS PeerId.
@@ -116,20 +116,22 @@ describe("subduction-transport codec", () => {
       // The verifying-key bytes must be the raw key, not include the suffix.
       expect(rust.verifying_key.length).toBe(32);
       expect(Array.from(rust.verifying_key)).toEqual(
-        Array.from(signer.verifyingKey),
+        Array.from(signer.verifyingKey)
       );
       // The Rust server keys peers by verifying_key alone; we must not put
       // the TS-only suffix on the wire or its peer registry rejects us.
       expect(rust.suffix).toBe(null);
       // Round-trip drops the suffix. peerIdFromSubduction returns the no-suffix
       // form regardless of what was originally encoded.
-      expect(peerIdFromSubduction(rust)).toBe(peerIdFromVerifyingKey(signer.verifyingKey));
+      expect(peerIdFromSubduction(rust)).toBe(
+        peerIdFromVerifyingKey(signer.verifyingKey)
+      );
     });
 
     it("rejects an obviously-malformed base64 portion", () => {
       // Two base64 chars decode to ~1 byte, far short of the 32 required.
       expect(() => peerIdToSubduction("AB" as PeerId)).toThrow(
-        /verifying-key length/,
+        /verifying-key length/
       );
     });
   });
@@ -172,14 +174,17 @@ describe("subduction-transport codec", () => {
       // Snake_case field names (matches `serde::Serialize` default for
       // `KeyhivePeerId { verifying_key, suffix }` and the variant fields).
       expect(Object.keys(inner).sort()).toEqual(
-        ["found", "pending", "sender_id", "target_id"].sort(),
+        ["found", "pending", "sender_id", "target_id"].sort()
       );
-      const sender = inner.sender_id as { verifying_key: Uint8Array; suffix: unknown };
+      const sender = inner.sender_id as {
+        verifying_key: Uint8Array;
+        suffix: unknown;
+      };
       // The verifying_key must be the raw 32 bytes, not the base64 form
       // we hold on the TS side.
       expect(sender.verifying_key.length).toBe(32);
       expect(Array.from(sender.verifying_key)).toEqual(
-        Array.from(signerA.verifyingKey),
+        Array.from(signerA.verifyingKey)
       );
       expect(sender.suffix).toBeNull();
     });
@@ -289,9 +294,14 @@ describe("subduction-transport codec", () => {
     });
 
     it("decode of an unknown variant tag is rejected (not silently coerced)", () => {
-      const bogus = cborEncode({ "NotARealVariant": { sender_id: { verifying_key: new Uint8Array(32), suffix: null }, target_id: { verifying_key: new Uint8Array(32), suffix: null } } });
+      const bogus = cborEncode({
+        NotARealVariant: {
+          sender_id: { verifying_key: new Uint8Array(32), suffix: null },
+          target_id: { verifying_key: new Uint8Array(32), suffix: null },
+        },
+      });
       expect(() => decodeSubductionKeyhiveMessage(bogus)).toThrow(
-        /unknown KeyhiveMessage variant/,
+        /unknown KeyhiveMessage variant/
       );
     });
 

@@ -18,7 +18,7 @@ async function buildHive(debounceMs: number) {
   const keyhive = await Keyhive.init(
     signer,
     CiphertextStore.newInMemory(),
-    () => {},
+    () => {}
   );
 
   let shareConfigChangedCount = 0;
@@ -28,7 +28,13 @@ async function buildHive(debounceMs: number) {
     },
   } as unknown as Repo;
 
-  const adapter = { disconnected: false, on() {}, disconnect() { this.disconnected = true; } };
+  const adapter = {
+    disconnected: false,
+    on() {},
+    disconnect() {
+      this.disconnected = true;
+    },
+  };
   const emitter = new KeyhiveEventEmitter();
 
   const hive = new AutomergeRepoKeyhive(
@@ -42,11 +48,19 @@ async function buildHive(debounceMs: number) {
     (() => {
       throw new Error("createKeyhiveNetworkAdapter is unused in this test");
     }) as any,
-    { trackedDocIds: [] as string[], docIdsAwaitingPcsKey: [] as string[] } as any,
+    {
+      trackedDocIds: [] as string[],
+      docIdsAwaitingPcsKey: [] as string[],
+    } as any
   );
   hive.linkRepo(repo, { debounceMs });
 
-  return { hive, adapter, emitter, shareConfigChangedCount: () => shareConfigChangedCount };
+  return {
+    hive,
+    adapter,
+    emitter,
+    shareConfigChangedCount: () => shareConfigChangedCount,
+  };
 }
 
 describe("close", () => {

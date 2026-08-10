@@ -17,7 +17,11 @@ export class MessageBatch {
       }
       this.syncRequestSenders.add(msg.senderId);
     }
-    this.metrics.recordMessage(msg.type, msg.senderId, data.signed.payload?.byteLength ?? 0);
+    this.metrics.recordMessage(
+      msg.type,
+      msg.senderId,
+      data.signed.payload?.byteLength ?? 0
+    );
     this.messages.push({ msg, data });
   }
 
@@ -36,8 +40,12 @@ export class BatchProcessor {
   constructor(
     private readonly batchInterval: number,
     private readonly keyhive: Keyhive,
-    private readonly handleMessage: (msg: Message, data: KeyhiveMessageData, metrics: Metrics) => Promise<void>,
-    private readonly swapBatch: () => MessageBatch,
+    private readonly handleMessage: (
+      msg: Message,
+      data: KeyhiveMessageData,
+      metrics: Metrics
+    ) => Promise<void>,
+    private readonly swapBatch: () => MessageBatch
   ) {}
 
   start() {
@@ -52,7 +60,9 @@ export class BatchProcessor {
   }
 
   private scheduleNext() {
-    this.timeoutId = setTimeout(() => { void this.processAndReschedule() }, this.batchInterval);
+    this.timeoutId = setTimeout(() => {
+      void this.processAndReschedule();
+    }, this.batchInterval);
   }
 
   private async processAndReschedule() {
@@ -69,9 +79,15 @@ export class BatchProcessor {
       try {
         const msgStart = Date.now();
         await this.handleMessage(msg, data, batch.metrics);
-        batch.metrics.recordProcessingTimeByType(msg.type ?? "unknown", Date.now() - msgStart);
+        batch.metrics.recordProcessingTimeByType(
+          msg.type ?? "unknown",
+          Date.now() - msgStart
+        );
       } catch (error) {
-        log.error(`[AMRepoKeyhive] Error processing batch message (type=${msg.type}, from=${msg.senderId}):`, error);
+        log.error(
+          `[AMRepoKeyhive] Error processing batch message (type=${msg.type}, from=${msg.senderId}):`,
+          error
+        );
       }
     }
     batch.metrics.recordProcessingTime(Date.now() - startTime);
