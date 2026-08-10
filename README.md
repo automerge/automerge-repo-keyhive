@@ -59,6 +59,5 @@ await hive.addMemberToDoc(handle.url, collaboratorContactCard, Access.edit());
 
 ## Status
 
-Pre-release. The package currently pins forked prerelease builds of
-automerge and automerge-repo (see `package.json`); the publishing story for
-public consumers is still being finalized.
+Alpha. Published for early adopters; the public API will change without
+notice between releases. Pin an exact version.
