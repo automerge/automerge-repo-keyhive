@@ -768,6 +768,8 @@ export class KeyhiveStorage {
   }
 
   async savePrekeySecrets(kh: Keyhive): Promise<void> {
+    // Every step aborts the save on failure, in which case the step is logged.
+    let step = "load stored prekey secrets";
     try {
       // Load existing secrets first so we don't overwrite secrets saved by another
       // instance.
@@ -776,15 +778,18 @@ export class KeyhiveStorage {
         KEYHIVE_PREKEY_SECRETS_KEY,
       ]);
       if (existing) {
+        step = "import stored prekey secrets (merge with a sibling instance)";
         await kh.importPrekeySecrets(existing);
       }
+      step = "export prekey secrets";
       const bytes = await kh.exportPrekeySecrets();
+      step = "save prekey secrets";
       await this.storage.save(
         [KEYHIVE_DB_KEY, KEYHIVE_PREKEY_SECRETS_KEY],
         bytes
       );
     } catch (error) {
-      log.error("[AMRepoKeyhive] Failed to export prekey secrets:", error);
+      log.error(`[AMRepoKeyhive] Failed to ${step}:`, error);
     }
   }
 
