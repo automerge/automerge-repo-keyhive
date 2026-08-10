@@ -29,7 +29,7 @@ import {
   Stats,
 } from "@keyhive/keyhive/slim";
 import { MemorySigner } from "@automerge/automerge-subduction/slim";
-import { SyncServer } from "../sync-server.js";
+import type { SyncServer } from "../sync-server.js";
 import { Active } from "./active.js";
 import { KeyhiveNetworkAdapter } from "../network-adapter/network-adapter.js";
 import { KeyhiveEventEmitter } from "./emitter.js";
