@@ -1,6 +1,6 @@
 import { log } from "./logging.js";
 import { initFromBase64Wasm } from "@keyhive/keyhive/slim";
-// @ts-expect-error
+// @ts-expect-error (the generated base64 wasm module ships no type declarations)
 import { wasmBase64 } from "@keyhive/keyhive/keyhive_wasm.base64.js";
 
 let wasmInitialized = false;

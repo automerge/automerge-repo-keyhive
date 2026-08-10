@@ -11,7 +11,13 @@ export function cborByteString(bytes: Uint8Array): Uint8Array {
   } else if (len < 0x10000) {
     header = new Uint8Array([0x59, len >> 8, len & 0xff]);
   } else {
-    header = new Uint8Array([0x5a, (len >>> 24) & 0xff, (len >>> 16) & 0xff, (len >>> 8) & 0xff, len & 0xff]);
+    header = new Uint8Array([
+      0x5a,
+      (len >>> 24) & 0xff,
+      (len >>> 16) & 0xff,
+      (len >>> 8) & 0xff,
+      len & 0xff,
+    ]);
   }
   const result = new Uint8Array(header.length + len);
   result.set(header);
@@ -22,15 +28,29 @@ export function cborByteString(bytes: Uint8Array): Uint8Array {
 function cborArrayHeader(length: number): Uint8Array {
   if (length < 24) return new Uint8Array([0x80 | length]);
   if (length < 0x100) return new Uint8Array([0x98, length]);
-  if (length < 0x10000) return new Uint8Array([0x99, length >> 8, length & 0xff]);
-  return new Uint8Array([0x9a, (length >>> 24) & 0xff, (length >>> 16) & 0xff, (length >>> 8) & 0xff, length & 0xff]);
+  if (length < 0x10000)
+    return new Uint8Array([0x99, length >> 8, length & 0xff]);
+  return new Uint8Array([
+    0x9a,
+    (length >>> 24) & 0xff,
+    (length >>> 16) & 0xff,
+    (length >>> 8) & 0xff,
+    length & 0xff,
+  ]);
 }
 
 function cborMapHeader(length: number): Uint8Array {
   if (length < 24) return new Uint8Array([0xa0 | length]);
   if (length < 0x100) return new Uint8Array([0xb8, length]);
-  if (length < 0x10000) return new Uint8Array([0xb9, length >> 8, length & 0xff]);
-  return new Uint8Array([0xba, (length >>> 24) & 0xff, (length >>> 16) & 0xff, (length >>> 8) & 0xff, length & 0xff]);
+  if (length < 0x10000)
+    return new Uint8Array([0xb9, length >> 8, length & 0xff]);
+  return new Uint8Array([
+    0xba,
+    (length >>> 24) & 0xff,
+    (length >>> 16) & 0xff,
+    (length >>> 8) & 0xff,
+    length & 0xff,
+  ]);
 }
 
 function cborTextString(str: string): Uint8Array {
@@ -44,7 +64,13 @@ function cborTextString(str: string): Uint8Array {
   } else if (len < 0x10000) {
     header = new Uint8Array([0x79, len >> 8, len & 0xff]);
   } else {
-    header = new Uint8Array([0x7a, (len >>> 24) & 0xff, (len >>> 16) & 0xff, (len >>> 8) & 0xff, len & 0xff]);
+    header = new Uint8Array([
+      0x7a,
+      (len >>> 24) & 0xff,
+      (len >>> 16) & 0xff,
+      (len >>> 8) & 0xff,
+      len & 0xff,
+    ]);
   }
   const result = new Uint8Array(header.length + len);
   result.set(header);
@@ -63,7 +89,13 @@ export function cborUint(value: number): Uint8Array {
   if (value < 24) return new Uint8Array([value]);
   if (value < 0x100) return new Uint8Array([0x18, value]);
   if (value < 0x10000) return new Uint8Array([0x19, value >> 8, value & 0xff]);
-  return new Uint8Array([0x1a, (value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff]);
+  return new Uint8Array([
+    0x1a,
+    (value >>> 24) & 0xff,
+    (value >>> 16) & 0xff,
+    (value >>> 8) & 0xff,
+    value & 0xff,
+  ]);
 }
 
 function concatParts(parts: Uint8Array[]): Uint8Array {
@@ -83,11 +115,12 @@ export function buildSyncResponseCbor(
   requested: Uint8Array[],
   cborFoundEvents: Uint8Array[],
   syncResponderTotal?: number,
-  syncRequesterTotal?: number,
+  syncRequesterTotal?: number
 ): Uint8Array {
   const parts: Uint8Array[] = [];
 
-  const hasMetadata = syncResponderTotal !== undefined && syncRequesterTotal !== undefined;
+  const hasMetadata =
+    syncResponderTotal !== undefined && syncRequesterTotal !== undefined;
   parts.push(cborMapHeader(hasMetadata ? 4 : 2));
 
   // "requested": [byte strings]
@@ -118,7 +151,7 @@ export function buildSyncResponseCbor(
 export function buildSyncOpsCbor(
   cborItems: Uint8Array[],
   syncResponderTotal: number,
-  syncRequesterTotal: number,
+  syncRequesterTotal: number
 ): Uint8Array {
   const parts: Uint8Array[] = [];
 

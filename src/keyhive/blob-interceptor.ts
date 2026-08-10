@@ -1,5 +1,11 @@
 import { log } from "../logging.js";
-import { type AutomergeUrl, type BlobInterceptor, type DocumentId, type StorageAdapterInterface, parseAutomergeUrl } from "@automerge/automerge-repo/slim";
+import {
+  type AutomergeUrl,
+  type BlobInterceptor,
+  type DocumentId,
+  type StorageAdapterInterface,
+  parseAutomergeUrl,
+} from "@automerge/automerge-repo/slim";
 import {
   ChangeId,
   DocumentId as KeyhiveDocumentId,
@@ -12,7 +18,11 @@ import { blake3 } from "@noble/hashes/blake3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { PromiseQueue } from "../network-adapter/pending.js";
 import { arraysEqual, isUnprotectedDocId } from "../utilities.js";
-import { KEYHIVE_DB_KEY, KEYHIVE_LEAF_SECRETS_KEY, KEYHIVE_PREKEY_SECRETS_KEY } from "./keyhive.js";
+import {
+  KEYHIVE_DB_KEY,
+  KEYHIVE_LEAF_SECRETS_KEY,
+  KEYHIVE_PREKEY_SECRETS_KEY,
+} from "./keyhive.js";
 
 const PCS_KEY_HASHES_STORAGE_KEY = "/pcs-key-hashes";
 
@@ -60,7 +70,12 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   // re-decrypting the entire history on every message.
   #delivered: Set<string> = new Set();
 
-  constructor(keyhive: Keyhive, queue: PromiseQueue, onEncrypted?: () => void, storage?: StorageAdapterInterface) {
+  constructor(
+    keyhive: Keyhive,
+    queue: PromiseQueue,
+    onEncrypted?: () => void,
+    storage?: StorageAdapterInterface
+  ) {
     this.#keyhive = keyhive;
     this.#queue = queue;
     this.#onEncrypted = onEncrypted;
@@ -69,10 +84,15 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
 
   async loadPersistedPcsKeyHashes(): Promise<void> {
     if (!this.#storage) return;
-    const data = await this.#storage.load([KEYHIVE_DB_KEY, PCS_KEY_HASHES_STORAGE_KEY]);
+    const data = await this.#storage.load([
+      KEYHIVE_DB_KEY,
+      PCS_KEY_HASHES_STORAGE_KEY,
+    ]);
     if (!data) return;
     try {
-      const decoded: Record<string, number[]> = JSON.parse(new TextDecoder().decode(data));
+      const decoded: Record<string, number[]> = JSON.parse(
+        new TextDecoder().decode(data)
+      );
       for (const [docId, hashArray] of Object.entries(decoded)) {
         this.#lastPcsKeyHash.set(docId, new Uint8Array(hashArray));
       }
@@ -95,7 +115,10 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     if (!this.#storage) return false;
     let newlyImported = 0;
     try {
-      const chunks = await this.#storage.loadRange([KEYHIVE_DB_KEY, KEYHIVE_LEAF_SECRETS_KEY]);
+      const chunks = await this.#storage.loadRange([
+        KEYHIVE_DB_KEY,
+        KEYHIVE_LEAF_SECRETS_KEY,
+      ]);
       for (const chunk of chunks) {
         if (!chunk.data) continue;
         const hashKey = chunk.key[chunk.key.length - 1] as string;
@@ -108,7 +131,10 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       // Re-read the consolidated prekey-secrets archive when it has grown/changed.
       // Length is a cheap change signal: the archive only ever accumulates
       // secrets, so a different length means a sibling added one.
-      const archive = await this.#storage.load([KEYHIVE_DB_KEY, KEYHIVE_PREKEY_SECRETS_KEY]);
+      const archive = await this.#storage.load([
+        KEYHIVE_DB_KEY,
+        KEYHIVE_PREKEY_SECRETS_KEY,
+      ]);
       if (archive && archive.byteLength !== this.#importedPrekeyArchiveLen) {
         await this.#keyhive.importPrekeySecrets(archive);
         this.#importedPrekeyArchiveLen = archive.byteLength;
@@ -126,7 +152,10 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     queueMicrotask(() => {
       this.#persistQueued = false;
       void this.#persistPcsKeyHashes().catch((e) => {
-        log.error("[KeyhiveBlobInterceptor] persisting PCS key hashes failed:", e);
+        log.error(
+          "[KeyhiveBlobInterceptor] persisting PCS key hashes failed:",
+          e
+        );
       });
     });
   }
@@ -138,7 +167,10 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       obj[docId] = Array.from(hash);
     }
     const bytes = new TextEncoder().encode(JSON.stringify(obj));
-    await this.#storage.save([KEYHIVE_DB_KEY, PCS_KEY_HASHES_STORAGE_KEY], bytes);
+    await this.#storage.save(
+      [KEYHIVE_DB_KEY, PCS_KEY_HASHES_STORAGE_KEY],
+      bytes
+    );
   }
 
   get trackedDocIds(): string[] {
@@ -163,7 +195,9 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     const { binaryDocumentId, unprotected } = parseDocId(documentId);
     if (unprotected) return blob;
     return this.#queue.run(async () => {
-      const doc = await this.#keyhive.getDocument(new KeyhiveDocumentId(binaryDocumentId));
+      const doc = await this.#keyhive.getDocument(
+        new KeyhiveDocumentId(binaryDocumentId)
+      );
       // No keyhive doc yet: drop the outgoing blob (nothing stored or pushed).
       if (!doc) {
         log.debug(
@@ -190,7 +224,12 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       }
       this.#docsAwaitingPcsKey.delete(documentId);
       const contentRef = new ChangeId(blake3(blob));
-      const result = await this.#keyhive.tryEncryptKeyed(doc, contentRef, [], blob);
+      const result = await this.#keyhive.tryEncryptKeyed(
+        doc,
+        contentRef,
+        [],
+        blob
+      );
       this.#onEncrypted?.();
       const encrypted = result.encrypted_content();
       const selfKey = result.applicationSecret;
@@ -249,7 +288,9 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     const { binaryDocumentId, unprotected } = parseDocId(documentId);
     if (unprotected) return blob;
     return this.#queue.run(async () => {
-      const doc = await this.#keyhive.getDocument(new KeyhiveDocumentId(binaryDocumentId));
+      const doc = await this.#keyhive.getDocument(
+        new KeyhiveDocumentId(binaryDocumentId)
+      );
       if (!doc) return null;
 
       // Decrypt this blob and, on a cold load, walk its predecessor chain by
@@ -258,7 +299,14 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       // concatenation is a valid `loadIncremental` input.
       const out: Uint8Array[] = [];
       const seen = new Set<string>();
-      const ok = await this.#decryptAndWalk(doc, commitId, blob, loadBlob, out, seen);
+      const ok = await this.#decryptAndWalk(
+        doc,
+        commitId,
+        blob,
+        loadBlob,
+        out,
+        seen
+      );
       if (!ok) return null;
       return out.length === 1 ? out[0] : concatBytes(out);
     });
@@ -392,12 +440,18 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   ): Promise<{ plaintext: Uint8Array; applicationSecret: Uint8Array } | null> {
     try {
       const res = await this.#keyhive.tryDecryptKeyed(doc, encrypted);
-      return { plaintext: res.plaintext, applicationSecret: res.applicationSecret };
+      return {
+        plaintext: res.plaintext,
+        applicationSecret: res.applicationSecret,
+      };
     } catch (firstError) {
       if (await this.#importNewLeafSecrets()) {
         try {
           const res = await this.#keyhive.tryDecryptKeyed(doc, encrypted);
-          return { plaintext: res.plaintext, applicationSecret: res.applicationSecret };
+          return {
+            plaintext: res.plaintext,
+            applicationSecret: res.applicationSecret,
+          };
         } catch (retryError) {
           log.debug(
             "[KeyhiveBlobInterceptor] CGKA decrypt failed after importing new leaf secrets; leaving pending:",
@@ -427,7 +481,10 @@ function concatBytes(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-function encodeOuterEnvelope(inner: Uint8Array, predsCipher: Uint8Array): Uint8Array {
+function encodeOuterEnvelope(
+  inner: Uint8Array,
+  predsCipher: Uint8Array
+): Uint8Array {
   const out = new Uint8Array(5 + inner.length + predsCipher.length);
   out[0] = ENVELOPE_VERSION;
   new DataView(out.buffer).setUint32(1, inner.length, true);
@@ -451,9 +508,10 @@ function decodeOuterEnvelope(
 
 // Decode the outer envelope and parse its inner keyhive content envelope.
 // Null for any blob this interceptor did not produce.
-function parseEnvelope(
-  blob: Uint8Array
-): { envelope: { inner: Uint8Array; predsCipher: Uint8Array }; encrypted: Encrypted } | null {
+function parseEnvelope(blob: Uint8Array): {
+  envelope: { inner: Uint8Array; predsCipher: Uint8Array };
+  encrypted: Encrypted;
+} | null {
   const envelope = decodeOuterEnvelope(blob);
   if (!envelope) return null;
   try {
@@ -463,9 +521,15 @@ function parseEnvelope(
   }
 }
 
-function decodePreds(plain: Uint8Array): Array<{ idHex: string; key: Uint8Array }> {
+function decodePreds(
+  plain: Uint8Array
+): Array<{ idHex: string; key: Uint8Array }> {
   const out: Array<{ idHex: string; key: Uint8Array }> = [];
-  for (let off = 0; off + PRED_ENTRY_BYTES <= plain.length; off += PRED_ENTRY_BYTES) {
+  for (
+    let off = 0;
+    off + PRED_ENTRY_BYTES <= plain.length;
+    off += PRED_ENTRY_BYTES
+  ) {
     out.push({
       idHex: bytesToHex(plain.subarray(off, off + COMMIT_ID_BYTES)),
       key: plain.slice(off + COMMIT_ID_BYTES, off + PRED_ENTRY_BYTES),
@@ -476,7 +540,15 @@ function decodePreds(plain: Uint8Array): Array<{ idHex: string; key: Uint8Array 
 
 // Parse the document id once, returning both the raw bytes (for building a
 // KeyhiveDocumentId) and whether it is an unprotected id.
-function parseDocId(documentId: DocumentId): { binaryDocumentId: Uint8Array; unprotected: boolean } {
-  const { binaryDocumentId } = parseAutomergeUrl(`automerge:${documentId}` as AutomergeUrl);
-  return { binaryDocumentId, unprotected: isUnprotectedDocId(binaryDocumentId) };
+function parseDocId(documentId: DocumentId): {
+  binaryDocumentId: Uint8Array;
+  unprotected: boolean;
+} {
+  const { binaryDocumentId } = parseAutomergeUrl(
+    `automerge:${documentId}` as AutomergeUrl
+  );
+  return {
+    binaryDocumentId,
+    unprotected: isUnprotectedDocId(binaryDocumentId),
+  };
 }

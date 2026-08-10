@@ -36,7 +36,12 @@ export function uint8ArrayToHex(arr: Uint8Array): string {
 // WASM errors have a toError() method that returns a proper JS Error.
 // This unwraps them if present, otherwise returns the original error.
 export function unwrapWasmError(error: unknown): unknown {
-  if (error && typeof error === "object" && "toError" in error && typeof (error as any).toError === "function") {
+  if (
+    error &&
+    typeof error === "object" &&
+    "toError" in error &&
+    typeof (error as any).toError === "function"
+  ) {
     return (error as any).toError();
   }
   return error;
@@ -92,16 +97,16 @@ export function hexToUint8Array(hex: string): Uint8Array {
 
 export async function getEventsForAgent(
   keyhive: Keyhive,
-  agent: Agent,
+  agent: Agent
 ): Promise<Map<Uint8Array, Uint8Array>> {
   // WASM binding types this as Map<Uint8Array, any>; values are always event bytes
-  return await keyhive.eventsForAgent(agent) as Map<Uint8Array, Uint8Array>;
+  return (await keyhive.eventsForAgent(agent)) as Map<Uint8Array, Uint8Array>;
 }
 
 // Returns event hashes for an agent as Map<hashString, hashBytes>
 export async function getEventHashesForAgent(
   keyhive: Keyhive,
-  agent: Agent,
+  agent: Agent
 ): Promise<Map<string, Uint8Array>> {
   const hashMap = new Map<string, Uint8Array>();
 

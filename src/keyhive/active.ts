@@ -22,7 +22,8 @@ async function serializeKeyPair(keyPair: CryptoKeyPair): Promise<Uint8Array> {
 
 async function deserializeKeyPair(bytes: Uint8Array): Promise<CryptoKeyPair> {
   const decoded = new TextDecoder().decode(bytes);
-  const { publicKey: publicKeyStr, privateKey: privateKeyStr } = JSON.parse(decoded);
+  const { publicKey: publicKeyStr, privateKey: privateKeyStr } =
+    JSON.parse(decoded);
   const publicKey = await crypto.subtle.importKey(
     "jwk",
     publicKeyStr,

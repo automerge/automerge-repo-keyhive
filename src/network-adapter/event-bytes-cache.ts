@@ -1,7 +1,6 @@
 import { Identifier, Keyhive } from "@keyhive/keyhive/slim";
 import { cborByteString } from "./cbor-builder.js";
 import { getEventsForAgent } from "../utilities.js";
-import type { EventBytesResult } from "./sync-data.js";
 
 const MAX_ENTRIES = 100000;
 
@@ -44,7 +43,7 @@ export class EventBytesCache {
     wasmEvents: Map<Uint8Array, Uint8Array>,
     missingHashes: Set<string>,
     events: Uint8Array[],
-    cborEvents: Uint8Array[],
+    cborEvents: Uint8Array[]
   ): void {
     for (const [hash, eventBytes] of wasmEvents.entries()) {
       const hashStr = hash.toString();
@@ -70,7 +69,7 @@ export class EventBytesCache {
 
 // Fetch public events from keyhive WASM API.
 async function fetchPublicEvents(
-  keyhive: Keyhive,
+  keyhive: Keyhive
 ): Promise<Map<Uint8Array, Uint8Array>> {
   const agent = await keyhive.getAgent(Identifier.publicId());
   return agent
@@ -81,7 +80,7 @@ async function fetchPublicEvents(
 // Fetch events for a specific agent plus public events from keyhive WASM API.
 export async function fetchAgentAndPublicEvents(
   keyhive: Keyhive,
-  agentId: Identifier,
+  agentId: Identifier
 ): Promise<Map<Uint8Array, Uint8Array>> {
   const wasmEvents = new Map<Uint8Array, Uint8Array>();
 

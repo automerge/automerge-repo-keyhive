@@ -114,7 +114,9 @@ export function encodeSignedMessage(msg: SubductionSignedMessage): Uint8Array {
   return encode(msg);
 }
 
-export function decodeSignedMessage(bytes: Uint8Array): SubductionSignedMessage {
+export function decodeSignedMessage(
+  bytes: Uint8Array
+): SubductionSignedMessage {
   const obj = decode(bytes) as { contactCard?: unknown; signed?: unknown };
   if (typeof obj?.contactCard !== "string") {
     throw new SukFrameError(
@@ -133,9 +135,7 @@ export function decodeSignedMessage(bytes: Uint8Array): SubductionSignedMessage 
     signedBytes = new Uint8Array(arr.length);
     for (let i = 0; i < arr.length; i++) signedBytes[i] = arr[i];
   } else {
-    throw new SukFrameError(
-      `decoded SignedMessage missing bytes signed field`
-    );
+    throw new SukFrameError(`decoded SignedMessage missing bytes signed field`);
   }
   return { contactCard: obj.contactCard, signed: signedBytes };
 }
@@ -191,7 +191,8 @@ export function peerIdFromSubduction(rust: SubductionPeerId): PeerId {
     );
   }
   let bin = "";
-  for (let i = 0; i < 32; i++) bin += String.fromCharCode(rust.verifying_key[i]);
+  for (let i = 0; i < 32; i++)
+    bin += String.fromCharCode(rust.verifying_key[i]);
   return btoa(bin) as PeerId;
 }
 
@@ -218,9 +219,13 @@ const RUST_VARIANT_BY_TYPE: Record<KeyhiveMessageType, string> = {
   "keyhive-sync-confirmation": "SyncConfirmation",
 };
 
-const TYPE_BY_RUST_VARIANT: Record<string, KeyhiveMessageType> = Object.fromEntries(
-  Object.entries(RUST_VARIANT_BY_TYPE).map(([k, v]) => [v, k as KeyhiveMessageType])
-);
+const TYPE_BY_RUST_VARIANT: Record<string, KeyhiveMessageType> =
+  Object.fromEntries(
+    Object.entries(RUST_VARIANT_BY_TYPE).map(([k, v]) => [
+      v,
+      k as KeyhiveMessageType,
+    ])
+  );
 
 // Sent for a SyncCheck whose op-set digest is absent (a peer predating the
 // digest field). All-zero never matches a non-empty pair-set digest, so the
@@ -245,6 +250,9 @@ export type TsInnerData =
       syncResponderTotal?: number;
       syncRequesterTotal?: number;
     } // sync-ops
+  // The wire message genuinely carries no fields, so `{}` is the shape;
+  // `object` / `unknown` would not describe it.
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   | {} // request/missing contact card
   | { senderTotal: number; senderSyncpoint: number; senderDigest?: Uint8Array } // sync-check
   | { confirmerTotal: number }; // sync-confirmation
@@ -272,7 +280,9 @@ export interface SubductionDecodeOutput {
  * Performs camelCase→snake_case conversion for the inline fields and
  * splices in the sender/target ids.
  */
-export function encodeSubductionKeyhiveMessage(input: SubductionEncodeInput): Uint8Array {
+export function encodeSubductionKeyhiveMessage(
+  input: SubductionEncodeInput
+): Uint8Array {
   const sender = peerIdToSubduction(input.senderId);
   const target = peerIdToSubduction(input.targetId);
   const inner = decodeInlineForType(input.type, input.inlineDataCbor);
@@ -291,7 +301,9 @@ export function encodeSubductionKeyhiveMessage(input: SubductionEncodeInput): Ui
  * Decode a Rust-shape KeyhiveMessage CBOR payload into the TS Message-like
  * shape the SyncProtocol expects.
  */
-export function decodeSubductionKeyhiveMessage(payload: Uint8Array): SubductionDecodeOutput {
+export function decodeSubductionKeyhiveMessage(
+  payload: Uint8Array
+): SubductionDecodeOutput {
   const obj = decode(payload) as Record<string, unknown>;
   const variants = Object.keys(obj);
   if (variants.length !== 1) {
@@ -322,10 +334,15 @@ function decodeInlineForType(
   type: KeyhiveMessageType,
   inlineDataCbor: Uint8Array
 ): Record<string, unknown> {
-  if (type === "keyhive-sync-request-contact-card" || type === "keyhive-sync-missing-contact-card") {
+  if (
+    type === "keyhive-sync-request-contact-card" ||
+    type === "keyhive-sync-missing-contact-card"
+  ) {
     return {};
   }
-  const obj = (inlineDataCbor.length === 0 ? {} : decode(inlineDataCbor)) as Record<string, unknown>;
+  const obj = (
+    inlineDataCbor.length === 0 ? {} : decode(inlineDataCbor)
+  ) as Record<string, unknown>;
   switch (type) {
     case "keyhive-sync-request":
       return {

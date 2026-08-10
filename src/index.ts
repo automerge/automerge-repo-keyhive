@@ -3,10 +3,19 @@ export { setKeyhiveLogLevel, getKeyhiveLogLevel } from "./logging.js";
 export type { KeyhiveLogLevel } from "./logging.js";
 export type { Active } from "./keyhive/active.js";
 export { KeyhiveEventEmitter } from "./keyhive/emitter.js";
-export { LegacyAutomergeRepoKeyhive, AutomergeRepoKeyhive, AutomergeRepoKeyhiveBase, NUDGE_FIELD } from "./keyhive/automerge-repo-keyhive.js"
-export type { DocMember, WrapNetworkAdapterOptions, CreateKeyhiveNetworkAdapter } from "./keyhive/automerge-repo-keyhive.js"
-export type { KeyhiveEmitterEvents } from "./keyhive/emitter.js"
-export { KeyhiveBlobInterceptor } from "./keyhive/blob-interceptor.js"
+export {
+  LegacyAutomergeRepoKeyhive,
+  AutomergeRepoKeyhive,
+  AutomergeRepoKeyhiveBase,
+  NUDGE_FIELD,
+} from "./keyhive/automerge-repo-keyhive.js";
+export type {
+  DocMember,
+  WrapNetworkAdapterOptions,
+  CreateKeyhiveNetworkAdapter,
+} from "./keyhive/automerge-repo-keyhive.js";
+export type { KeyhiveEmitterEvents } from "./keyhive/emitter.js";
+export { KeyhiveBlobInterceptor } from "./keyhive/blob-interceptor.js";
 export {
   initializeLegacyAutomergeRepoKeyhive,
   initializeAutomergeRepoKeyhive,
@@ -18,7 +27,10 @@ export {
   SUBDUCTION_SYNC_SERVER_CONTACT_CARD_JSON,
   SUBDUCTION_SYNC_SERVER_PEER_ID,
 } from "./keyhive/keyhive.js";
-export type { SyncServerIdentity, SyncServerSelection } from "./keyhive/keyhive.js";
+export type {
+  SyncServerIdentity,
+  SyncServerSelection,
+} from "./keyhive/keyhive.js";
 export { KeyhiveNetworkAdapter } from "./network-adapter/network-adapter.js";
 export {
   KeyhiveSubductionAdapter,
