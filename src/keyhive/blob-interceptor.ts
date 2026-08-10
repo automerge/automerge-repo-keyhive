@@ -82,6 +82,15 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     this.#storage = storage;
   }
 
+  /**
+   * Drop the cached key material and its delivery bookkeeping.
+   */
+  clearCachedKeyMaterial(): void {
+    this.#blobKeys.clear();
+    this.#delivered.clear();
+    this.#importedLeafSecrets.clear();
+  }
+
   async loadPersistedPcsKeyHashes(): Promise<void> {
     if (!this.#storage) return;
     const data = await this.#storage.load([
