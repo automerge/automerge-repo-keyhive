@@ -1,12 +1,12 @@
-// LLM-generated wire codec for talking to the Rust subduction-keyhive server.
+// Wire codec for talking to the Rust subduction-keyhive server.
 // TODO: Replace this with a subduction keyhive WASM API to avoid duplicate
 // implementations.
 //
-// Rust source of truth:
-//   ~/dev/subduction/subduction_keyhive/src/wire.rs        (SUK frame)
-//   ~/dev/subduction/subduction_keyhive/src/signed_message.rs
-//   ~/dev/subduction/subduction_keyhive/src/message.rs     (KeyhiveMessage enum)
-//   ~/dev/subduction/subduction_keyhive/src/peer_id.rs     (KeyhivePeerId)
+// Rust source of truth, in https://github.com/inkandswitch/subduction:
+//   subduction_keyhive/src/wire.rs            (SUK frame)
+//   subduction_keyhive/src/signed_message.rs
+//   subduction_keyhive/src/message.rs         (KeyhiveMessage enum)
+//   subduction_keyhive/src/peer_id.rs         (KeyhivePeerId)
 //
 // Wire envelope:
 //   +-------+-----------+---------------------------+
