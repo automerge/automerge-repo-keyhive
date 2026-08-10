@@ -54,7 +54,7 @@ export type {
   SubductionPeerId,
   SubductionSignedMessage,
 } from "./network-adapter/subduction-transport/index.js";
-export { SyncServer } from "./sync-server.js";
+export type { SyncServer } from "./sync-server.js";
 export {
   isUnprotectedDoc,
   UnprotectedDocError,
