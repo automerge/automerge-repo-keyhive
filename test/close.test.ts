@@ -37,6 +37,15 @@ async function buildHive(debounceMs: number) {
   };
   const emitter = new KeyhiveEventEmitter();
 
+  const blobInterceptor = {
+    trackedDocIds: [] as string[],
+    docIdsAwaitingPcsKey: [] as string[],
+    cleared: 0,
+    clearCachedKeyMaterial() {
+      this.cleared++;
+    },
+  };
+
   const hive = new AutomergeRepoKeyhive(
     {} as any,
     keyhive,
@@ -48,10 +57,7 @@ async function buildHive(debounceMs: number) {
     (() => {
       throw new Error("createKeyhiveNetworkAdapter is unused in this test");
     }) as any,
-    {
-      trackedDocIds: [] as string[],
-      docIdsAwaitingPcsKey: [] as string[],
-    } as any
+    blobInterceptor as any
   );
   hive.linkRepo(repo, { debounceMs });
 
@@ -59,6 +65,7 @@ async function buildHive(debounceMs: number) {
     hive,
     adapter,
     emitter,
+    blobInterceptor,
     shareConfigChangedCount: () => shareConfigChangedCount,
   };
 }
@@ -76,6 +83,14 @@ describe("close", () => {
 
     expect(adapter.disconnected).toBe(true);
     expect(emitter.listenerCount("update")).toBe(0);
+  });
+
+  it("clears the blob interceptor's cached key material", async () => {
+    const { hive, blobInterceptor } = await buildHive(0);
+
+    expect(blobInterceptor.cleared).toBe(0);
+    hive.close();
+    expect(blobInterceptor.cleared).toBe(1);
   });
 
   it("runs registered cleanups, and only once", async () => {

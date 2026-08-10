@@ -583,6 +583,15 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
   }
 
   /**
+   * Like {@link AutomergeRepoKeyhiveBase.close}, additionally dropping the blob
+   * interceptor's cached key material.
+   */
+  override close(): void {
+    super.close();
+    this.blobInterceptor.clearCachedKeyMaterial();
+  }
+
+  /**
    * Wire keyhive membership updates to {@link Repo.shareConfigChanged}().
    *
    * @internal Called by the init functions.
