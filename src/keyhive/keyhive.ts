@@ -210,12 +210,17 @@ interface KeyhiveSyncDriver {
  * Saves event bytes/prekey secrets to keyhive storage and, when there
  * are new events, asks the driver to invalidate its caches and schedule
  * an outbound sync after 1s.
+ *
+ * Returns a cleanup callback that detaches the listener and cancels any
+ * pending sync timer. `AutomergeRepoKeyhiveBase.close()` runs it; without
+ * that, a flush scheduled just before close fires up to a second later and
+ * calls `syncKeyhive()` on an already-disconnected adapter.
  */
 function setupEventFlushListener(
   bootstrap: KeyhiveContext,
   driver: KeyhiveSyncDriver,
   options: { automaticArchiveIngestion: boolean }
-): void {
+): () => void {
   const { emitter, keyhiveQueue, keyhiveStorage, keyhive } = bootstrap;
   let syncTimeout: ReturnType<typeof setTimeout> | undefined;
   let pendingEventBytes: Uint8Array[] = [];
@@ -223,7 +228,7 @@ function setupEventFlushListener(
   let pendingSync = false;
   let flushQueued = false;
 
-  emitter.on("update", (event: KeyhiveEvent) => {
+  const onUpdate = (event: KeyhiveEvent) => {
     if (!keyhiveStorage.isEventWriteSuppressed()) {
       pendingEventBytes.push(event.toBytes());
     }
@@ -281,7 +286,17 @@ function setupEventFlushListener(
           log.error("[AMRepoKeyhive] Event flush failed:", error)
         );
     }
-  });
+  };
+
+  emitter.on("update", onUpdate);
+
+  return () => {
+    emitter.off("update", onUpdate);
+    if (syncTimeout) {
+      clearTimeout(syncTimeout);
+      syncTimeout = undefined;
+    }
+  };
 }
 
 /** Build the hive for the legacy network adapter path (no repo wiring). */
@@ -370,13 +385,15 @@ async function buildLegacyHive(options: {
     }
   );
 
-  setupEventFlushListener(bootstrap, keyhiveNetworkAdapter, {
-    automaticArchiveIngestion,
-  });
+  const cleanupEventFlushListener = setupEventFlushListener(
+    bootstrap,
+    keyhiveNetworkAdapter,
+    { automaticArchiveIngestion }
+  );
 
   await keyhiveStorage.savePrekeySecrets(keyhive);
 
-  return new LegacyAutomergeRepoKeyhive(
+  const hive = new LegacyAutomergeRepoKeyhive(
     active,
     keyhive,
     keyhiveStorage,
@@ -387,6 +404,8 @@ async function buildLegacyHive(options: {
     keyhiveIdFactory(keyhiveNetworkAdapter, keyhive),
     createKeyhiveNetworkAdapter
   );
+  hive.registerCleanup(cleanupEventFlushListener);
+  return hive;
 }
 
 /**
@@ -442,9 +461,11 @@ async function buildHive(options: {
     periodicallyRequestSync,
   });
 
-  setupEventFlushListener(bootstrap, networkAdapter, {
-    automaticArchiveIngestion,
-  });
+  const cleanupEventFlushListener = setupEventFlushListener(
+    bootstrap,
+    networkAdapter,
+    { automaticArchiveIngestion }
+  );
 
   await keyhiveStorage.savePrekeySecrets(keyhive);
 
@@ -503,7 +524,7 @@ async function buildHive(options: {
   );
   await blobInterceptor.loadPersistedPcsKeyHashes();
 
-  return new AutomergeRepoKeyhive(
+  const hive = new AutomergeRepoKeyhive(
     active,
     keyhive,
     keyhiveStorage,
@@ -514,6 +535,8 @@ async function buildHive(options: {
     createKeyhiveNetworkAdapter,
     blobInterceptor
   );
+  hive.registerCleanup(cleanupEventFlushListener);
+  return hive;
 }
 
 /** Options shared by both init functions for wiring the hive to its repo. */

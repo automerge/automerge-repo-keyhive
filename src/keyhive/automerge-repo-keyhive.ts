@@ -86,6 +86,14 @@ export abstract class AutomergeRepoKeyhiveBase {
    */
   protected shareConfigTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * Cleanup callbacks for resources wired up before this instance existed.
+   * The init functions attach the keyhive event-flush listener to the shared
+   * emitter while building the hive, and its pending sync timer has to be
+   * cancelled by {@link close}. Run once, then dropped.
+   */
+  private cleanups: Array<() => void> = [];
+
   constructor(
     public readonly active: Active,
     public readonly keyhive: Keyhive,
@@ -94,14 +102,29 @@ export abstract class AutomergeRepoKeyhiveBase {
   ) {}
 
   /**
-   * Cancel the pending share-config notification, remove all emitter
-   * listeners, and disconnect the network adapter, which stops its timers.
-   * The hive is unusable afterwards.
+   * Register a cleanup callback to run on {@link close}.
+   *
+   * @internal Called by the init functions for teardown that has to be set up
+   * before the hive instance exists.
+   */
+  registerCleanup(cleanup: () => void): void {
+    this.cleanups.push(cleanup);
+  }
+
+  /**
+   * Cancel the pending share-config notification, run registered cleanups,
+   * remove all emitter listeners, and disconnect the network adapter, which
+   * stops its timers. The hive is unusable afterwards.
    */
   close(): void {
     if (this.shareConfigTimer) {
       clearTimeout(this.shareConfigTimer);
       this.shareConfigTimer = null;
+    }
+    const cleanups = this.cleanups;
+    this.cleanups = [];
+    for (const cleanup of cleanups) {
+      cleanup();
     }
     this.networkAdapter.disconnect();
     this.emitter.removeAllListeners();
