@@ -52,6 +52,7 @@ export const KEYHIVE_EVENTS_KEY = "/ops/";
 export const KEYHIVE_PREKEY_SECRETS_KEY = "/prekey-secrets";
 export const KEYHIVE_LEAF_SECRETS_KEY = "/leaf-secrets/";
 
+/** @deprecated */
 export function docIdFromAutomergeUrl(url: AutomergeUrl): KeyhiveDocumentId {
   const { binaryDocumentId } = parseAutomergeUrl(url);
   return new KeyhiveDocumentId(binaryDocumentId);

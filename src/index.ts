@@ -20,7 +20,6 @@ export {
   initializeLegacyAutomergeRepoKeyhive,
   initializeAutomergeRepoKeyhive,
   KeyhiveStorage,
-  /** @deprecated */
   docIdFromAutomergeUrl,
   KEYHIVE_SYNC_SERVER_CONTACT_CARD_JSON,
   KEYHIVE_SYNC_SERVER_PEER_ID,
