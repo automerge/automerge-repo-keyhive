@@ -5,9 +5,13 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
-    "dist/*",
+    "dist",
     "src"
   ],
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "build": "tsc",
     "build:watch": "tsc --watch",
