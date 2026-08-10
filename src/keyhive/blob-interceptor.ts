@@ -33,9 +33,12 @@ const PCS_KEY_HASHES_STORAGE_KEY = "/pcs-key-hashes";
 //   [.] predsCipher = symmetricEncrypt(selfKey, predecessor entries)
 // Each predecessor entry (inside predsCipher, once decrypted) is 64 bytes:
 //   [32] predecessor commit id  [32] that predecessor's application secret.
-const ENVELOPE_VERSION = 1;
-const COMMIT_ID_BYTES = 32;
-const PRED_ENTRY_BYTES = COMMIT_ID_BYTES + 32;
+/** @internal Exported for tests. */
+export const ENVELOPE_VERSION = 1;
+/** @internal Exported for tests. */
+export const COMMIT_ID_BYTES = 32;
+/** @internal Exported for tests. */
+export const PRED_ENTRY_BYTES = COMMIT_ID_BYTES + 32;
 
 type KeyhiveDoc = NonNullable<Awaited<ReturnType<Keyhive["getDocument"]>>>;
 
@@ -490,7 +493,14 @@ function concatBytes(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-function encodeOuterEnvelope(
+/**
+ * Frame the keyhive-encrypted blob and its encrypted predecessor-key table:
+ * a version byte, the inner length as a little-endian uint32, then the two
+ * payloads. Everything after the inner payload is the predecessor ciphertext.
+ *
+ * @internal Exported for tests.
+ */
+export function encodeOuterEnvelope(
   inner: Uint8Array,
   predsCipher: Uint8Array
 ): Uint8Array {
@@ -502,7 +512,12 @@ function encodeOuterEnvelope(
   return out;
 }
 
-function decodeOuterEnvelope(
+/**
+ * Inverse of {@link encodeOuterEnvelope}.
+ *
+ * @internal Exported for tests.
+ */
+export function decodeOuterEnvelope(
   bytes: Uint8Array
 ): { inner: Uint8Array; predsCipher: Uint8Array } | null {
   if (bytes.length < 5 || bytes[0] !== ENVELOPE_VERSION) return null;
@@ -530,7 +545,14 @@ function parseEnvelope(blob: Uint8Array): {
   }
 }
 
-function decodePreds(
+/**
+ * Parse the decrypted predecessor-key table: a flat run of 64-byte entries,
+ * each a 32-byte commit id followed by that predecessor's 32-byte application
+ * secret. A trailing partial entry is ignored rather than treated as an error.
+ *
+ * @internal Exported for tests.
+ */
+export function decodePreds(
   plain: Uint8Array
 ): Array<{ idHex: string; key: Uint8Array }> {
   const out: Array<{ idHex: string; key: Uint8Array }> = [];
