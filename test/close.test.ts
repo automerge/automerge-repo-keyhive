@@ -78,6 +78,18 @@ describe("close", () => {
     expect(emitter.listenerCount("update")).toBe(0);
   });
 
+  it("runs registered cleanups, and only once", async () => {
+    const { hive } = await buildHive(0);
+    let cleaned = 0;
+    hive.registerCleanup(() => cleaned++);
+
+    hive.close();
+    expect(cleaned).toBe(1);
+
+    hive.close();
+    expect(cleaned).toBe(1);
+  });
+
   it("cancels a debounced shareConfigChanged that has not fired yet", async () => {
     const { hive, shareConfigChangedCount } = await buildHive(50);
 
