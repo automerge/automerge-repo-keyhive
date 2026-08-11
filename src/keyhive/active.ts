@@ -1,15 +1,11 @@
 import { log } from "../logging.js";
-import {
-  PeerId,
-  StorageAdapterInterface,
-} from "@automerge/automerge-repo/slim";
+import { StorageAdapterInterface } from "@automerge/automerge-repo/slim";
 import {
   ContactCard,
   Individual,
   Keyhive,
   Signer,
 } from "@keyhive/keyhive/slim";
-import { peerIdFromSigner } from "../utilities.js";
 
 const ACTIVE_DB_KEY: string = "active-key-pair-2";
 
@@ -43,7 +39,6 @@ async function deserializeKeyPair(bytes: Uint8Array): Promise<CryptoKeyPair> {
 
 export type Active = {
   keyPair: CryptoKeyPair;
-  peerId: PeerId;
   individual: Individual;
   contactCard: ContactCard;
   signer: Signer;
@@ -90,10 +85,8 @@ export async function createActive(
   const contactCard = await keyhive.getExistingContactCard();
   // TODO: We can now just get this off of Keyhive. We probably don't need it here anymore
   const individual: Individual = await keyhive.individual;
-  const peerId = peerIdFromSigner(signer);
   return {
     keyPair: keyPair,
-    peerId: peerId,
     signer: signer,
     individual: individual,
     contactCard: contactCard,
