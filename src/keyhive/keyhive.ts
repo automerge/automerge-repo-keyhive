@@ -132,17 +132,8 @@ const SYNC_SERVERS: Record<"subduction" | "keyhive", SyncServerIdentity> = {
 
 /** Resolve a {@link SyncServerSelection} to its card + peer id (null for "none"). */
 function resolveSyncServer(
-  selection?: SyncServerSelection
+  selection: SyncServerSelection
 ): SyncServerIdentity | null {
-  if (selection === undefined) {
-    log.warn(
-      "[AMRepoKeyhive] No syncServer selection was passed; defaulting to the " +
-        "subduction.sync.inkandswitch.com identity. Pass syncServer " +
-        '("subduction", "keyhive", "none", or a custom identity) explicitly. ' +
-        "The identity must match the server the repo actually connects to."
-    );
-    return SYNC_SERVERS.subduction;
-  }
   if (selection === "none") return null;
   return typeof selection === "string" ? SYNC_SERVERS[selection] : selection;
 }
@@ -169,10 +160,12 @@ export interface KeyhiveIdentityOptions {
    */
   keyPair?: CryptoKeyPair;
   /**
-   * Which sync server to register as the relay. The identity must match the
-   * server the repo actually connects to.
+   * Which sync server to register as the relay.
+   *
+   * The identity must match the server the repo actually connects to.
+   * Pass `"none"` to run without one.
    */
-  syncServer?: SyncServerSelection;
+  syncServer: SyncServerSelection;
 }
 
 /**

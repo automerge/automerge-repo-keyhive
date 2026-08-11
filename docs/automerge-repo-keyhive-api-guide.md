@@ -60,6 +60,7 @@ const { hive, repo } = await initializeAutomergeRepoKeyhive({
   createRepo: (config) => new Repo(config),
   storage: new IndexedDBStorageAdapter("my-app-keyhive"),
   peerIdSuffix: "my-app",
+  syncServer: "subduction",
   repo: {
     storage: new IndexedDBStorageAdapter(),
     subductionWebsocketEndpoints: ["wss://your-sync-server.example.com"],
@@ -87,7 +88,7 @@ collide, even with the same label.
 | `storage` | required | `StorageAdapterInterface` for keyhive state (key pair, archives, events, secrets). Usually a separate database from the repo's document storage. |
 | `peerIdSuffix` | required | A label appended to the identity-derived peer id as `-<label>-<random>`. ARK adds the random component itself, so a plain app name is fine. |
 | `keyPair` | generated | Supply an existing extractable Ed25519 `CryptoKeyPair` instead of loading or generating one. |
-| `syncServer` | `"subduction"` | Which sync server to register as a relay: `"subduction"`, `"keyhive"`, a custom `SyncServerIdentity`, or `"none"`. See "Sync servers" below. `"none"` on the subduction path requires an explicit `remotePeerId`, since that path syncs against a single remote. |
+| `syncServer` | required | Which sync server to register as a relay: `"subduction"`, `"keyhive"`, a custom `SyncServerIdentity`, or `"none"`. See "Sync servers" below. `"none"` on the subduction path requires an explicit `remotePeerId`, since that path syncs against a single remote. |
 | `automaticArchiveIngestion` | `true` | On keyhive changes, automatically persist state and schedule an outbound keyhive sync. |
 | `cachingMode` | `"none"` (adapter path), `"periodic"` (subduction path) | Event cache strategy for the sync protocol: `"none"` or `"periodic"`. `"periodic"` caches sync state and refreshes it on the `syncRequestInterval` timer. |
 | `periodicallyRequestSync` | `true` | Request keyhive sync from peers on an interval. |
@@ -308,10 +309,11 @@ const stats = await hive.stats();
 ## Sync servers
 
 ARK registers a sync server identity as a relay during initialization,
-selected via the `syncServer` option. Pass it explicitly: the identity must
-match the server the repo actually connects to, and a mismatched pair fails
-silently (relay grants and keyhive sync target a peer that never connects).
-If you omit the option, ARK warns and falls back to `"subduction"`.
+selected via the `syncServer` option. The option is required and has no
+default: the identity must match the server the repo actually connects to,
+and a mismatched pair fails silently (relay grants and keyhive sync target a
+peer that never connects). There is no value that is right by default, so
+ARK makes you choose rather than guessing and warning.
 
 Two identities ship with the library, selected by name:
 
