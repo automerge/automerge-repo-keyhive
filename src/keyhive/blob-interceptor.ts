@@ -513,13 +513,22 @@ export function encodeOuterEnvelope(
 }
 
 /**
+ * The two payloads an outer envelope carries: the keyhive-encrypted blob, and
+ * the encrypted predecessor-key table that follows it.
+ *
+ * @internal Exported for tests.
+ */
+export interface OuterEnvelope {
+  inner: Uint8Array;
+  predsCipher: Uint8Array;
+}
+
+/**
  * Inverse of {@link encodeOuterEnvelope}.
  *
  * @internal Exported for tests.
  */
-export function decodeOuterEnvelope(
-  bytes: Uint8Array
-): { inner: Uint8Array; predsCipher: Uint8Array } | null {
+export function decodeOuterEnvelope(bytes: Uint8Array): OuterEnvelope | null {
   if (bytes.length < 5 || bytes[0] !== ENVELOPE_VERSION) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const innerLen = view.getUint32(1, true);
@@ -532,10 +541,9 @@ export function decodeOuterEnvelope(
 
 // Decode the outer envelope and parse its inner keyhive content envelope.
 // Null for any blob this interceptor did not produce.
-function parseEnvelope(blob: Uint8Array): {
-  envelope: { inner: Uint8Array; predsCipher: Uint8Array };
-  encrypted: Encrypted;
-} | null {
+function parseEnvelope(
+  blob: Uint8Array
+): { envelope: OuterEnvelope; encrypted: Encrypted } | null {
   const envelope = decodeOuterEnvelope(blob);
   if (!envelope) return null;
   try {
