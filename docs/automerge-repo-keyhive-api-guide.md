@@ -349,6 +349,21 @@ const keyhiveAdapter = hive.createKeyhiveNetworkAdapter(rawAdapter);
 repo.networkSubsystem.addNetworkAdapter(keyhiveAdapter);
 ```
 
+`WrapNetworkAdapterOptions` does not inherit the options you initialized the
+hive with, and its defaults are not the initialization defaults:
+
+| Option | at initialization | when wrapping |
+| --- | --- | --- |
+| `periodicallyRequestSync` | `true` | `false` |
+| `syncRequestInterval` | `2000` | `2000` |
+| `onlyShareWithSyncServer` | `false` | `false` |
+| `archiveThreshold` | `200` (legacy path only) | inherits the init value on the legacy path; fixed at `200` on the subduction path |
+| `cachingMode` | `"none"` / `"periodic"` | inherited; not settable per-adapter |
+
+So the call above, with no options, produces an adapter that never
+periodically requests keyhive sync, even on a hive that does. Pass
+`periodicallyRequestSync: true` explicitly if you want it.
+
 ## Keyhive sync
 
 Keyhive state (memberships, key rotations, contact cards) syncs over its own
