@@ -338,7 +338,10 @@ export abstract class AutomergeRepoKeyhiveBase {
   /** Grant the configured sync server relay access to a document. */
   abstract addSyncServerRelayToDoc(docUrl: AutomergeUrl): Promise<void>;
 
-  /** @deprecated */
+  /**
+   * @deprecated Kept only for prebuilt bundles compiled against 0.3. Renamed
+   * to {@link addSyncServerRelayToDoc}, which this calls under the hood.
+   */
   async addSyncServerPullToDoc(docUrl: AutomergeUrl): Promise<void> {
     return this.addSyncServerRelayToDoc(docUrl);
   }

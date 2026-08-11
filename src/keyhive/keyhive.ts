@@ -52,7 +52,13 @@ export const KEYHIVE_EVENTS_KEY = "/ops/";
 export const KEYHIVE_PREKEY_SECRETS_KEY = "/prekey-secrets";
 export const KEYHIVE_LEAF_SECRETS_KEY = "/leaf-secrets/";
 
-/** @deprecated */
+/**
+ * @deprecated Kept only for prebuilt bundles compiled against 0.3. Every ARK
+ * method takes an `AutomergeUrl` directly, so this is no longer required.
+ * Use {@link isUnprotectedDoc} to distinguish keyhive documents from non-keyhive
+ * ones, and `listMembers(url)` and `docMemberCapabilities(url)` to inspect
+ * membership.
+ */
 export function docIdFromAutomergeUrl(url: AutomergeUrl): KeyhiveDocumentId {
   const { binaryDocumentId } = parseAutomergeUrl(url);
   return new KeyhiveDocumentId(binaryDocumentId);
