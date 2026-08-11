@@ -41,14 +41,23 @@ import {
 import { signData } from "../network-adapter/messages.js";
 import { KeyhiveSubductionAdapter } from "../network-adapter/subduction-transport/keyhive-subduction-adapter.js";
 
-/** Options for wrapping an additional raw network adapter. */
+/**
+ * Options for wrapping an additional raw network adapter.
+ *
+ * These do not inherit from the options the hive was initialized with,
+ * with one exception: `cachingMode` is taken from initialization and cannot
+ * be set per-adapter. Everything else falls back to the defaults below.
+ */
 export interface WrapNetworkAdapterOptions {
   /**
    * Share only with the configured sync server. Messages from any other peer on
    * this adapter are ignored, so nothing is exchanged with them. Default false.
    */
   onlyShareWithSyncServer?: boolean;
-  /** Request keyhive sync from this adapter's peers on an interval. Default false. */
+  /**
+   * Request keyhive sync from this adapter's peers on an interval.
+   * Default false.
+   */
   periodicallyRequestSync?: boolean;
   /** Interval for periodic sync requests in ms. Default 2000. */
   syncRequestInterval?: number;
