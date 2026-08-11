@@ -29,6 +29,13 @@ export {
 export type {
   SyncServerIdentity,
   SyncServerSelection,
+  KeyhiveIdentityOptions,
+  KeyhiveSyncOptions,
+  LegacyHiveOptions,
+  SubductionHiveOptions,
+  InitRepoLinkOptions,
+  InitializeLegacyAutomergeRepoKeyhiveOptions,
+  InitializeAutomergeRepoKeyhiveOptions,
 } from "./keyhive/keyhive.js";
 export { KeyhiveNetworkAdapter } from "./network-adapter/network-adapter.js";
 export {

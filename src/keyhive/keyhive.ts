@@ -147,13 +147,93 @@ function resolveSyncServer(
   return typeof selection === "string" ? SYNC_SERVERS[selection] : selection;
 }
 
-async function bootstrapKeyhive(options: {
+/**
+ * Identity and storage options, shared by both initialization functions.
+ */
+export interface KeyhiveIdentityOptions {
+  /**
+   * Storage for keyhive state: the identity key pair, archives, events, and
+   * secrets.
+   */
   storage: StorageAdapterInterface;
+  /**
+   * A readability label appended to the identity-derived peer id as
+   * `-<label>-<random>`. ARK adds the random component itself, so peers
+   * sharing an identity (e.g., several tabs) never collide even with the same
+   * label.
+   */
   peerIdSuffix: string;
+  /**
+   * An existing extractable Ed25519 key pair to adopt as this identity,
+   * instead of loading one from `storage` or generating a new one.
+   */
   keyPair?: CryptoKeyPair;
-  /** Which sync server to register as the relay. Defaults to subduction.sync. */
+  /**
+   * Which sync server to register as the relay. The identity must match the
+   * server the repo actually connects to.
+   */
   syncServer?: SyncServerSelection;
-}): Promise<KeyhiveContext> {
+}
+
+/**
+ * Sync-behaviour options shared by both initialization functions.
+ */
+export interface KeyhiveSyncOptions {
+  /**
+   * On keyhive changes, persist state and schedule a keyhive sync.
+   * Default true.
+   */
+  automaticArchiveIngestion?: boolean;
+  /**
+   * Event cache strategy for the sync protocol. `"periodic"` caches sync
+   * state and refreshes it on the `syncRequestInterval` timer.
+   */
+  cachingMode?: "none" | "periodic";
+  /** Request keyhive sync from peers on an interval. Default true. */
+  periodicallyRequestSync?: boolean;
+  /**
+   * Interval in ms for periodic sync requests, and for periodic cache
+   * refresh. Default 2000.
+   */
+  syncRequestInterval?: number;
+}
+
+/** Options for building a hive on the automerge-repo network-adapter path. */
+export interface LegacyHiveOptions
+  extends KeyhiveIdentityOptions, KeyhiveSyncOptions {
+  /** The raw adapter to wrap. Its traffic is signed and verified. */
+  networkAdapter: NetworkAdapter;
+  /**
+   * Share only with the configured sync server. Messages from any other peer
+   * are ignored. Default false. Throws if `syncServer` is `"none"`.
+   */
+  onlyShareWithSyncServer?: boolean;
+  /** If set, batch outgoing keyhive messages on this interval in ms. */
+  batchInterval?: number;
+  /** Retry events left pending in storage on reconnect. Default true. */
+  retryPendingFromStorage?: boolean;
+  /** Compact events into an archive in the background. Default true. */
+  enableCompaction?: boolean;
+  /** Event count that triggers compaction into an archive. Default 200. */
+  archiveThreshold?: number;
+}
+
+/** Options for building a hive on the subduction path. */
+export interface SubductionHiveOptions
+  extends KeyhiveIdentityOptions, KeyhiveSyncOptions {
+  /** The subduction instance to sync over. */
+  subduction: Subduction | Promise<Subduction>;
+  /**
+   * The single remote this hive syncs against. Defaults to the peer id of the
+   * selected `syncServer`, and is therefore required when `syncServer` is
+   * `"none"`.
+   */
+  remotePeerId?: PeerId;
+}
+
+async function bootstrapKeyhive(
+  options: KeyhiveIdentityOptions
+): Promise<KeyhiveContext> {
   const { keyPair, signer } = await loadOrCreateKeyPairAndSigner(
     options.storage,
     options.keyPair
@@ -306,22 +386,9 @@ function setupEventFlushListener(
 }
 
 /** Build the hive for the legacy network adapter path (no repo wiring). */
-async function buildLegacyHive(options: {
-  storage: StorageAdapterInterface;
-  peerIdSuffix: string;
-  networkAdapter: NetworkAdapter;
-  automaticArchiveIngestion?: boolean;
-  onlyShareWithSyncServer?: boolean;
-  periodicallyRequestSync?: boolean;
-  cachingMode?: "none" | "periodic";
-  keyPair?: CryptoKeyPair;
-  syncServer?: SyncServerSelection;
-  syncRequestInterval?: number;
-  batchInterval?: number;
-  retryPendingFromStorage?: boolean;
-  enableCompaction?: boolean;
-  archiveThreshold?: number;
-}): Promise<LegacyAutomergeRepoKeyhive> {
+async function buildLegacyHive(
+  options: LegacyHiveOptions
+): Promise<LegacyAutomergeRepoKeyhive> {
   const {
     automaticArchiveIngestion = true,
     onlyShareWithSyncServer = false,
@@ -418,18 +485,9 @@ async function buildLegacyHive(options: {
  * Build the hive for the subduction path (no repo wiring): a keyhive
  * instance and a `KeyhiveSubductionAdapter` backed by subduction.
  */
-async function buildHive(options: {
-  storage: StorageAdapterInterface;
-  peerIdSuffix: string;
-  subduction: Subduction | Promise<Subduction>;
-  remotePeerId?: PeerId;
-  keyPair?: CryptoKeyPair;
-  syncServer?: SyncServerSelection;
-  automaticArchiveIngestion?: boolean;
-  cachingMode?: "none" | "periodic";
-  syncRequestInterval?: number;
-  periodicallyRequestSync?: boolean;
-}): Promise<AutomergeRepoKeyhive> {
+async function buildHive(
+  options: SubductionHiveOptions
+): Promise<AutomergeRepoKeyhive> {
   const {
     automaticArchiveIngestion = true,
     cachingMode = "periodic" as "none" | "periodic",
@@ -546,7 +604,7 @@ async function buildHive(options: {
 }
 
 /** Options shared by both init functions for wiring the hive to its repo. */
-interface InitRepoLinkOptions {
+export interface InitRepoLinkOptions {
   /**
    * Debounce interval for propagating keyhive membership changes to
    * `repo.shareConfigChanged()`. Default 2000 ms.
@@ -554,6 +612,33 @@ interface InitRepoLinkOptions {
   shareConfigDebounceMs?: number;
   /** Called immediately before each (debounced) `repo.shareConfigChanged()`. */
   onBeforeShareConfigChanged?: () => void;
+}
+
+/** Options for {@link initializeLegacyAutomergeRepoKeyhive}. */
+export interface InitializeLegacyAutomergeRepoKeyhiveOptions
+  extends LegacyHiveOptions, InitRepoLinkOptions {
+  /** Constructs the `Repo` from a config. Usually `(config) => new Repo(config)`. */
+  createRepo: (config: RepoConfig) => Repo;
+  /**
+   * Extra `RepoConfig` fields. The hive-derived fields are injected by the
+   * init function and so are absent here.
+   */
+  repo?: Omit<RepoConfig, "peerId" | "idFactory" | "network">;
+}
+
+/** Options for {@link initializeAutomergeRepoKeyhive}. */
+export interface InitializeAutomergeRepoKeyhiveOptions
+  extends Omit<SubductionHiveOptions, "subduction">, InitRepoLinkOptions {
+  /** Constructs the `Repo` from a config. Usually `(config) => new Repo(config)`. */
+  createRepo: (config: RepoConfig) => Repo;
+  /**
+   * Extra `RepoConfig` fields. The hive-derived fields are injected by the
+   * init function and so are absent here.
+   */
+  repo?: Omit<
+    RepoConfig,
+    "peerId" | "idFactory" | "signer" | "subductionBlobInterceptor"
+  >;
 }
 
 /**
@@ -565,11 +650,7 @@ interface InitRepoLinkOptions {
  * and links the resulting repo to the hive.
  */
 export async function initializeLegacyAutomergeRepoKeyhive(
-  options: Parameters<typeof buildLegacyHive>[0] &
-    InitRepoLinkOptions & {
-      createRepo: (config: RepoConfig) => Repo;
-      repo?: Omit<RepoConfig, "peerId" | "idFactory" | "network">;
-    }
+  options: InitializeLegacyAutomergeRepoKeyhiveOptions
 ): Promise<{ hive: LegacyAutomergeRepoKeyhive; repo: Repo }> {
   initKeyhiveWasm();
   const {
@@ -605,14 +686,7 @@ export async function initializeLegacyAutomergeRepoKeyhive(
  * hands `repo.subduction` back to the hive, and links the repo to the hive.
  */
 export async function initializeAutomergeRepoKeyhive(
-  options: Omit<Parameters<typeof buildHive>[0], "subduction"> &
-    InitRepoLinkOptions & {
-      createRepo: (config: RepoConfig) => Repo;
-      repo?: Omit<
-        RepoConfig,
-        "peerId" | "idFactory" | "signer" | "subductionBlobInterceptor"
-      >;
-    }
+  options: InitializeAutomergeRepoKeyhiveOptions
 ): Promise<{ hive: AutomergeRepoKeyhive; repo: Repo }> {
   initKeyhiveWasm();
   const {
