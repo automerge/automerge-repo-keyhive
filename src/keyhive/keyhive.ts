@@ -292,7 +292,6 @@ function setupEventFlushListener(
   emitter.on("update", onUpdate);
 
   return () => {
-    emitter.off("update", onUpdate);
     if (syncTimeout) {
       clearTimeout(syncTimeout);
       syncTimeout = undefined;
