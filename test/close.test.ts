@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import { CiphertextStore, Keyhive, Signer } from "@keyhive/keyhive/slim";
 import type { PeerId, Repo } from "@automerge/automerge-repo/slim";
 import { initKeyhiveWasm } from "../src/index.js";
@@ -40,10 +40,7 @@ async function buildHive(debounceMs: number) {
   const blobInterceptor = {
     trackedDocIds: [] as string[],
     docIdsAwaitingPcsKey: [] as string[],
-    cleared: 0,
-    clearCachedKeyMaterial() {
-      this.cleared++;
-    },
+    clearCachedKeyMaterial: vi.fn(),
   };
 
   const hive = new AutomergeRepoKeyhive(
@@ -88,21 +85,21 @@ describe("close", () => {
   it("clears the blob interceptor's cached key material", async () => {
     const { hive, blobInterceptor } = await buildHive(0);
 
-    expect(blobInterceptor.cleared).toBe(0);
+    expect(blobInterceptor.clearCachedKeyMaterial).not.toHaveBeenCalled();
     hive.close();
-    expect(blobInterceptor.cleared).toBe(1);
+    expect(blobInterceptor.clearCachedKeyMaterial).toHaveBeenCalledOnce();
   });
 
   it("runs registered cleanups, and only once", async () => {
     const { hive } = await buildHive(0);
-    let cleaned = 0;
-    hive.registerCleanup(() => cleaned++);
+    const cleanup = vi.fn();
+    hive.registerCleanup(cleanup);
 
     hive.close();
-    expect(cleaned).toBe(1);
+    expect(cleanup).toHaveBeenCalledOnce();
 
     hive.close();
-    expect(cleaned).toBe(1);
+    expect(cleanup).toHaveBeenCalledOnce();
   });
 
   it("cancels a debounced shareConfigChanged that has not fired yet", async () => {
