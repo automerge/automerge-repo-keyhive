@@ -18,7 +18,7 @@ custom setups.
   to documents.
 - **Access levels.** Every document has members, and each member has one of
   four levels: `relay` (sync bytes but no read access), `read`, `edit`,
-  and `admin`. If access is granted to a special "public" member, eveyone has
+  and `admin`. If access is granted to a special "public" member, everyone has
   that access level.
 - **Peer id.** ARK peer ids are the base64-encoded verifying key, optionally
   followed by `-<suffix>`. The suffix lets several peers (for example, several
@@ -87,7 +87,7 @@ collide, even with the same label.
 | `storage` | required | `StorageAdapterInterface` for keyhive state (key pair, archives, events, secrets). Usually a separate database from the repo's document storage. |
 | `peerIdSuffix` | required | A label appended to the identity-derived peer id as `-<label>-<random>`. ARK adds the random component itself, so a plain app name is fine. |
 | `keyPair` | generated | Supply an existing extractable Ed25519 `CryptoKeyPair` instead of loading or generating one. |
-| `syncServer` | `"subduction"` | Which sync server to register as a relay: `"subduction"`, `"keyhive"`, or a custom `SyncServerIdentity`. See "Sync servers" below. |
+| `syncServer` | `"subduction"` | Which sync server to register as a relay: `"subduction"`, `"keyhive"`, a custom `SyncServerIdentity`, or `"none"`. See "Sync servers" below. `"none"` on the subduction path requires an explicit `remotePeerId`, since that path syncs against a single remote. |
 | `automaticArchiveIngestion` | `true` | On keyhive changes, automatically persist state and schedule an outbound keyhive sync. |
 | `cachingMode` | `"none"` (adapter path), `"periodic"` (subduction path) | Event cache strategy for the sync protocol: `"none"` or `"periodic"`. `"periodic"` caches sync state and refreshes it on the `syncRequestInterval` timer. |
 | `periodicallyRequestSync` | `true` | Request keyhive sync from peers on an interval. |
@@ -100,7 +100,17 @@ collide, even with the same label.
 
 ## The hive object
 
-Initialization returns a "hive" that shares a common core:
+There are two hive types:
+
+- `AutomergeRepoKeyhive`, from `initializeAutomergeRepoKeyhive`, syncs over
+  subduction against a single remote.
+- `LegacyAutomergeRepoKeyhive`, from `initializeLegacyAutomergeRepoKeyhive`,
+  syncs over an automerge-repo `NetworkAdapter` and can talk to many peers.
+
+Both extend `AutomergeRepoKeyhiveBase`. Code that only needs membership and
+access queries should type against the base class so it works with either.
+
+The shared core:
 
 - `hive.active`: the local identity.
 - `hive.keyhive`: the underlying `Keyhive` WASM instance, for operations not
@@ -117,11 +127,20 @@ Initialization returns a "hive" that shares a common core:
   raw network adapter. See "Wrapping additional network adapters" below.
 - `hive.close()`: stop timers, remove all emitter listeners, and disconnect
   the network adapter. Call on teardown. The hive is unusable afterwards.
+
+Only on `AutomergeRepoKeyhive` (the subduction path):
+
 - `hive.blobInterceptor`: the `KeyhiveBlobInterceptor` that encrypts and
   decrypts document blobs. The init function passes it to the repo.
 - `hive.notifySameAgentKeyhiveChange()`: signal a keyhive change made by
   another instance of this same identity (for example, another tab), so the
   repo re-evaluates share configuration.
+
+Only on `LegacyAutomergeRepoKeyhive`:
+
+- `hive.syncServer`: the resolved `SyncServer`, or `null` when initialized
+  with `syncServer: "none"`.
+- `hive.buildServerSubductionPolicy()`: see "Running a sync server" below.
 
 
 ## Identity and contact cards
@@ -202,11 +221,14 @@ const card = ContactCard.fromJson(memberContactCardJson);
 await hive.addMemberToDoc(docUrl, card, Access.edit());
 ```
 
-Adding a member with read access also rotates the
-document key and writes a small "nudge" edit so the new member can decrypt
-prior history. The edit sets a timestamp on a namespaced field at the
-document root: `__automerge-repo-keyhive__last-added-member` (exported as
-`NUDGE_FIELD`). Applications that iterate document keys should skip it.
+On the subduction path, adding any member also rotates the document key and
+writes a small "nudge" edit so the new member can decrypt prior history. The
+edit sets a timestamp on a namespaced field at the document root:
+`__automerge-repo-keyhive__last-added-member-ts`. Applications that iterate
+document keys should skip it, and can import `NUDGE_FIELD` rather than hardcoding
+the string.
+
+The rotation fires for every member this agent adds and it is debounced after `shareConfigDebounceMs`.
 
 ### Revoke a member
 
@@ -362,8 +384,9 @@ setKeyhiveLogLevel("debug"); // "silent" | "error" | "warn" | "info" | "debug"
 
 ## Utilities
 
-- `isUnprotectedDoc(url)`: true if the URL refers to an unprotected (pre-keyhive)
-  document. Throws only if the URL itself is malformed.
+- `isUnprotectedDoc(url)`: true if the URL refers to an unprotected (non-keyhive)
+  document. Throws only if the URL itself is malformed. This is the supported
+  way to distinguish keyhive documents from unprotected ones.
 - `UnprotectedDocError`: thrown by membership operations when the target is an
   unprotected document.
 - `uint8ArrayToHex(bytes)`: hex-encode bytes (member ids, hashes).
