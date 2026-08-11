@@ -118,7 +118,11 @@ The shared core:
   wrapped by ARK.
 - `hive.keyhiveStorage`: the `KeyhiveStorage` wrapper that persists keyhive
   state.
-- `hive.peerId`: the peer id to give the repo.
+- `hive.peerId`: the peer id to give the repo. It includes the
+  `-<peerIdSuffix>-<random>` suffix, so it is per-session. For a durable identity
+  string use `verifyingKeyPeerIdWithoutSuffix(hive.peerId)`, which is the bare
+  verifying key and stable for the life of the key pair, or
+  `hive.active.individual.id` for the keyhive identifier.
 - `hive.emitter`: a `KeyhiveEventEmitter` that emits `"update"` with a keyhive
   `Event` whenever keyhive state changes.
 - `hive.networkAdapter`: the keyhive sync driver.
