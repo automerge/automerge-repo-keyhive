@@ -3,7 +3,7 @@
 `@automerge/automerge-repo-keyhive` adds end-to-end access control and
 encryption to [automerge-repo](https://github.com/automerge/automerge-repo)
 using the [keyhive](https://github.com/inkandswitch/keyhive) protocol.
-Documents get member lists with ordered access levels (relay, read, edit,
+Documents have member lists with ordered access levels (relay, read, edit,
 admin), membership changes sync over a dedicated protocol, and document data
 is encrypted so sync servers relay ciphertext they cannot read.
 
@@ -59,5 +59,7 @@ await hive.addMemberToDoc(handle.url, collaboratorContactCard, Access.edit());
 
 ## Status
 
-Alpha. Published for early adopters; the public API will change without
+Alpha. Published for early adopters. The public API will change without
 notice between releases. Pin an exact version.
+
+The TypeScript implementation of the keyhive sync protocol will be removed in the near future in favor of a WASM API for the Rust implementation.

@@ -106,9 +106,7 @@ export default [
     },
 
     rules: {
-      // Formatting is prettier's job; eslint only owns correctness rules here.
-      // (The original config had `semi: [2, "never"]`, which contradicted both
-      // prettier's default and the codebase's overwhelmingly semicolon style.)
+      // Prettier handles formatting. Eslint only specifies correctness rules here.
       "@typescript-eslint/no-floating-promises": 2,
       "@typescript-eslint/no-empty-function": 0,
       "@typescript-eslint/no-non-null-assertion": 0,

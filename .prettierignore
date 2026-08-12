@@ -1,7 +1,2 @@
 dist
 node_modules
-
-# Excluded by decision: the reconciliation state machine in this file is
-# intricate and is deliberately frozen ahead of release, so it is left out of
-# the repo-wide format rather than rewritten. eslint.config.mjs ignores it too.
-src/network-adapter/sync-protocol.ts
