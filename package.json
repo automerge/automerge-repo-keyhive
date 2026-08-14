@@ -34,7 +34,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.1.0",
-    "@eslint/js": "^10.0.1",
+    "@eslint/js": "^9.39.2",
     "@noble/ed25519": "^3.0.0",
     "@types/debug": "^4.1.12",
     "@types/uuid": "^10.0.0",

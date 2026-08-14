@@ -69,10 +69,6 @@ export default [
       "**/lib/*",
       "**/node_modules/*",
       "eslint.config.mjs",
-      // Excluded by decision: the reconciliation state machine in this file is
-      // intricate and is deliberately frozen ahead of release. See
-      // .prettierignore for the same exclusion on the formatting side.
-      "src/network-adapter/sync-protocol.ts",
     ],
   },
   js.configs.recommended,

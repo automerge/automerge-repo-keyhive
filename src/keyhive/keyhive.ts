@@ -301,6 +301,7 @@ function setupEventFlushListener(
   let pendingPrekeySecrets = false;
   let pendingSync = false;
   let flushQueued = false;
+  let closed = false;
 
   const onUpdate = (event: KeyhiveEvent) => {
     if (!keyhiveStorage.isEventWriteSuppressed()) {
@@ -349,7 +350,7 @@ function setupEventFlushListener(
             driver.invalidateCaches();
           }
 
-          if (needSync && !syncTimeout) {
+          if (needSync && !syncTimeout && !closed) {
             syncTimeout = setTimeout(() => {
               syncTimeout = undefined;
               driver.syncKeyhive();
@@ -365,6 +366,8 @@ function setupEventFlushListener(
   emitter.on("update", onUpdate);
 
   return () => {
+    closed = true;
+    emitter.off("update", onUpdate);
     if (syncTimeout) {
       clearTimeout(syncTimeout);
       syncTimeout = undefined;
