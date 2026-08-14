@@ -7,6 +7,33 @@ Documents have member lists with ordered access levels (relay, read, edit,
 admin), membership changes sync over a dedicated protocol, and document data
 is encrypted so sync servers relay ciphertext they cannot read.
 
+## Status
+
+Alpha. The public API will change without notice between releases. Pin an exact version.
+
+The TypeScript implementation of the keyhive sync protocol will be removed in the near future in favor of a WASM API for the Rust implementation, which is a major refactor. Under `src/network-adapter`, this means removing all caching modules plus at least:
+
+```
+sync-protocol.ts
+subduction-transport/keyhive-subduction-adapter.ts
+subduction-transport/codec.ts
+network-adapter.ts
+cbor-builder.ts
+metrics.ts
+batch.ts
+pending.ts
+```
+
+## Documentation
+
+- [API guide](docs/automerge-repo-keyhive-api-guide.md): the full public
+  API, including initialization on both transports, identity and contact
+  cards, membership and access, sync servers, bundler setup, and the
+  storage layout.
+- [Example app](https://github.com/inkandswitch/keyhive-todo-app-demo): a
+  complete todo application built on ARK, including a reference Vite
+  configuration.
+
 ## Install
 
 ```
@@ -46,20 +73,3 @@ const handle = await repo.create2({ title: "hello" });
 await hive.addSyncServerRelayToDoc(handle.url);
 await hive.addMemberToDoc(handle.url, collaboratorContactCard, Access.edit());
 ```
-
-## Documentation
-
-- [API guide](docs/automerge-repo-keyhive-api-guide.md): the full public
-  API, including initialization on both transports, identity and contact
-  cards, membership and access, sync servers, bundler setup, and the
-  storage layout.
-- [Example app](https://github.com/inkandswitch/keyhive-todo-app-demo): a
-  complete todo application built on ARK, including a reference Vite
-  configuration.
-
-## Status
-
-Alpha. Published for early adopters. The public API will change without
-notice between releases. Pin an exact version.
-
-The TypeScript implementation of the keyhive sync protocol will be removed in the near future in favor of a WASM API for the Rust implementation.

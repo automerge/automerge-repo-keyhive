@@ -41,32 +41,6 @@ import {
 import { signData } from "../network-adapter/messages.js";
 import { KeyhiveSubductionAdapter } from "../network-adapter/subduction-transport/keyhive-subduction-adapter.js";
 
-/**
- * Options for wrapping an additional raw network adapter.
- *
- * These do not inherit from the options the hive was initialized with,
- * with one exception: `cachingMode` is taken from initialization and cannot
- * be set per-adapter. Everything else falls back to the defaults below.
- */
-export interface WrapNetworkAdapterOptions {
-  /**
-   * Share only with the configured sync server. Messages from any other peer on
-   * this adapter are ignored, so nothing is exchanged with them. Default false.
-   */
-  onlyShareWithSyncServer?: boolean;
-  /**
-   * Request keyhive sync from this adapter's peers on an interval.
-   * Default false.
-   */
-  periodicallyRequestSync?: boolean;
-  /** Interval for periodic sync requests in ms. Default 2000. */
-  syncRequestInterval?: number;
-  /** If set, batch outgoing keyhive messages on this interval in ms. */
-  batchInterval?: number;
-  /** Event count that triggers compaction into an archive. Default 200. */
-  archiveThreshold?: number;
-}
-
 export type CreateKeyhiveNetworkAdapter = (
   networkAdapter: NetworkAdapter,
   options?: WrapNetworkAdapterOptions
@@ -79,8 +53,8 @@ export const NUDGE_FIELD = "__automerge-repo-keyhive__last-added-member-ts";
 
 /**
  * Shared base for {@link LegacyAutomergeRepoKeyhive} and
- * {@link AutomergeRepoKeyhive}. Holds the keyhive state common to both
- * paths and operations that depend only on the `Keyhive` instance.
+ * {@link AutomergeRepoKeyhive}. Holds the keyhive state common to
+ * operations that depend only on the `Keyhive` instance.
  */
 export abstract class AutomergeRepoKeyhiveBase {
   /**
@@ -90,8 +64,8 @@ export abstract class AutomergeRepoKeyhiveBase {
   abstract readonly networkAdapter: { disconnect(): void };
 
   /**
-   * Debounce timer for the `shareConfigChanged` notification scheduled by each
-   * path's `linkRepo`.
+   * Debounce timer for the `shareConfigChanged` notification scheduled by
+   * `linkRepo`.
    */
   protected shareConfigTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -202,8 +176,9 @@ export abstract class AutomergeRepoKeyhiveBase {
     contactCard: ContactCard,
     access: Access
   ): Promise<void> {
-    if (isUnprotectedDoc(docUrl))
+    if (isUnprotectedDoc(docUrl)) {
       throw new UnprotectedDocError("addMemberToDoc", docUrl);
+    }
     await this.receiveContactCard(contactCard);
     const agent = await this.keyhive.getAgent(contactCard.id);
     if (!agent) {
@@ -228,8 +203,9 @@ export abstract class AutomergeRepoKeyhiveBase {
     docUrl: AutomergeUrl,
     member: Identifier | string
   ): Promise<void> {
-    if (isUnprotectedDoc(docUrl))
+    if (isUnprotectedDoc(docUrl)) {
       throw new UnprotectedDocError("revokeMemberFromDoc", docUrl);
+    }
     const identifier =
       typeof member === "string"
         ? new Identifier(hexToUint8Array(member))
@@ -758,4 +734,26 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
       keyhiveIdentifierFromPeerId(this.networkAdapter.remotePeerId).toBytes()
     );
   }
+}
+
+/**
+ * Options for wrapping an additional raw network adapter.
+ */
+export interface WrapNetworkAdapterOptions {
+  /**
+   * Share only with the configured sync server. Messages from any other peer on
+   * this adapter are ignored, so nothing is exchanged with them. Default false.
+   */
+  onlyShareWithSyncServer?: boolean;
+  /**
+   * Request keyhive sync from this adapter's peers on an interval.
+   * Default false.
+   */
+  periodicallyRequestSync?: boolean;
+  /** Interval for periodic sync requests in ms. Default 2000. */
+  syncRequestInterval?: number;
+  /** If set, batch outgoing keyhive messages on this interval in ms. */
+  batchInterval?: number;
+  /** Event count that triggers compaction into an archive. Default 200. */
+  archiveThreshold?: number;
 }

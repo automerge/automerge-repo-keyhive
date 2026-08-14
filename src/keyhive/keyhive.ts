@@ -53,11 +53,10 @@ export const KEYHIVE_PREKEY_SECRETS_KEY = "/prekey-secrets";
 export const KEYHIVE_LEAF_SECRETS_KEY = "/leaf-secrets/";
 
 /**
- * @deprecated Kept only for prebuilt bundles compiled against 0.3. Every ARK
- * method takes an `AutomergeUrl` directly, so this is no longer required.
- * Use {@link isUnprotectedDoc} to distinguish keyhive documents from non-keyhive
- * ones, and `listMembers(url)` and `docMemberCapabilities(url)` to inspect
- * membership.
+ * @deprecated Kept public only for prebuilt bundles compiled against 0.3.
+ * Will eventually be private. Every ARK method takes an `AutomergeUrl` directly,
+ * so this is no longer required. Use {@link isUnprotectedDoc} to distinguish
+ * keyhive documents from non-keyhive ones.
  */
 export function docIdFromAutomergeUrl(url: AutomergeUrl): KeyhiveDocumentId {
   const { binaryDocumentId } = parseAutomergeUrl(url);
@@ -82,8 +81,7 @@ export type SyncServerSelection =
   "subduction" | "keyhive" | "none" | SyncServerIdentity;
 
 /**
- * Shared keyhive context: signer, storage, keyhive instance, active,
- * peerId, emitter, queue, and the selected syncServer.
+ * Shared keyhive context.
  */
 interface KeyhiveContext {
   active: Active;
@@ -109,16 +107,14 @@ export const KEYHIVE_SYNC_SERVER_CONTACT_CARD_JSON =
 export const KEYHIVE_SYNC_SERVER_PEER_ID =
   "1/Qebw9O69oH8T/ejYMhFup0tNBh69I3ytGqsmIl358=" as PeerId;
 
-/** subduction.sync.inkandswitch.com keyhive contact card (issuer f709c58c…),
- * captured over the wire from its MissingContactCard at subduction-transport/codec.ts. */
+/** subduction.sync.inkandswitch.com keyhive contact card (issuer f709c58c…) . */
 export const SUBDUCTION_SYNC_SERVER_CONTACT_CARD_JSON =
   '{"Rotate":{"payload":{"old":[33,137,111,238,179,125,3,30,133,139,50,112,178,153,171,132,174,170,136,174,242,17,131,192,37,125,253,108,91,65,84,110],"new":[34,214,236,200,87,89,211,226,207,54,34,177,181,49,195,126,244,174,192,163,6,174,225,45,147,0,82,73,79,78,196,60]},"issuer":[247,9,197,140,25,81,187,131,117,217,148,149,178,185,64,74,187,27,132,103,122,139,165,214,120,158,18,104,148,65,76,25],"signature":[92,213,174,209,83,196,175,199,100,26,241,68,150,220,89,224,87,196,169,73,234,232,74,212,191,3,116,4,138,189,221,44,177,140,139,161,19,139,164,49,224,197,190,25,144,134,90,157,255,86,184,5,184,94,70,127,22,40,43,34,200,182,65,8]}}';
 /** subduction.sync.inkandswitch.com subduction peer id. */
 export const SUBDUCTION_SYNC_SERVER_PEER_ID =
   "9wnFjBlRu4N12ZSVsrlASrsbhGd6i6XWeJ4SaJRBTBk=" as PeerId;
 
-// Known sync-server identities, keyed by name. Each card and peer id are a
-// matched pair, so selecting by name can never mismatch them.
+// Known sync-server identities, keyed by name.
 const SYNC_SERVERS: Record<"subduction" | "keyhive", SyncServerIdentity> = {
   subduction: {
     contactCardJson: SUBDUCTION_SYNC_SERVER_CONTACT_CARD_JSON,
@@ -130,7 +126,7 @@ const SYNC_SERVERS: Record<"subduction" | "keyhive", SyncServerIdentity> = {
   },
 };
 
-/** Resolve a {@link SyncServerSelection} to its card + peer id (null for "none"). */
+/** Resolve a {@link SyncServerSelection} to its card and peer id (null for "none"). */
 function resolveSyncServer(
   selection: SyncServerSelection
 ): SyncServerIdentity | null {
@@ -149,7 +145,7 @@ export interface KeyhiveIdentityOptions {
   storage: StorageAdapterInterface;
   /**
    * A readability label appended to the identity-derived peer id as
-   * `-<label>-<random>`. ARK adds the random component itself, so peers
+   * `-<label>-<random>`. ARK adds the `-<random>` component itself, so peers
    * sharing an identity (e.g., several tabs) never collide even with the same
    * label.
    */
@@ -292,16 +288,14 @@ interface KeyhiveSyncDriver {
  * an outbound sync after 1s.
  *
  * Returns a cleanup callback that detaches the listener and cancels any
- * pending sync timer. `AutomergeRepoKeyhiveBase.close()` runs it; without
- * that, a flush scheduled just before close fires up to a second later and
- * calls `syncKeyhive()` on an already-disconnected adapter.
+ * pending sync timer. `AutomergeRepoKeyhiveBase.close()` runs it.
  */
 function setupEventFlushListener(
-  bootstrap: KeyhiveContext,
+  keyhiveContext: KeyhiveContext,
   driver: KeyhiveSyncDriver,
   options: { automaticArchiveIngestion: boolean }
 ): () => void {
-  const { emitter, keyhiveQueue, keyhiveStorage, keyhive } = bootstrap;
+  const { emitter, keyhiveQueue, keyhiveStorage, keyhive } = keyhiveContext;
   let syncTimeout: ReturnType<typeof setTimeout> | undefined;
   let pendingEventBytes: Uint8Array[] = [];
   let pendingPrekeySecrets = false;
@@ -487,7 +481,7 @@ async function buildHive(
     syncRequestInterval = 2000,
     periodicallyRequestSync = true,
   } = options;
-  const bootstrap = await bootstrapKeyhive(options);
+  const keyhiveContext = await bootstrapKeyhive(options);
   const {
     active,
     keyhive,
@@ -496,7 +490,7 @@ async function buildHive(
     emitter,
     keyhiveQueue,
     serverPeerIdHardcoded,
-  } = bootstrap;
+  } = keyhiveContext;
 
   const remotePeerId = options.remotePeerId ?? serverPeerIdHardcoded;
   if (!remotePeerId) {
@@ -519,7 +513,7 @@ async function buildHive(
   });
 
   const cleanupEventFlushListener = setupEventFlushListener(
-    bootstrap,
+    keyhiveContext,
     networkAdapter,
     { automaticArchiveIngestion }
   );

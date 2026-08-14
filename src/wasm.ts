@@ -7,7 +7,7 @@ let wasmInitialized = false;
 
 /**
  * Initialize the keyhive WASM module. Idempotent. The init functions call
- * this automatically; call it directly only when using keyhive WASM types
+ * this automatically. Call it directly only when using keyhive WASM types
  * (e.g. `ContactCard`, `Access`) before initializing a hive.
  */
 export function initKeyhiveWasm(): void {

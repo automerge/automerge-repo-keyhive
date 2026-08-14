@@ -307,7 +307,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
 
       // Decrypt this blob and, on a cold load, walk its predecessor chain by
       // loading just the parent blobs it points at. Collect this blob's
-      // plaintext plus any ancestor plaintexts the walk recovers; their
+      // plaintext plus any ancestor plaintexts the walk recovers. Their
       // concatenation is a valid `loadIncremental` input.
       const out: Uint8Array[] = [];
       const seen = new Set<string>();
@@ -324,7 +324,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     });
   }
 
-  // Decrypt one blob, then follow its predecessor-secret chain: recover each
+  // Decrypt one blob, then follow its predecessor-secret chain. Recover each
   // parent's key from the decrypted preds and, when `loadBlob` is available,
   // load just those parent blobs and recurse. Pushes every recovered plaintext
   // (this blob first, then ancestors) into `out`. Returns false only when this
