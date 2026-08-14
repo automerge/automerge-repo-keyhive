@@ -227,8 +227,9 @@ export abstract class AutomergeRepoKeyhiveBase {
    * keyhive.
    */
   async setPublicAccess(docUrl: AutomergeUrl, access: Access): Promise<void> {
-    if (isUnprotectedDoc(docUrl))
+    if (isUnprotectedDoc(docUrl)) {
       throw new UnprotectedDocError("setPublicAccess", docUrl);
+    }
     const publicId = Identifier.publicId();
     const agent = await this.keyhive.getAgent(publicId);
     if (!agent) {
@@ -476,8 +477,9 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
    * ciphertext without being able to read it. Throws on failure.
    */
   async addSyncServerRelayToDoc(docUrl: AutomergeUrl): Promise<void> {
-    if (isUnprotectedDoc(docUrl))
+    if (isUnprotectedDoc(docUrl)) {
       throw new UnprotectedDocError("addSyncServerRelayToDoc", docUrl);
+    }
     if (!this.syncServer) {
       throw new Error(
         'addSyncServerRelayToDoc: no sync server configured (syncServer is "none")'
@@ -707,8 +709,9 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
    * when the server's identity has not synced yet (retry after sync).
    */
   async addSyncServerRelayToDoc(docUrl: AutomergeUrl): Promise<void> {
-    if (isUnprotectedDoc(docUrl))
+    if (isUnprotectedDoc(docUrl)) {
       throw new UnprotectedDocError("addSyncServerRelayToDoc", docUrl);
+    }
     const identifier = keyhiveIdentifierFromPeerId(
       this.networkAdapter.remotePeerId
     );

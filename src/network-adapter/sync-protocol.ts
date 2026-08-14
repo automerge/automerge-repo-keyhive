@@ -1,6 +1,6 @@
 import { log } from "../logging.js";
 import { Message, PeerId } from "@automerge/automerge-repo/slim";
-import { ContactCard, Identifier, Keyhive } from "@keyhive/keyhive/slim";
+import { ContactCard, Keyhive } from "@keyhive/keyhive/slim";
 import { encode, decode } from "cbor-x";
 import {
   buildSyncResponseCbor,

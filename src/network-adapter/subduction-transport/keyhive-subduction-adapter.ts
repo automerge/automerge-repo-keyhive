@@ -266,9 +266,14 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
       clearInterval(this.periodicCacheRefreshId);
       this.periodicCacheRefreshId = undefined;
     }
-    void this.subductionReady.then(({ subduction }) =>
-      subduction.registerFrameHandler(undefined)
-    );
+    void this.subductionReady
+      .then(({ subduction }) => subduction.registerFrameHandler(undefined))
+      .catch((err) =>
+        log.error(
+          "[KeyhiveSubductionAdapter] failed to clear frame handler:",
+          err
+        )
+      );
   }
 
   private send(message: Message, contactCard?: ContactCard): void {

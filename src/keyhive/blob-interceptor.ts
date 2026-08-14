@@ -506,7 +506,11 @@ export function encodeOuterEnvelope(
 ): Uint8Array {
   const out = new Uint8Array(5 + inner.length + predsCipher.length);
   out[0] = ENVELOPE_VERSION;
-  new DataView(out.buffer).setUint32(1, inner.length, true);
+  new DataView(out.buffer, out.byteOffset, out.byteLength).setUint32(
+    1,
+    inner.length,
+    true
+  );
   out.set(inner, 5);
   out.set(predsCipher, 5 + inner.length);
   return out;
