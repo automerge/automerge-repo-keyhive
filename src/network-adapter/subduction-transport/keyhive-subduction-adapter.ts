@@ -27,9 +27,9 @@ import {
   peerIdToSubduction,
 } from "./codec.js";
 
-// Cadence of the full-sync fallback. A forced full request bypasses the
+// Full-sync fallback interval. A forced full request bypasses the
 // lightweight sync-check, recovering from a stale syncpoint that would
-// otherwise keep the check short-circuiting. Matches KeyhiveNetworkAdapter.
+// otherwise keep the check short-circuiting.
 const FULL_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 const KEYHIVE_MESSAGE_TYPES: ReadonlySet<string> = new Set<KeyhiveMessageType>([
@@ -104,8 +104,7 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
     this.localPeerId = options.localPeerId;
     this.remotePeerId = options.remotePeerId;
 
-    // Get a PeerId instance from subduction's own module to avoid
-    // cross-module wasm-bindgen instanceof failures.
+    // Get a PeerId instance from subduction's own module.
     const remotePeerBytes = peerIdToSubduction(
       options.remotePeerId
     ).verifying_key;

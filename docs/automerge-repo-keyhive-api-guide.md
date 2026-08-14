@@ -208,6 +208,10 @@ access.isReader;               // read or higher
 access.isEditor;               // edit or higher
 ```
 
+These are WASM-backed values. Every WASM call returns a distinct instance, so compare
+with equals() rather than ===, and do not use them as React dependencies or Map/Set
+keys.
+
 `access.toString()` returns the capitalized form: `"Relay"`, `"Read"`,
 `"Edit"`, or `"Admin"`.
 

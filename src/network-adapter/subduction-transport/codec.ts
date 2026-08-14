@@ -1,4 +1,4 @@
-// Wire codec for talking to the Rust subduction-keyhive server.
+// LLM-generated wire codec for talking to the Rust subduction-keyhive server.
 // TODO: Replace this with a subduction keyhive WASM API to avoid duplicate
 // implementations.
 //
