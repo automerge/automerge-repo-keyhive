@@ -232,4 +232,62 @@ describe("checkForMembershipNudges", () => {
 
     expect(nudges.length).toBe(1);
   });
+
+  // Attribution descends through every group holding access, so a member
+  // added two levels down still has to be recognised as ours.
+  it("nudges for a member added to a group nested inside one with access", async () => {
+    const { hive, keyhive, nudges, interceptor } = await buildHive();
+    const docUrl = await createDoc(keyhive);
+    const doc = await keyhive.getDocument(docIdFromAutomergeUrl(docUrl));
+    const outer = await keyhive.generateGroup([]);
+    const inner = await keyhive.generateGroup([]);
+
+    await keyhive.addMember(
+      outer.toAgent(),
+      doc!.toMembered(),
+      Access.read(),
+      []
+    );
+    await keyhive.addMember(
+      inner.toAgent(),
+      outer.toMembered(),
+      Access.read(),
+      []
+    );
+    interceptor.trackedDocIds = [docUrl.replace(/^automerge:/, "")];
+    await flush(hive);
+    expect(nudges.length).toBe(0);
+
+    const member = await receiveOtherIdentity(keyhive);
+    await keyhive.addMember(member, inner.toMembered(), Access.read(), []);
+    await flush(hive);
+
+    expect(nudges.length).toBe(1);
+  });
+
+  it("nudges every document a group holds access to", async () => {
+    const { hive, keyhive, nudges, interceptor } = await buildHive();
+    const group = await keyhive.generateGroup([]);
+    const docUrls = [await createDoc(keyhive), await createDoc(keyhive)];
+    for (const docUrl of docUrls) {
+      const doc = await keyhive.getDocument(docIdFromAutomergeUrl(docUrl));
+      await keyhive.addMember(
+        group.toAgent(),
+        doc!.toMembered(),
+        Access.read(),
+        []
+      );
+    }
+    interceptor.trackedDocIds = docUrls.map((u) =>
+      u.replace(/^automerge:/, "")
+    );
+    await flush(hive);
+    expect(nudges.length).toBe(0);
+
+    const member = await receiveOtherIdentity(keyhive);
+    await keyhive.addMember(member, group.toMembered(), Access.read(), []);
+    await flush(hive);
+
+    expect(nudges.length).toBe(2);
+  });
 });
