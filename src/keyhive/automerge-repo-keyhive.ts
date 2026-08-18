@@ -706,22 +706,29 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
         const currentIds = new Set(
           (await doc.cgkaMembers()).map((id) => uint8ArrayToHex(id.toBytes()))
         );
+        const seen = this.#seenMembers.get(documentId);
+        const candidates = seen
+          ? [...currentIds].filter(
+              (idHex) => idHex !== ourIdHex && !seen.has(idHex)
+            )
+          : null;
+        // Nothing joined since the last check, which is the usual case, so
+        // skip walking the delegations to find out who we let in.
+        if (candidates && candidates.length === 0) {
+          this.#docsWithLocalMembershipChanges.delete(documentId);
+          continue;
+        }
         const grantedByUs = await this.#individualsWeGrantedAccessTo(
           doc,
           ourIdHex
         );
-        const baseline =
-          this.#seenMembers.get(documentId) ??
-          // Treat everyone we did not grant access to as already
-          // known. A restart nudges once for our own adds and not at all
-          // for anyone else's.
-          new Set([...currentIds].filter((idHex) => !grantedByUs.has(idHex)));
-        let addedByUs = 0;
-        for (const idHex of currentIds) {
-          if (idHex === ourIdHex) continue; // never nudge for our own membership
-          if (baseline.has(idHex)) continue; // not new
-          if (grantedByUs.has(idHex)) addedByUs++;
-        }
+        // Treat everyone we did not grant access to as already known.
+        // A restart nudges once for our own adds.
+        const added =
+          candidates ?? [...currentIds].filter((idHex) => idHex !== ourIdHex);
+        const addedByUs = added.filter((idHex) =>
+          grantedByUs.has(idHex)
+        ).length;
         // Record the new membership regardless, so a given add nudges once.
         this.#seenMembers.set(documentId, currentIds);
         // We no longer need to track this as a local change.
