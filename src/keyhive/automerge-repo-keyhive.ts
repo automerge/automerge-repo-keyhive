@@ -18,10 +18,12 @@ import {
 import { KeyhiveBlobInterceptor } from "./blob-interceptor.js";
 import {
   Access,
+  Capability,
   ChangeId,
   ContactCard,
   Document as KeyhiveDocument,
   DocumentId as KeyhiveDocumentId,
+  GroupId,
   Identifier,
   Individual,
   Keyhive,
@@ -632,12 +634,53 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
   }
 
   /**
+   * Everyone we granted access to, anywhere under this document's delegations.
+   */
+  async #individualsWeGrantedAccessTo(
+    doc: KeyhiveDocument,
+    ourIdHex: string
+  ): Promise<Set<string>> {
+    const granted = new Set<string>();
+    const seenGroups = new Set<string>();
+
+    const walk = async (
+      capabilities: Capability[],
+      grantedByUs: boolean
+    ): Promise<void> => {
+      for (const capability of capabilities) {
+        const byUs =
+          grantedByUs ||
+          uint8ArrayToHex(capability.proof.verifyingKey) === ourIdHex;
+        const idHex = uint8ArrayToHex(capability.who.id.toBytes());
+        if (capability.who.isGroup()) {
+          // A cycle would otherwise not terminate.
+          if (seenGroups.has(idHex)) continue;
+          seenGroups.add(idHex);
+          const group = await this.keyhive.getGroup(
+            new GroupId(capability.who.id.toBytes())
+          );
+          if (group) await walk(await group.members(), byUs);
+          continue;
+        }
+        if (byUs) granted.add(idHex);
+      }
+    };
+
+    await walk(await doc.members(), false);
+    return granted;
+  }
+
+  /**
    * Give any reader our agent just added a way into the document's history.
    *
    * A simple add leaves the new member with no derivable key, so we rotate
    * the PCS key via `forcePcsUpdate` and then write a nudge edit under it.
    * That edit encrypts under the post-rotation key and gives a way into the
    * predecessor app secret chain for the new member.
+   *
+   * Who counts as new is decided by the document's CGKA membership, not by its
+   * delegations. Adding someone to a group that already has access puts them
+   * in the CGKA while the document's own members are unchanged.
    */
   async #checkForMembershipNudges(): Promise<void> {
     const repo = this.#repo;
@@ -660,23 +703,24 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
           this.#docsWithLocalMembershipChanges.delete(documentId);
           continue;
         }
-        const members = await doc.members();
         const currentIds = new Set(
-          members.map((c) => uint8ArrayToHex(c.who.id.toBytes()))
+          (await doc.cgkaMembers()).map((id) => uint8ArrayToHex(id.toBytes()))
+        );
+        const grantedByUs = await this.#individualsWeGrantedAccessTo(
+          doc,
+          ourIdHex
         );
         const baseline =
           this.#seenMembers.get(documentId) ??
-          new Set(
-            members
-              .filter((c) => uint8ArrayToHex(c.proof.verifyingKey) !== ourIdHex)
-              .map((c) => uint8ArrayToHex(c.who.id.toBytes()))
-          );
+          // Treat everyone we did not grant access to as already
+          // known. A restart nudges once for our own adds and not at all
+          // for anyone else's.
+          new Set([...currentIds].filter((idHex) => !grantedByUs.has(idHex)));
         let addedByUs = 0;
-        for (const c of members) {
-          const idHex = uint8ArrayToHex(c.who.id.toBytes());
+        for (const idHex of currentIds) {
           if (idHex === ourIdHex) continue; // never nudge for our own membership
           if (baseline.has(idHex)) continue; // not new
-          if (uint8ArrayToHex(c.proof.verifyingKey) === ourIdHex) addedByUs++;
+          if (grantedByUs.has(idHex)) addedByUs++;
         }
         // Record the new membership regardless, so a given add nudges once.
         this.#seenMembers.set(documentId, currentIds);

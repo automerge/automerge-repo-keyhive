@@ -21,8 +21,8 @@ importers:
         specifier: 0.16.0
         version: 0.16.0
       '@keyhive/keyhive':
-        specifier: 0.1.0-alpha.6
-        version: 0.1.0-alpha.6
+        specifier: 0.1.0-alpha.7
+        version: 0.1.0-alpha.7
       '@noble/hashes':
         specifier: ^2.2.0
         version: 2.2.0
@@ -348,8 +348,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@keyhive/keyhive@0.1.0-alpha.6':
-    resolution: {integrity: sha512-SbZkc08VBD1jIPgaGxTl/hN5jCSpdv4PrhC0lJlLcHs94LOQsR2CvXkTWESsxN6laCq+f9+ReewfF7xzRMA1pQ==}
+  '@keyhive/keyhive@0.1.0-alpha.7':
+    resolution: {integrity: sha512-Ym7xtnyNJs5MT5golGA05onWEcPS/ZeGdCuqUFR0o33kg6nlw7cELMyipWfyapwnI+cKKE5JWfiTTRMgBeyBHw==}
 
   '@noble/ed25519@3.0.0':
     resolution: {integrity: sha512-QyteqMNm0GLqfa5SoYbSC3+Pvykwpn95Zgth4MFVSMKBB75ELl9tX1LAVsN4c3HXOrakHsF2gL4zWDAYCcsnzg==}
@@ -1410,7 +1410,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@keyhive/keyhive@0.1.0-alpha.6': {}
+  '@keyhive/keyhive@0.1.0-alpha.7': {}
 
   '@noble/ed25519@3.0.0': {}
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import {
   Access,
+  Agent,
   CiphertextStore,
   Identifier,
   Keyhive,
@@ -92,6 +93,26 @@ async function addPublicAccessOutsideHive(
   await keyhive.addMember(agent!, doc!.toMembered(), Access.read(), []);
 }
 
+/**
+ * A second identity that can be granted access.
+ */
+async function receiveOtherIdentity(keyhive: Keyhive): Promise<Agent> {
+  const keyPair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
+    "sign",
+    "verify",
+  ]);
+  const other = await Keyhive.init(
+    await Signer.webCryptoSigner(keyPair),
+    CiphertextStore.newInMemory(),
+    () => {}
+  );
+  const contactCard = await other.contactCard();
+  await keyhive.receiveContactCard(contactCard);
+  const agent = await keyhive.getAgent(contactCard.id);
+  if (!agent) throw new Error("contact card did not resolve to an agent");
+  return agent;
+}
+
 async function createDoc(keyhive: Keyhive): Promise<AutomergeUrl> {
   const doc = await generateDoc(keyhive);
   return stringifyAutomergeUrl({
@@ -156,5 +177,59 @@ describe("checkForMembershipNudges", () => {
     await flush(hive);
 
     expect(nudges.length).toBe(0);
+  });
+
+  // The document's own members do not change when a group it already shares
+  // with gains someone, so a check that reads `doc.members()` sees nothing and
+  // the new member is left with no derivable key.
+  it("nudges when a group that already holds access gains a member", async () => {
+    const { hive, keyhive, nudges, interceptor } = await buildHive();
+    const docUrl = await createDoc(keyhive);
+    const doc = await keyhive.getDocument(docIdFromAutomergeUrl(docUrl));
+    const group = await keyhive.generateGroup([]);
+
+    await keyhive.addMember(
+      group.toAgent(),
+      doc!.toMembered(),
+      Access.read(),
+      []
+    );
+    interceptor.trackedDocIds = [docUrl.replace(/^automerge:/, "")];
+    await flush(hive);
+    // The group is empty, so nobody has gained a key yet.
+    expect(nudges.length).toBe(0);
+
+    const member = await receiveOtherIdentity(keyhive);
+    await keyhive.addMember(member, group.toMembered(), Access.read(), []);
+    await flush(hive);
+
+    expect(nudges.length).toBe(1);
+    expect(typeof nudges[0][NUDGE_FIELD]).toBe("number");
+  });
+
+  it("nudges once for a group add, not on every flush", async () => {
+    const { hive, keyhive, nudges, interceptor } = await buildHive();
+    const docUrl = await createDoc(keyhive);
+    const doc = await keyhive.getDocument(docIdFromAutomergeUrl(docUrl));
+    const group = await keyhive.generateGroup([]);
+    await keyhive.addMember(
+      group.toAgent(),
+      doc!.toMembered(),
+      Access.read(),
+      []
+    );
+    interceptor.trackedDocIds = [docUrl.replace(/^automerge:/, "")];
+
+    // Settle the grant first, so a nudge for it cannot be mistaken for one
+    // covering the member added below.
+    await flush(hive);
+    expect(nudges.length).toBe(0);
+
+    const member = await receiveOtherIdentity(keyhive);
+    await keyhive.addMember(member, group.toMembered(), Access.read(), []);
+    await flush(hive);
+    await flush(hive);
+
+    expect(nudges.length).toBe(1);
   });
 });
