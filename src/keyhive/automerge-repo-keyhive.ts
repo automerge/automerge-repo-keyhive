@@ -23,11 +23,13 @@ import {
   ContactCard,
   Document as KeyhiveDocument,
   DocumentId as KeyhiveDocumentId,
+  Group,
   GroupId,
   Identifier,
   Individual,
   Keyhive,
   Membership,
+  Peer,
   Stats,
 } from "@keyhive/keyhive/slim";
 import { MemorySigner } from "@automerge/automerge-subduction/slim";
@@ -327,6 +329,28 @@ export abstract class AutomergeRepoKeyhiveBase {
   abstract addSyncServerRelayToDoc(docUrl: AutomergeUrl): Promise<void>;
 
   /**
+   * Grant the configured sync server relay access to a group, so the server
+   * can relay the group to its members.
+   *
+   * A no-op when no sync server is configured. Throws when one is configured
+   * but its identity has not synced yet, which is worth retrying.
+   */
+  abstract addSyncServerRelayToGroup(group: Group): Promise<void>;
+
+  /**
+   * Create a group, adding the sync server as relay so the group can be
+   * relayed to its members.
+   *
+   * The group exists in keyhive even if the sync server delegation fails.
+   * A caller that catches can retry with {@link addSyncServerRelayToGroup}.
+   */
+  async generateGroup(coparents: Peer[] = []): Promise<Group> {
+    const group = await this.keyhive.generateGroup(coparents);
+    await this.addSyncServerRelayToGroup(group);
+    return group;
+  }
+
+  /**
    * @deprecated Kept only for prebuilt bundles compiled against 0.3. Renamed
    * to {@link addSyncServerRelayToDoc}, which this calls under the hood.
    */
@@ -496,6 +520,26 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
       );
     }
     await this.addMemberToDoc(docUrl, serverContactCard, Access.relay());
+  }
+
+  async addSyncServerRelayToGroup(group: Group): Promise<void> {
+    if (!this.syncServer) return;
+    const serverContactCard = ContactCard.fromJson(
+      this.syncServer.contactCard.toJson()
+    );
+    if (!serverContactCard) {
+      throw new Error(
+        "addSyncServerRelayToGroup: failed to parse sync server contact card"
+      );
+    }
+    await this.receiveContactCard(serverContactCard);
+    const agent = await this.keyhive.getAgent(serverContactCard.id);
+    if (!agent) {
+      throw new Error(
+        "addSyncServerRelayToGroup: sync server agent not yet known; retry after sync"
+      );
+    }
+    await this.keyhive.addMember(agent, group.toMembered(), Access.relay(), []);
   }
 
   protected syncServerIdentifierHex(): string | null {
@@ -781,6 +825,19 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
     }
     await this.keyhive.addMember(agent, doc.toMembered(), Access.relay(), []);
     this.noteLocalMembershipChange(docUrl);
+  }
+
+  async addSyncServerRelayToGroup(group: Group): Promise<void> {
+    const identifier = keyhiveIdentifierFromPeerId(
+      this.networkAdapter.remotePeerId
+    );
+    const agent = await this.keyhive.getAgent(identifier);
+    if (!agent) {
+      throw new Error(
+        `addSyncServerRelayToGroup: sync server agent not yet known; retry after sync. remotePeerId=${this.networkAdapter.remotePeerId}`
+      );
+    }
+    await this.keyhive.addMember(agent, group.toMembered(), Access.relay(), []);
   }
 
   protected syncServerIdentifierHex(): string | null {
