@@ -5,21 +5,21 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  '@automerge/automerge-repo': 2.6.0-subduction.40
+  '@automerge/automerge-repo': 2.6.0-subduction.48
 
 importers:
 
   .:
     dependencies:
       '@automerge/automerge-repo':
-        specifier: 2.6.0-subduction.40
-        version: 2.6.0-subduction.40
+        specifier: 2.6.0-subduction.48
+        version: 2.6.0-subduction.48
       '@automerge/automerge-repo-network-websocket':
         specifier: 2.6.0-subduction.48
         version: 2.6.0-subduction.48
       '@automerge/automerge-subduction':
-        specifier: 0.16.0
-        version: 0.16.0
+        specifier: 0.16.1
+        version: 0.16.1
       '@keyhive/keyhive':
         specifier: 0.1.0-alpha.8
         version: 0.1.0-alpha.8
@@ -79,15 +79,15 @@ packages:
     resolution: {integrity: sha512-TRKAq4iTdrSpOQYxyKZMJDJ5Civa+vONrAHBZkpK+DGShzqBB6vCdTCsrBGBF2Q63H33qQM0XYBQEQKIa/zM+Q==}
     engines: {node: '>=22.13'}
 
-  '@automerge/automerge-repo@2.6.0-subduction.40':
-    resolution: {integrity: sha512-9r3GS8FtZKoIJOtJqkQR0ukF7HSu+IyV5Iqf7MP3ELDz/TEaUbZV8ysyl5Ju4fVZjmagI/n3oH2h4ySk4FdEFQ==}
+  '@automerge/automerge-repo@2.6.0-subduction.48':
+    resolution: {integrity: sha512-HNS1YsD0XmQ0vtwIincF7NvEBrQuOMnk+mjCVluRiIpUFvcaVeNAFXCCyBVeXubmg88AHe+LkIQ96v/lyHZ7Wg==}
     engines: {node: '>=22.13'}
 
-  '@automerge/automerge-subduction@0.16.0':
-    resolution: {integrity: sha512-BOOn/4p8cF4LhjDUQdgM3qyZFya+M7ZuZywuC99x/kbhk4UK7dw/QcsifcHG5E1TAW4R/K17ZGFUC5nCVUSSWg==}
+  '@automerge/automerge-subduction@0.16.1':
+    resolution: {integrity: sha512-alH7U4eYn0O7sT6hNLv7CJhNODJi+QD6qfRQTNfZCxL3Q5JZdJ8lFpdvXUkBf+I3bu0GLvVlTaYPWGrBihjpIw==}
 
-  '@automerge/automerge@3.3.0-fragments.2':
-    resolution: {integrity: sha512-F5KL+YXD0GMFH/as0/kJ3+lotpuJsH1SSrhhKdYSGtR+S9ytBNTw+s3pAjF2Vr0+ZdTMHxsGjqj5SRkJiSNokQ==}
+  '@automerge/automerge@3.3.2':
+    resolution: {integrity: sha512-9vCdCL7pdQwUra66SBxPVHr+/t9epXKni9KDeak2rNBFMzABVh2u6gSpcwxi3jkR5qr047jVqZv9DlrOfVxLFw==}
 
   '@cbor-extract/cbor-extract-darwin-arm64@2.2.0':
     resolution: {integrity: sha512-P7swiOAdF7aSi0H+tHtHtr6zrpF3aAq/W9FXx5HektRvLTM2O89xCyXF3pk7pLc7QpaY7AoaE8UowVf9QBdh3w==}
@@ -1210,7 +1210,7 @@ snapshots:
 
   '@automerge/automerge-repo-network-websocket@2.6.0-subduction.48':
     dependencies:
-      '@automerge/automerge-repo': 2.6.0-subduction.40
+      '@automerge/automerge-repo': 2.6.0-subduction.48
       cbor-x: 1.6.4
       debug: 4.4.3
       eventemitter3: 5.0.4
@@ -1220,10 +1220,10 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@automerge/automerge-repo@2.6.0-subduction.40':
+  '@automerge/automerge-repo@2.6.0-subduction.48':
     dependencies:
-      '@automerge/automerge': 3.3.0-fragments.2
-      '@automerge/automerge-subduction': 0.16.0
+      '@automerge/automerge': 3.3.2
+      '@automerge/automerge-subduction': 0.16.1
       bs58check: 4.0.0
       cbor-x: 1.6.4
       debug: 4.4.3
@@ -1238,9 +1238,9 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@automerge/automerge-subduction@0.16.0': {}
+  '@automerge/automerge-subduction@0.16.1': {}
 
-  '@automerge/automerge@3.3.0-fragments.2': {}
+  '@automerge/automerge@3.3.2': {}
 
   '@cbor-extract/cbor-extract-darwin-arm64@2.2.0':
     optional: true
