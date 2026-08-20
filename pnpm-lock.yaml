@@ -15,8 +15,8 @@ importers:
         specifier: 2.6.0-subduction.40
         version: 2.6.0-subduction.40
       '@automerge/automerge-repo-network-websocket':
-        specifier: 2.6.0-subduction.40
-        version: 2.6.0-subduction.40
+        specifier: 2.6.0-subduction.48
+        version: 2.6.0-subduction.48
       '@automerge/automerge-subduction':
         specifier: 0.16.0
         version: 0.16.0
@@ -75,8 +75,8 @@ importers:
 
 packages:
 
-  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.40':
-    resolution: {integrity: sha512-tzMdGgLXgCU3IFRmdisRacAovr3XllwiGVS0y9urYFPdvV3pxanLS2Ozj/YXyMO06UXUnM4YhpU0JzLLhfiI6g==}
+  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.48':
+    resolution: {integrity: sha512-TRKAq4iTdrSpOQYxyKZMJDJ5Civa+vONrAHBZkpK+DGShzqBB6vCdTCsrBGBF2Q63H33qQM0XYBQEQKIa/zM+Q==}
     engines: {node: '>=22.13'}
 
   '@automerge/automerge-repo@2.6.0-subduction.40':
@@ -1208,7 +1208,7 @@ packages:
 
 snapshots:
 
-  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.40':
+  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.48':
     dependencies:
       '@automerge/automerge-repo': 2.6.0-subduction.40
       cbor-x: 1.6.4
