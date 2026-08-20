@@ -224,24 +224,30 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
         await this.#importNewLeafSecrets();
         pcsHash = await this.#keyhive.tryPcsKeyHash(doc);
         if (!pcsHash) {
-          // Either a sibling's rotation we cannot see yet or a member add
-          // that invalidated the key (the membership nudge rotation restores
-          // the key in that case).
-          this.#docsAwaitingPcsKey.add(documentId);
+          // Encrypt anyway. `tryEncryptKeyed` rotates when there is no
+          // derivable key.
           log.debug(
-            `[KeyhiveBlobInterceptor] transformOutgoing: no derivable PCS key for ${documentId} (even after importing leaf secrets); dropping outgoing blob (a later save retries)`
+            `[KeyhiveBlobInterceptor] transformOutgoing: no derivable PCS key for ${documentId} (even after importing leaf secrets); encrypting anyway so keyhive rotates`
           );
-          return null;
         }
       }
-      this.#docsAwaitingPcsKey.delete(documentId);
       const contentRef = new ChangeId(blake3(blob));
-      const result = await this.#keyhive.tryEncryptKeyed(
-        doc,
-        contentRef,
-        [],
-        blob
-      );
+      let result;
+      try {
+        result = await this.#keyhive.tryEncryptKeyed(doc, contentRef, [], blob);
+      } catch (e) {
+        if (pcsHash) throw e;
+        // We had no derivable key and the rotation did not work either, so
+        // this agent cannot encrypt for this document at all (perhaps it
+        // is not yet in the document's CGKA tree).
+        this.#docsAwaitingPcsKey.add(documentId);
+        log.debug(
+          `[KeyhiveBlobInterceptor] transformOutgoing: could not rotate to get a PCS key for ${documentId}; dropping outgoing blob (a later save retries): %O`,
+          e
+        );
+        return null;
+      }
+      this.#docsAwaitingPcsKey.delete(documentId);
       this.#onEncrypted?.();
       const encrypted = result.encrypted_content();
       const selfKey = result.applicationSecret;
