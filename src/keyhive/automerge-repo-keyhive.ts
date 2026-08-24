@@ -62,7 +62,7 @@ export const NUDGE_FIELD = "__automerge-repo-keyhive__last-added-member-ts";
  */
 export abstract class AutomergeRepoKeyhiveBase {
   /**
-   * Each path narrows this to its own adapter type. Only `disconnect` is
+   * Each version narrows this to its own adapter type. Only `disconnect` is
    * needed here, for {@link close}.
    */
   abstract readonly networkAdapter: { disconnect(): void };
@@ -85,7 +85,10 @@ export abstract class AutomergeRepoKeyhiveBase {
     public readonly active: Active,
     public readonly keyhive: Keyhive,
     public readonly keyhiveStorage: KeyhiveStorage,
-    public readonly emitter: KeyhiveEventEmitter
+    public readonly emitter: KeyhiveEventEmitter,
+    public readonly peerId: PeerId,
+    public readonly idFactory: (heads: Heads) => Promise<Uint8Array>,
+    public readonly createKeyhiveNetworkAdapter: CreateKeyhiveNetworkAdapter
   ) {}
 
   /**
@@ -387,15 +390,23 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
     active: Active,
     keyhive: Keyhive,
     keyhiveStorage: KeyhiveStorage,
-    public readonly peerId: PeerId,
+    peerId: PeerId,
     /** Null when initialized with syncServer "none". */
     public readonly syncServer: SyncServer | null,
     public readonly networkAdapter: KeyhiveNetworkAdapter,
     emitter: KeyhiveEventEmitter,
-    public readonly idFactory: (heads: Heads) => Promise<Uint8Array>,
-    public readonly createKeyhiveNetworkAdapter: CreateKeyhiveNetworkAdapter
+    idFactory: (heads: Heads) => Promise<Uint8Array>,
+    createKeyhiveNetworkAdapter: CreateKeyhiveNetworkAdapter
   ) {
-    super(active, keyhive, keyhiveStorage, emitter);
+    super(
+      active,
+      keyhive,
+      keyhiveStorage,
+      emitter,
+      peerId,
+      idFactory,
+      createKeyhiveNetworkAdapter
+    );
   }
 
   /**
@@ -604,14 +615,22 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
     active: Active,
     keyhive: Keyhive,
     keyhiveStorage: KeyhiveStorage,
-    public readonly peerId: PeerId,
+    peerId: PeerId,
     emitter: KeyhiveEventEmitter,
     public readonly networkAdapter: KeyhiveSubductionAdapter,
-    public readonly idFactory: (heads: Heads) => Promise<Uint8Array>,
-    public readonly createKeyhiveNetworkAdapter: CreateKeyhiveNetworkAdapter,
+    idFactory: (heads: Heads) => Promise<Uint8Array>,
+    createKeyhiveNetworkAdapter: CreateKeyhiveNetworkAdapter,
     public readonly blobInterceptor: KeyhiveBlobInterceptor
   ) {
-    super(active, keyhive, keyhiveStorage, emitter);
+    super(
+      active,
+      keyhive,
+      keyhiveStorage,
+      emitter,
+      peerId,
+      idFactory,
+      createKeyhiveNetworkAdapter
+    );
   }
 
   protected override noteLocalMembershipChange(docUrl: AutomergeUrl): void {

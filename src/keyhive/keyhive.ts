@@ -207,7 +207,7 @@ export interface LegacyHiveOptions
   archiveThreshold?: number;
 }
 
-/** Options for building a hive on the subduction path. */
+/** Options for building a hive for the subduction configuration. */
 export interface SubductionHiveOptions
   extends KeyhiveIdentityOptions, KeyhiveSyncOptions {
   /** The subduction instance to sync over. */
@@ -472,7 +472,7 @@ async function buildLegacyHive(
 }
 
 /**
- * Build the hive for the subduction path (no repo wiring): a keyhive
+ * Build the hive for the subduction configuration (no repo wiring): a keyhive
  * instance and a `KeyhiveSubductionAdapter` backed by subduction.
  */
 async function buildHive(
@@ -498,7 +498,7 @@ async function buildHive(
   const remotePeerId = options.remotePeerId ?? serverPeerIdHardcoded;
   if (!remotePeerId) {
     throw new Error(
-      'initializeAutomergeRepoKeyhive: the subduction path syncs against a single remote, so syncServer "none" requires an explicit remotePeerId'
+      'initializeAutomergeRepoKeyhive: the subduction configuration syncs against a single remote, so syncServer "none" requires an explicit remotePeerId'
     );
   }
 

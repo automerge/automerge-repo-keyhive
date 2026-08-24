@@ -3,9 +3,9 @@
 `@automerge/automerge-repo-keyhive` (ARK) adds access control and end-to-end
 encryption to [automerge-repo](https://github.com/automerge/automerge-repo)
 using the [keyhive](https://github.com/inkandswitch/keyhive) protocol. This
-guide covers the full public API: initialization, identity, document
-membership, access queries, sync, and the lower-level pieces you may need for
-custom setups.
+guide covers the API most applications need: initialization, identity,
+document creation, membership, access queries, sync, and the lower-level
+pieces you may need for custom setups. It is written for use with the default [subduction](https://github.com/inkandswitch/subduction) configuration and notes where the legacy `NetworkAdapter` configuration differs.
 
 ## Concepts
 
@@ -88,9 +88,9 @@ collide, even with the same label.
 | `storage` | required | `StorageAdapterInterface` for keyhive state (key pair, archives, events, secrets). Usually a separate database from the repo's document storage. |
 | `peerIdSuffix` | required | A label appended to the identity-derived peer id as `-<label>-<random>`. ARK adds the random component itself, so a plain app name is fine. |
 | `keyPair` | generated | Supply an existing extractable Ed25519 `CryptoKeyPair` instead of loading or generating one. |
-| `syncServer` | required | Which sync server to register as a relay: `"subduction"`, `"keyhive"`, a custom `SyncServerIdentity`, or `"none"`. See "Sync servers" below. `"none"` on the subduction path requires an explicit `remotePeerId`, since that path syncs against a single remote. |
+| `syncServer` | required | Which sync server to register as a relay: `"subduction"`, `"keyhive"`, a custom `SyncServerIdentity`, or `"none"`. See "Sync servers" below. `"none"` for the subduction configuration requires an explicit `remotePeerId`, since that path syncs against a single remote. |
 | `automaticArchiveIngestion` | `true` | On keyhive changes, automatically persist state and schedule an outbound keyhive sync. |
-| `cachingMode` | `"none"` (adapter path), `"periodic"` (subduction path) | Event cache strategy for the sync protocol: `"none"` or `"periodic"`. `"periodic"` caches sync state and refreshes it on the `syncRequestInterval` timer. |
+| `cachingMode` | `"none"` (adapter path), `"periodic"` (subduction configuration) | Event cache strategy for the sync protocol: `"none"` or `"periodic"`. `"periodic"` caches sync state and refreshes it on the `syncRequestInterval` timer. |
 | `periodicallyRequestSync` | `true` | Request keyhive sync from peers on an interval. |
 | `syncRequestInterval` | `2000` (ms) | Interval for periodic sync requests (and periodic cache refresh). |
 | `createRepo` | required | Function that constructs the `Repo` from a `RepoConfig`. Usually `(config) => new Repo(config)`. |
@@ -98,6 +98,21 @@ collide, even with the same label.
 | `shareConfigDebounceMs` | `2000` | Debounce for propagating keyhive membership changes to `repo.shareConfigChanged()`. |
 | `onBeforeShareConfigChanged` | none | Called immediately before each (debounced) `repo.shareConfigChanged()`. |
 | `remotePeerId` | from `syncServer` | Override the sync server peer id. |
+
+## Creating documents
+
+Create documents with `repo.create2`, which routes through the `idFactory` the
+init function installed. This ensures the document gets a keyhive document id and is
+encrypted:
+
+```ts
+const handle = await repo.create2({ title: "hello" });
+await hive.addSyncServerRelayToDoc(handle.url);
+```
+
+`repo.create` bypasses the id factory and silently creates an unprotected
+document, with no access control or encryption. Use `isUnprotectedDoc(url)`
+to check for this property.
 
 ## The hive object
 
@@ -109,23 +124,23 @@ There are two hive types:
   syncs over an automerge-repo `NetworkAdapter` and can talk to many peers.
 
 Both extend `AutomergeRepoKeyhiveBase`. Code that only needs membership and
-access queries should type against the base class so it works with either.
+access queries should check against the base class type so it works with either.
 
-The shared core:
+On the shared `AutomergeRepoKeyhiveBase`:
 
 - `hive.active`: the local identity.
 - `hive.keyhive`: the underlying `Keyhive` WASM instance, for operations not
   wrapped by ARK.
 - `hive.keyhiveStorage`: the `KeyhiveStorage` wrapper that persists keyhive
   state.
+- `hive.emitter`: a `KeyhiveEventEmitter` that emits `"update"` with a keyhive
+  `Event` whenever keyhive state changes, and `"encrypt"` when the blob
+  interceptor encrypts document data.
 - `hive.peerId`: the peer id to give the repo. It includes the
   `-<peerIdSuffix>-<random>` suffix, so it is per-session. For a durable identity
   string use `verifyingKeyPeerIdWithoutSuffix(hive.peerId)`, which is the bare
   verifying key and stable for the life of the key pair, or
   `hive.active.individual.id` for the keyhive identifier.
-- `hive.emitter`: a `KeyhiveEventEmitter` that emits `"update"` with a keyhive
-  `Event` whenever keyhive state changes.
-- `hive.networkAdapter`: the keyhive sync driver.
 - `hive.idFactory`: the id factory the init function passed to the repo, so
   new documents get keyhive document ids.
 - `hive.createKeyhiveNetworkAdapter(adapter, options?)`: wraps an additional
@@ -133,20 +148,23 @@ The shared core:
 - `hive.close()`: stop timers, remove all emitter listeners, and disconnect
   the network adapter. Call on teardown. The hive is unusable afterwards.
 
-Only on `AutomergeRepoKeyhive` (the subduction path):
+On `AutomergeRepoKeyhive` (the subduction configuration):
 
 - `hive.blobInterceptor`: the `KeyhiveBlobInterceptor` that encrypts and
   decrypts document blobs. The init function passes it to the repo.
 - `hive.notifySameAgentKeyhiveChange()`: signal a keyhive change made by
   another instance of this same identity (for example, another tab), so the
   repo re-evaluates share configuration.
+- `hive.networkAdapter`: a `KeyhiveSubductionAdapter`, which drives keyhive
+  sync against the single configured remote.
 
-Only on `LegacyAutomergeRepoKeyhive`:
+On `LegacyAutomergeRepoKeyhive`:
 
 - `hive.syncServer`: the resolved `SyncServer`, or `null` when initialized
   with `syncServer: "none"`.
 - `hive.buildServerSubductionPolicy()`: see "Running a sync server" below.
-
+- `hive.networkAdapter`: a `KeyhiveNetworkAdapter`, which drives keyhive sync
+  across every peer on the wrapped adapter.
 
 ## Identity and contact cards
 
@@ -230,14 +248,15 @@ const card = ContactCard.fromJson(memberContactCardJson);
 await hive.addMemberToDoc(docUrl, card, Access.edit());
 ```
 
-On the subduction path, adding any member also rotates the document key and
+For the subduction configuration, adding any member also rotates the document key and
 writes a small "nudge" edit so the new member can decrypt prior history. The
 edit sets a timestamp on a namespaced field at the document root:
 `__automerge-repo-keyhive__last-added-member-ts`. Applications that iterate
 document keys should skip it, and can import `NUDGE_FIELD` rather than hardcoding
 the string.
 
-The rotation fires for every member this agent adds and it is debounced after `shareConfigDebounceMs`.
+The rotation fires for every member this agent adds and is debounced after
+`shareConfigDebounceMs`.
 
 ### Revoke a member
 
@@ -292,6 +311,34 @@ access lets it move ciphertext without being able to read the document:
 ```ts
 await hive.addSyncServerRelayToDoc(docUrl);
 ```
+
+### Groups
+
+`generateGroup` creates a keyhive group and grants the sync server relay
+access to it, so the server can relay the group to its members:
+
+```ts
+const group = await hive.generateGroup();
+```
+
+Grant the group access to a document through `hive.keyhive`:
+
+```ts
+import { docIdFromAutomergeUrl } from "@automerge/automerge-repo-keyhive";
+
+const doc = await hive.keyhive.getDocument(docIdFromAutomergeUrl(docUrl));
+if (doc) {
+  await hive.keyhive.addMember(
+    group.toAgent(),
+    doc.toMembered(),
+    Access.edit(),
+    []
+  );
+}
+```
+
+Everyone in the group then holds `edit` on the document, and adding someone to
+the group later grants it to them too.
 
 ### Query access
 
@@ -365,7 +412,7 @@ hive with, and its defaults are not the initialization defaults:
 | `periodicallyRequestSync` | `true` | `false` |
 | `syncRequestInterval` | `2000` | `2000` |
 | `onlyShareWithSyncServer` | `false` | `false` |
-| `archiveThreshold` | `200` (legacy path only) | inherits the init value on the legacy path; fixed at `200` on the subduction path |
+| `archiveThreshold` | `200` (legacy path only) | inherits the init value on the legacy path; fixed at `200` for the subduction configuration |
 | `cachingMode` | `"none"` / `"periodic"` | inherited; not settable per-adapter |
 
 So the call above, with no options, produces an adapter that never
@@ -375,7 +422,8 @@ periodically requests keyhive sync, even on a hive that does. Pass
 ## Keyhive sync
 
 Keyhive state (memberships, key rotations, contact cards) syncs over its own
-protocol, separate from document sync. Relevant controls:
+protocol, separate from document sync. Both adapter types offer these
+controls:
 
 - `hive.networkAdapter.syncKeyhive()`: request a sync now.
 - `hive.networkAdapter.invalidateCaches()`: force the next sync to recompute
