@@ -1,7 +1,9 @@
 import { log } from "./logging.js";
-import { initFromBase64Wasm } from "@keyhive/keyhive/slim";
+// @ts-expect-error (dist/index.d.ts omits initSync and the Init* types; a
+// wasm-bodge limitation noted in keyhive's README)
+import { initSync } from "@keyhive/keyhive/slim";
 // @ts-expect-error (the generated base64 wasm module ships no type declarations)
-import { wasmBase64 } from "@keyhive/keyhive/keyhive_wasm.base64.js";
+import { wasmBase64 } from "@keyhive/keyhive/wasm-base64";
 
 let wasmInitialized = false;
 
@@ -15,7 +17,8 @@ export function initKeyhiveWasm(): void {
     return;
   }
   wasmInitialized = true;
-  initFromBase64Wasm(wasmBase64);
+  const bytes = Uint8Array.from(atob(wasmBase64), (c) => c.charCodeAt(0));
+  initSync({ module: bytes });
   log.debug("[AMRepoKeyhive] WASM initialized");
 }
 
