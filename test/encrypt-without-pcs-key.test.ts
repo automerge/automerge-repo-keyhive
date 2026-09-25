@@ -34,8 +34,8 @@ interface Calls {
  */
 function keyhiveWithNoPcsKey(calls: Calls, pcsHash?: Uint8Array): Keyhive {
   return {
-    async getDocument() {
-      return { id: "doc" };
+    async hasDocument() {
+      return true;
     },
     async tryPcsKeyHash() {
       calls.pcsKeyHash++;
@@ -83,6 +83,7 @@ describe("transformOutgoing when no PCS key is derivable", () => {
       new Uint8Array([1])
     );
     expect(interceptor.docIdsAwaitingPcsKey).toEqual([id]);
+    expect(calls.pcsKeyHash).toBe(2);
   });
 
   it("rethrows an encryption failure when a key was available", async () => {

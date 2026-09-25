@@ -114,7 +114,7 @@ export class SyncProtocol {
         receiveContactCard(this.keyhive, contactCard, this.keyhiveStorage)
       );
     }
-    message.data = keyhiveMessageData.signed.payload;
+    message.data = keyhiveMessageData.signed.payload();
     return this.dispatchByType(message, metrics);
   }
 

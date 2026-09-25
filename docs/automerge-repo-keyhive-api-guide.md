@@ -318,23 +318,23 @@ await hive.addSyncServerRelayToDoc(docUrl);
 access to it, so the server can relay the group to its members:
 
 ```ts
-const group = await hive.generateGroup();
+const groupId = await hive.generateGroup();
 ```
 
 Grant the group access to a document through `hive.keyhive`:
 
 ```ts
-import { docIdFromAutomergeUrl } from "@automerge/automerge-repo-keyhive";
+import {
+  docIdFromAutomergeUrl,
+  MemberedId,
+} from "@automerge/automerge-repo-keyhive";
 
-const doc = await hive.keyhive.getDocument(docIdFromAutomergeUrl(docUrl));
-if (doc) {
-  await hive.keyhive.addMember(
-    group.toAgent(),
-    doc.toMembered(),
-    Access.edit(),
-    []
-  );
-}
+await hive.keyhive.addMember(
+  groupId.toIdentifier(),
+  MemberedId.document(docIdFromAutomergeUrl(docUrl)),
+  Access.edit(),
+  []
+);
 ```
 
 Everyone in the group then holds `edit` on the document, and adding someone to

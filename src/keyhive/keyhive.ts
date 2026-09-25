@@ -41,7 +41,6 @@ import {
   LegacyAutomergeRepoKeyhive,
   AutomergeRepoKeyhive,
   type CreateKeyhiveNetworkAdapter,
-  generateDoc,
   keyhiveIdFactory,
 } from "./automerge-repo-keyhive.js";
 import { KeyhiveBlobInterceptor } from "./blob-interceptor.js";
@@ -464,7 +463,7 @@ async function buildLegacyHive(
     syncServer,
     keyhiveNetworkAdapter,
     emitter,
-    keyhiveIdFactory(keyhiveNetworkAdapter, keyhive),
+    keyhiveIdFactory(keyhive),
     createKeyhiveNetworkAdapter
   );
   hive.registerCleanup(cleanupEventFlushListener);
@@ -561,12 +560,7 @@ async function buildHive(
     return adapter;
   };
 
-  const idFactory = async (
-    _heads: import("@automerge/automerge-repo/slim").Heads
-  ) => {
-    const doc = await generateDoc(keyhive);
-    return doc.doc_id.toBytes();
-  };
+  const idFactory = keyhiveIdFactory(keyhive);
 
   const blobInterceptor = new KeyhiveBlobInterceptor(
     keyhive,
@@ -725,18 +719,16 @@ export async function receiveContactCard(
   contactCard: ContactCard,
   keyhiveStorage: KeyhiveStorage
 ): Promise<Individual | undefined> {
-  const agent = await keyhive.getAgent(contactCard.id);
-  if (agent) {
-    return await keyhive.getIndividual(contactCard.individualId);
-  } else {
+  if (!(await keyhive.getAgent(contactCard.id))) {
     if (contactCard.op) {
       log.debug(`[AMRepoKeyhive] Saving Contact Card event: ${contactCard.op}`);
       await keyhiveStorage.saveEventWithHash(contactCard.op);
     } else {
       log.error(`[AMRepoKeyhive] No op found for ${contactCard.toJson()}`);
     }
-    return await keyhive.receiveContactCard(contactCard);
+    await keyhive.receiveContactCard(contactCard);
   }
+  return keyhive.getIndividual(contactCard.individualId);
 }
 
 export async function getPendingOpHashes(

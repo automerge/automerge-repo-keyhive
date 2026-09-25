@@ -357,7 +357,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             } else {
               this.streamingMetrics.recordNonKeyhive();
             }
-            message.data = maybeKeyhiveMessageData.signed.payload;
+            message.data = maybeKeyhiveMessageData.signed.payload();
             this.emit("message", message);
           } else if (this.isBatching()) {
             this.keyhiveMsgBatch.add(message, maybeKeyhiveMessageData);
@@ -365,7 +365,7 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
             this.streamingMetrics.recordMessage(
               message.type,
               message.senderId,
-              maybeKeyhiveMessageData.signed.payload?.byteLength ?? 0
+              maybeKeyhiveMessageData.signed.payloadLength
             );
             const startTime = Date.now();
             const msgType = message.type ?? "unknown";
