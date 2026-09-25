@@ -364,7 +364,7 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
 
     let decoded: ReturnType<typeof decodeSubductionKeyhiveMessage>;
     try {
-      decoded = decodeSubductionKeyhiveMessage(signed.payload);
+      decoded = decodeSubductionKeyhiveMessage(signed.payload());
     } catch (err) {
       log.error(
         "[KeyhiveSubductionAdapter] Rust KeyhiveMessage decode failed:",

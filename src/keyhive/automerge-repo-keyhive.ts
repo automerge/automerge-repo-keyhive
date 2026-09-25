@@ -23,13 +23,12 @@ import {
   ContactCard,
   Document as KeyhiveDocument,
   DocumentId as KeyhiveDocumentId,
-  Group,
   GroupId,
   Identifier,
   Individual,
   Keyhive,
+  MemberedId,
   Membership,
-  Peer,
   Stats,
 } from "@keyhive/keyhive/slim";
 import { MemorySigner } from "@automerge/automerge-subduction/slim";
@@ -54,6 +53,31 @@ export type CreateKeyhiveNetworkAdapter = (
  * Field written into a document by the membership "nudge" edit.
  */
 export const NUDGE_FIELD = "__automerge-repo-keyhive__last-added-member-ts";
+
+/** The document as the subject a membership call takes. */
+function memberedDoc(docUrl: AutomergeUrl) {
+  return MemberedId.document(docIdFromAutomergeUrl(docUrl));
+}
+
+/**
+ * Run a keyhive membership call and provide the operation and the document to
+ * report if it is rejected.
+ */
+async function withDocContext<T>(
+  operation: string,
+  docUrl: AutomergeUrl,
+  run: () => Promise<T>
+): Promise<T> {
+  try {
+    return await run();
+  } catch (cause) {
+    throw new Error(
+      `${operation}: keyhive rejected this for ${docUrl}. Have the document ` +
+        `and the member both synced yet?`,
+      { cause }
+    );
+  }
+}
 
 /**
  * Shared base for {@link LegacyAutomergeRepoKeyhive} and
@@ -157,21 +181,6 @@ export abstract class AutomergeRepoKeyhiveBase {
     return receiveContactCard(this.keyhive, contactCard, this.keyhiveStorage);
   }
 
-  /** Return the document for `docUrl` or throw a descriptive error noting the operation. */
-  private async getDocForOperation(
-    operation: string,
-    docUrl: AutomergeUrl
-  ): Promise<KeyhiveDocument> {
-    const docId = docIdFromAutomergeUrl(docUrl);
-    const doc = await this.keyhive.getDocument(docId);
-    if (!doc) {
-      throw new Error(
-        `${operation}: document not found in keyhive for ${docUrl} (has it synced yet?)`
-      );
-    }
-    return doc;
-  }
-
   /**
    * Grant `access` on the document to the identity in `contactCard`.
    *
@@ -187,15 +196,9 @@ export abstract class AutomergeRepoKeyhiveBase {
       throw new UnprotectedDocError("addMemberToDoc", docUrl);
     }
     await this.receiveContactCard(contactCard);
-    const agent = await this.keyhive.getAgent(contactCard.id);
-    if (!agent) {
-      throw new Error(
-        `addMemberToDoc: contact card did not resolve to a keyhive agent (id ${uint8ArrayToHex(contactCard.id.toBytes())})`
-      );
-    }
-
-    const doc = await this.getDocForOperation("addMemberToDoc", docUrl);
-    await this.keyhive.addMember(agent, doc.toMembered(), access, []);
+    await withDocContext("addMemberToDoc", docUrl, () =>
+      this.keyhive.addMember(contactCard.id, memberedDoc(docUrl), access, [])
+    );
     this.noteLocalMembershipChange(docUrl);
   }
 
@@ -217,15 +220,9 @@ export abstract class AutomergeRepoKeyhiveBase {
       typeof member === "string"
         ? new Identifier(hexToUint8Array(member))
         : member;
-    const agent = await this.keyhive.getAgent(identifier);
-    if (!agent) {
-      throw new Error(
-        `revokeMemberFromDoc: member not found in keyhive (id ${uint8ArrayToHex(identifier.toBytes())})`
-      );
-    }
-
-    const doc = await this.getDocForOperation("revokeMemberFromDoc", docUrl);
-    await this.keyhive.revokeMember(agent, true, doc.toMembered());
+    await withDocContext("revokeMemberFromDoc", docUrl, () =>
+      this.keyhive.revokeMember(identifier, true, memberedDoc(docUrl))
+    );
   }
 
   /**
@@ -237,14 +234,14 @@ export abstract class AutomergeRepoKeyhiveBase {
     if (isUnprotectedDoc(docUrl)) {
       throw new UnprotectedDocError("setPublicAccess", docUrl);
     }
-    const publicId = Identifier.publicId();
-    const agent = await this.keyhive.getAgent(publicId);
-    if (!agent) {
-      throw new Error("setPublicAccess: public agent not found in keyhive");
-    }
-
-    const doc = await this.getDocForOperation("setPublicAccess", docUrl);
-    await this.keyhive.addMember(agent, doc.toMembered(), access, []);
+    await withDocContext("setPublicAccess", docUrl, () =>
+      this.keyhive.addMember(
+        Identifier.publicId(),
+        memberedDoc(docUrl),
+        access,
+        []
+      )
+    );
     this.noteLocalMembershipChange(docUrl);
   }
 
@@ -338,7 +335,7 @@ export abstract class AutomergeRepoKeyhiveBase {
    * A no-op when no sync server is configured. Throws when one is configured
    * but its identity has not synced yet, which is worth retrying.
    */
-  abstract addSyncServerRelayToGroup(group: Group): Promise<void>;
+  abstract addSyncServerRelayToGroup(groupId: GroupId): Promise<void>;
 
   /**
    * Create a group, adding the sync server as relay so the group can be
@@ -347,10 +344,10 @@ export abstract class AutomergeRepoKeyhiveBase {
    * The group exists in keyhive even if the sync server delegation fails.
    * A caller that catches can retry with {@link addSyncServerRelayToGroup}.
    */
-  async generateGroup(coparents: Peer[] = []): Promise<Group> {
-    const group = await this.keyhive.generateGroup(coparents);
-    await this.addSyncServerRelayToGroup(group);
-    return group;
+  async generateGroup(coparents: Identifier[] = []): Promise<GroupId> {
+    const groupId = await this.keyhive.generateGroup(coparents);
+    await this.addSyncServerRelayToGroup(groupId);
+    return groupId;
   }
 
   /**
@@ -533,7 +530,7 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
     await this.addMemberToDoc(docUrl, serverContactCard, Access.relay());
   }
 
-  async addSyncServerRelayToGroup(group: Group): Promise<void> {
+  async addSyncServerRelayToGroup(groupId: GroupId): Promise<void> {
     if (!this.syncServer) return;
     const serverContactCard = ContactCard.fromJson(
       this.syncServer.contactCard.toJson()
@@ -544,13 +541,12 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
       );
     }
     await this.receiveContactCard(serverContactCard);
-    const agent = await this.keyhive.getAgent(serverContactCard.id);
-    if (!agent) {
-      throw new Error(
-        "addSyncServerRelayToGroup: sync server agent not yet known; retry after sync"
-      );
-    }
-    await this.keyhive.addMember(agent, group.toMembered(), Access.relay(), []);
+    await this.keyhive.addMember(
+      serverContactCard.id,
+      MemberedId.group(groupId),
+      Access.relay(),
+      []
+    );
   }
 
   protected syncServerIdentifierHex(): string | null {
@@ -559,7 +555,7 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
       : null;
   }
 
-  async generateDoc(): Promise<KeyhiveDocument> {
+  async generateDoc(): Promise<KeyhiveDocumentId> {
     return generateDoc(this.keyhive);
   }
 
@@ -571,29 +567,30 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
   }
 
   keyhiveIdFactory(): (heads: Heads) => Promise<Uint8Array> {
-    return keyhiveIdFactory(this.networkAdapter, this.keyhive);
+    return keyhiveIdFactory(this.keyhive);
   }
 }
 
-export async function generateDoc(kh: Keyhive): Promise<KeyhiveDocument> {
+export async function generateDoc(kh: Keyhive): Promise<KeyhiveDocumentId> {
   // For now, randomly generate a ChangeId
   const changeIdArray = crypto.getRandomValues(new Uint8Array(10));
   const changeId = new ChangeId(changeIdArray);
-  const g = await kh.generateGroup([]);
-  const doc = await kh.generateDocument([g.toPeer()], changeId, []);
-  log.debug(
-    `[AMRepoKeyhive] Generated Keyhive document with id ${doc.doc_id.toBytes()}`
+  const groupId = await kh.generateGroup([]);
+  const docId = await kh.generateDocument(
+    [groupId.toIdentifier()],
+    changeId,
+    []
   );
-  return doc;
+  log.debug(`[AMRepoKeyhive] Generated Keyhive document with id ${docId}`);
+  return docId;
 }
 
 export function keyhiveIdFactory(
-  _keyhiveNetworkAdapter: KeyhiveNetworkAdapter,
   keyhive: Keyhive
 ): (heads: Heads) => Promise<Uint8Array> {
   return async (_heads: Heads) => {
-    const doc = await generateDoc(keyhive);
-    return doc.doc_id.toBytes();
+    const docId = await generateDoc(keyhive);
+    return docId.toBytes();
   };
 }
 
@@ -715,7 +712,7 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
           grantedByUs ||
           uint8ArrayToHex(capability.proof.verifyingKey) === ourIdHex;
         const idHex = uint8ArrayToHex(capability.who.id.toBytes());
-        if (capability.who.isGroup()) {
+        if (capability.who.isGroup) {
           // A cycle would otherwise not terminate.
           if (seenGroups.has(idHex)) continue;
           seenGroups.add(idHex);
@@ -750,7 +747,7 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
     if (!repo) return;
     // Zero-padded 64-hex id, matching the members' `who.id` and `verifyingKey`
     // hexes.
-    const ourIdHex = uint8ArrayToHex(this.keyhive.id.bytes);
+    const ourIdHex = uint8ArrayToHex(this.keyhive.id.toBytes());
     const docIds = new Set([
       ...this.blobInterceptor.trackedDocIds,
       ...this.#docsWithLocalMembershipChanges,
@@ -759,9 +756,10 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
     ]);
     for (const documentId of docIds) {
       try {
-        const doc = await this.keyhive.getDocument(
-          docIdFromAutomergeUrl(`automerge:${documentId}` as AutomergeUrl)
+        const docId = docIdFromAutomergeUrl(
+          `automerge:${documentId}` as AutomergeUrl
         );
+        const doc = await this.keyhive.getDocument(docId);
         if (!doc) {
           this.#docsWithLocalMembershipChanges.delete(documentId);
           continue;
@@ -800,7 +798,7 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
 
         // Rotate (so the new member has a derivable current key), persist the
         // rotated leaf secret for any sibling instance, then write the nudge.
-        const leafSecret = await this.keyhive.forcePcsUpdate(doc);
+        const leafSecret = await this.keyhive.forcePcsUpdate(docId);
         await this.keyhiveStorage.saveLeafSecret(leafSecret);
         const handle = await repo.find(
           `automerge:${documentId}` as AutomergeUrl
@@ -826,37 +824,24 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
     if (isUnprotectedDoc(docUrl)) {
       throw new UnprotectedDocError("addSyncServerRelayToDoc", docUrl);
     }
-    const identifier = keyhiveIdentifierFromPeerId(
-      this.networkAdapter.remotePeerId
+    await withDocContext("addSyncServerRelayToDoc", docUrl, () =>
+      this.keyhive.addMember(
+        keyhiveIdentifierFromPeerId(this.networkAdapter.remotePeerId),
+        memberedDoc(docUrl),
+        Access.relay(),
+        []
+      )
     );
-    const agent = await this.keyhive.getAgent(identifier);
-    if (!agent) {
-      throw new Error(
-        `addSyncServerRelayToDoc: sync server agent not yet known; retry after sync. remotePeerId=${this.networkAdapter.remotePeerId}`
-      );
-    }
-    const docId = docIdFromAutomergeUrl(docUrl);
-    const doc = await this.keyhive.getDocument(docId);
-    if (!doc) {
-      throw new Error(
-        `addSyncServerRelayToDoc: document not found in keyhive for ${docUrl} (has it synced yet?)`
-      );
-    }
-    await this.keyhive.addMember(agent, doc.toMembered(), Access.relay(), []);
     this.noteLocalMembershipChange(docUrl);
   }
 
-  async addSyncServerRelayToGroup(group: Group): Promise<void> {
-    const identifier = keyhiveIdentifierFromPeerId(
-      this.networkAdapter.remotePeerId
+  async addSyncServerRelayToGroup(groupId: GroupId): Promise<void> {
+    await this.keyhive.addMember(
+      keyhiveIdentifierFromPeerId(this.networkAdapter.remotePeerId),
+      MemberedId.group(groupId),
+      Access.relay(),
+      []
     );
-    const agent = await this.keyhive.getAgent(identifier);
-    if (!agent) {
-      throw new Error(
-        `addSyncServerRelayToGroup: sync server agent not yet known; retry after sync. remotePeerId=${this.networkAdapter.remotePeerId}`
-      );
-    }
-    await this.keyhive.addMember(agent, group.toMembered(), Access.relay(), []);
   }
 
   protected syncServerIdentifierHex(): string | null {

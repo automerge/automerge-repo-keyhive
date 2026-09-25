@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import {
   Access,
-  Agent,
   CiphertextStore,
   Identifier,
   Keyhive,
+  MemberedId,
   Signer,
 } from "@keyhive/keyhive/slim";
 import { docIdFromAutomergeUrl } from "../src/keyhive/keyhive.js";
@@ -88,15 +88,18 @@ async function addPublicAccessOutsideHive(
   keyhive: Keyhive,
   docUrl: AutomergeUrl
 ): Promise<void> {
-  const agent = await keyhive.getAgent(Identifier.publicId());
-  const doc = await keyhive.getDocument(docIdFromAutomergeUrl(docUrl));
-  await keyhive.addMember(agent!, doc!.toMembered(), Access.read(), []);
+  await keyhive.addMember(
+    Identifier.publicId(),
+    MemberedId.document(docIdFromAutomergeUrl(docUrl)),
+    Access.read(),
+    []
+  );
 }
 
 /**
  * A second identity that can be granted access.
  */
-async function receiveOtherIdentity(keyhive: Keyhive): Promise<Agent> {
+async function receiveOtherIdentity(keyhive: Keyhive): Promise<Identifier> {
   const keyPair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
     "sign",
     "verify",
@@ -108,15 +111,13 @@ async function receiveOtherIdentity(keyhive: Keyhive): Promise<Agent> {
   );
   const contactCard = await other.contactCard();
   await keyhive.receiveContactCard(contactCard);
-  const agent = await keyhive.getAgent(contactCard.id);
-  if (!agent) throw new Error("contact card did not resolve to an agent");
-  return agent;
+  return contactCard.id;
 }
 
 async function createDoc(keyhive: Keyhive): Promise<AutomergeUrl> {
-  const doc = await generateDoc(keyhive);
+  const docId = await generateDoc(keyhive);
   return stringifyAutomergeUrl({
-    documentId: doc.doc_id.toBytes() as any,
+    documentId: docId.toBytes() as any,
   }) as AutomergeUrl;
 }
 
@@ -185,12 +186,11 @@ describe("checkForMembershipNudges", () => {
   it("nudges when a group that already holds access gains a member", async () => {
     const { hive, keyhive, nudges, interceptor } = await buildHive();
     const docUrl = await createDoc(keyhive);
-    const doc = await keyhive.getDocument(docIdFromAutomergeUrl(docUrl));
     const group = await keyhive.generateGroup([]);
 
     await keyhive.addMember(
-      group.toAgent(),
-      doc!.toMembered(),
+      group.toIdentifier(),
+      MemberedId.document(docIdFromAutomergeUrl(docUrl)),
       Access.read(),
       []
     );
@@ -200,7 +200,7 @@ describe("checkForMembershipNudges", () => {
     expect(nudges.length).toBe(0);
 
     const member = await receiveOtherIdentity(keyhive);
-    await keyhive.addMember(member, group.toMembered(), Access.read(), []);
+    await keyhive.addMember(member, MemberedId.group(group), Access.read(), []);
     await flush(hive);
 
     expect(nudges.length).toBe(1);
@@ -210,11 +210,10 @@ describe("checkForMembershipNudges", () => {
   it("nudges once for a group add, not on every flush", async () => {
     const { hive, keyhive, nudges, interceptor } = await buildHive();
     const docUrl = await createDoc(keyhive);
-    const doc = await keyhive.getDocument(docIdFromAutomergeUrl(docUrl));
     const group = await keyhive.generateGroup([]);
     await keyhive.addMember(
-      group.toAgent(),
-      doc!.toMembered(),
+      group.toIdentifier(),
+      MemberedId.document(docIdFromAutomergeUrl(docUrl)),
       Access.read(),
       []
     );
@@ -226,7 +225,7 @@ describe("checkForMembershipNudges", () => {
     expect(nudges.length).toBe(0);
 
     const member = await receiveOtherIdentity(keyhive);
-    await keyhive.addMember(member, group.toMembered(), Access.read(), []);
+    await keyhive.addMember(member, MemberedId.group(group), Access.read(), []);
     await flush(hive);
     await flush(hive);
 
@@ -238,19 +237,18 @@ describe("checkForMembershipNudges", () => {
   it("nudges for a member added to a group nested inside one with access", async () => {
     const { hive, keyhive, nudges, interceptor } = await buildHive();
     const docUrl = await createDoc(keyhive);
-    const doc = await keyhive.getDocument(docIdFromAutomergeUrl(docUrl));
     const outer = await keyhive.generateGroup([]);
     const inner = await keyhive.generateGroup([]);
 
     await keyhive.addMember(
-      outer.toAgent(),
-      doc!.toMembered(),
+      outer.toIdentifier(),
+      MemberedId.document(docIdFromAutomergeUrl(docUrl)),
       Access.read(),
       []
     );
     await keyhive.addMember(
-      inner.toAgent(),
-      outer.toMembered(),
+      inner.toIdentifier(),
+      MemberedId.group(outer),
       Access.read(),
       []
     );
@@ -259,7 +257,7 @@ describe("checkForMembershipNudges", () => {
     expect(nudges.length).toBe(0);
 
     const member = await receiveOtherIdentity(keyhive);
-    await keyhive.addMember(member, inner.toMembered(), Access.read(), []);
+    await keyhive.addMember(member, MemberedId.group(inner), Access.read(), []);
     await flush(hive);
 
     expect(nudges.length).toBe(1);
@@ -270,10 +268,9 @@ describe("checkForMembershipNudges", () => {
     const group = await keyhive.generateGroup([]);
     const docUrls = [await createDoc(keyhive), await createDoc(keyhive)];
     for (const docUrl of docUrls) {
-      const doc = await keyhive.getDocument(docIdFromAutomergeUrl(docUrl));
       await keyhive.addMember(
-        group.toAgent(),
-        doc!.toMembered(),
+        group.toIdentifier(),
+        MemberedId.document(docIdFromAutomergeUrl(docUrl)),
         Access.read(),
         []
       );
@@ -285,7 +282,7 @@ describe("checkForMembershipNudges", () => {
     expect(nudges.length).toBe(0);
 
     const member = await receiveOtherIdentity(keyhive);
-    await keyhive.addMember(member, group.toMembered(), Access.read(), []);
+    await keyhive.addMember(member, MemberedId.group(group), Access.read(), []);
     await flush(hive);
 
     expect(nudges.length).toBe(2);

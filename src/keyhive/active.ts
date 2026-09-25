@@ -84,7 +84,7 @@ export async function createActive(
 ): Promise<Active> {
   const contactCard = await keyhive.getExistingContactCard();
   // TODO: We can now just get this off of Keyhive. We probably don't need it here anymore
-  const individual: Individual = await keyhive.individual;
+  const individual: Individual = await keyhive.individual();
   return {
     keyPair: keyPair,
     signer: signer,

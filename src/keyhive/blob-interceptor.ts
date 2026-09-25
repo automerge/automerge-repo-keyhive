@@ -29,7 +29,7 @@ const PCS_KEY_HASHES_STORAGE_KEY = "/pcs-key-hashes";
 // Outer envelope wire format (around keyhive's content envelope):
 //   [1] version
 //   [4] inner length (uint32 LE)
-//   [.] inner = keyhive EncryptedContent.serialize()
+//   [.] inner = keyhive Encrypted.toBytes()
 //   [.] predsCipher = symmetricEncrypt(selfKey, predecessor entries)
 // Each predecessor entry (inside predsCipher, once decrypted) is 64 bytes:
 //   [32] predecessor commit id  [32] that predecessor's application secret.
@@ -39,8 +39,6 @@ export const ENVELOPE_VERSION = 1;
 export const COMMIT_ID_BYTES = 32;
 /** @internal Exported for tests. */
 export const PRED_ENTRY_BYTES = COMMIT_ID_BYTES + 32;
-
-type KeyhiveDoc = NonNullable<Awaited<ReturnType<Keyhive["getDocument"]>>>;
 
 export class KeyhiveBlobInterceptor implements BlobInterceptor {
   #keyhive: Keyhive;
@@ -207,22 +205,20 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     const { binaryDocumentId, unprotected } = parseDocId(documentId);
     if (unprotected) return blob;
     return this.#queue.run(async () => {
-      const doc = await this.#keyhive.getDocument(
-        new KeyhiveDocumentId(binaryDocumentId)
-      );
+      const docId = new KeyhiveDocumentId(binaryDocumentId);
       // No keyhive doc yet: drop the outgoing blob (nothing stored or pushed).
-      if (!doc) {
+      if (!(await this.#keyhive.hasDocument(docId))) {
         log.debug(
           `[KeyhiveBlobInterceptor] transformOutgoing: no keyhive document for ${documentId}; dropping outgoing blob (a later save retries)`
         );
         return null;
       }
-      let pcsHash = await this.#keyhive.tryPcsKeyHash(doc);
+      let pcsHash = await this.#keyhive.tryPcsKeyHash(docId);
       if (!pcsHash) {
         // A sibling instance (e.g. the tab) may have rotated the key and written
         // the new leaf secret to shared storage. Import and retry once.
         await this.#importNewLeafSecrets();
-        pcsHash = await this.#keyhive.tryPcsKeyHash(doc);
+        pcsHash = await this.#keyhive.tryPcsKeyHash(docId);
         if (!pcsHash) {
           // Encrypt anyway. `tryEncryptKeyed` rotates when there is no
           // derivable key.
@@ -234,7 +230,12 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       const contentRef = new ChangeId(blake3(blob));
       let result;
       try {
-        result = await this.#keyhive.tryEncryptKeyed(doc, contentRef, [], blob);
+        result = await this.#keyhive.tryEncryptKeyed(
+          docId,
+          contentRef,
+          [],
+          blob
+        );
       } catch (e) {
         if (pcsHash) throw e;
         // We had no derivable key and the rotation did not work either, so
@@ -249,7 +250,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       }
       this.#docsAwaitingPcsKey.delete(documentId);
       this.#onEncrypted?.();
-      const encrypted = result.encrypted_content();
+      const encrypted = result.encryptedContent();
       const selfKey = result.applicationSecret;
 
       // Attach each parent's application secret, encrypted under this blob's own
@@ -265,7 +266,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
         if (idBytes.length !== COMMIT_ID_BYTES) continue;
         let parentKey = this.#blobKeys.get(parentHex);
         if (!parentKey && loadBlob) {
-          parentKey = await this.#recoverParentKey(doc, parentHex, loadBlob);
+          parentKey = await this.#recoverParentKey(docId, parentHex, loadBlob);
         }
         if (!parentKey) continue;
         const entry = new Uint8Array(PRED_ENTRY_BYTES);
@@ -283,11 +284,11 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
         concatBytes(entries),
         hexToBytes(commitId)
       );
-      const out = encodeOuterEnvelope(encrypted.serialize(), predsCipher);
+      const out = encodeOuterEnvelope(encrypted.toBytes(), predsCipher);
 
       this.#blobKeys.set(commitId, selfKey);
 
-      const newHash = encrypted.pcs_key_hash;
+      const newHash = encrypted.pcsKeyHash;
       const oldHash = this.#lastPcsKeyHash.get(documentId);
       if (!oldHash || !arraysEqual(oldHash, newHash)) {
         this.#lastPcsKeyHash.set(documentId, newHash);
@@ -306,10 +307,8 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     const { binaryDocumentId, unprotected } = parseDocId(documentId);
     if (unprotected) return blob;
     return this.#queue.run(async () => {
-      const doc = await this.#keyhive.getDocument(
-        new KeyhiveDocumentId(binaryDocumentId)
-      );
-      if (!doc) return null;
+      const docId = new KeyhiveDocumentId(binaryDocumentId);
+      if (!(await this.#keyhive.hasDocument(docId))) return null;
 
       // Decrypt this blob and, on a cold load, walk its predecessor chain by
       // loading just the parent blobs it points at. Collect this blob's
@@ -318,7 +317,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       const out: Uint8Array[] = [];
       const seen = new Set<string>();
       const ok = await this.#decryptAndWalk(
-        doc,
+        docId,
         commitId,
         blob,
         loadBlob,
@@ -336,7 +335,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   // (this blob first, then ancestors) into `out`. Returns false only when this
   // blob cannot be decrypted (the caller leaves it pending for a later pass).
   async #decryptAndWalk(
-    doc: KeyhiveDoc,
+    docId: KeyhiveDocumentId,
     commitId: string,
     blob: Uint8Array,
     loadBlob: ((commitIdHex: string) => Promise<Uint8Array | null>) | undefined,
@@ -376,7 +375,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       plaintext = decrypted;
       selfKey = cachedKey;
     } else {
-      const viaCgka = await this.#decryptViaCgka(doc, encrypted);
+      const viaCgka = await this.#decryptViaCgka(docId, encrypted);
       if (!viaCgka) return false;
       plaintext = viaCgka.plaintext;
       selfKey = viaCgka.applicationSecret;
@@ -409,7 +408,14 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
         continue;
       }
       if (parentBlob) {
-        await this.#decryptAndWalk(doc, idHex, parentBlob, loadBlob, out, seen);
+        await this.#decryptAndWalk(
+          docId,
+          idHex,
+          parentBlob,
+          loadBlob,
+          out,
+          seen
+        );
       }
     }
     return true;
@@ -417,10 +423,10 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
 
   // Recover a parent blob's application secret at encrypt time by loading its
   // stored envelope and decrypting it (CGKA dive). Caches the result and any of
-  // the parent's own predecessor keys it carries. Returns undefined if the blob
+  // the parent's own predecessor keys it contains. Returns undefined if the blob
   // is absent or cannot be decrypted (then the link is skipped as before).
   async #recoverParentKey(
-    doc: KeyhiveDoc,
+    docId: KeyhiveDocumentId,
     parentHex: string,
     loadBlob: (commitIdHex: string) => Promise<Uint8Array | null>
   ): Promise<Uint8Array | undefined> {
@@ -434,7 +440,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     const parsed = parseEnvelope(parentBlob);
     if (!parsed) return undefined;
     const { envelope, encrypted } = parsed;
-    const viaCgka = await this.#decryptViaCgka(doc, encrypted);
+    const viaCgka = await this.#decryptViaCgka(docId, encrypted);
     if (!viaCgka) return undefined;
     const key = viaCgka.applicationSecret;
     this.#blobKeys.set(parentHex, key);
@@ -453,21 +459,21 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   // Recover a blob's application secret through keyhive/CGKA (the chain entry
   // point), importing sibling-written leaf secrets and retrying once on a miss.
   async #decryptViaCgka(
-    doc: KeyhiveDoc,
+    docId: KeyhiveDocumentId,
     encrypted: Encrypted
   ): Promise<{ plaintext: Uint8Array; applicationSecret: Uint8Array } | null> {
     try {
-      const res = await this.#keyhive.tryDecryptKeyed(doc, encrypted);
+      const res = await this.#keyhive.tryDecryptKeyed(docId, encrypted);
       return {
-        plaintext: res.plaintext,
+        plaintext: res.plaintext(),
         applicationSecret: res.applicationSecret,
       };
     } catch (firstError) {
       if (await this.#importNewLeafSecrets()) {
         try {
-          const res = await this.#keyhive.tryDecryptKeyed(doc, encrypted);
+          const res = await this.#keyhive.tryDecryptKeyed(docId, encrypted);
           return {
-            plaintext: res.plaintext,
+            plaintext: res.plaintext(),
             applicationSecret: res.applicationSecret,
           };
         } catch (retryError) {
@@ -523,7 +529,7 @@ export function encodeOuterEnvelope(
 }
 
 /**
- * The two payloads an outer envelope carries: the keyhive-encrypted blob, and
+ * The two payloads an outer envelope contains: the keyhive-encrypted blob, and
  * the encrypted predecessor-key table that follows it.
  *
  * @internal Exported for tests.

@@ -20,7 +20,7 @@ export class MessageBatch {
     this.metrics.recordMessage(
       msg.type,
       msg.senderId,
-      data.signed.payload?.byteLength ?? 0
+      data.signed.payloadLength
     );
     this.messages.push({ msg, data });
   }
