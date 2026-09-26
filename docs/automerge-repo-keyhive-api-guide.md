@@ -474,6 +474,9 @@ The package re-exports the full `@keyhive/keyhive/slim` API, so you rarely
 need a direct dependency on the keyhive package. The types you will most
 often use are `ContactCard`, `Access`, `Identifier`, `DocumentId`,
 `Individual`, `Membership`, `Event`, `Signer`, and `Keyhive` itself.
+Import from `@automerge/automerge-repo-keyhive/slim` when you want the same
+ARK API surface without bundling ARK's base64-encoded keyhive wasm helper; in
+that mode, initialize keyhive wasm yourself.
 
 ## Storage layout
 
