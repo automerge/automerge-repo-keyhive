@@ -17,14 +17,8 @@ import {
 import { blake3 } from "@noble/hashes/blake3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { PromiseQueue } from "../network-adapter/pending.js";
-import { arraysEqual, isUnprotectedDocId } from "../utilities.js";
-import {
-  KEYHIVE_DB_KEY,
-  KEYHIVE_LEAF_SECRETS_KEY,
-  KEYHIVE_PREKEY_SECRETS_KEY,
-} from "./keyhive.js";
-
-const PCS_KEY_HASHES_STORAGE_KEY = "/pcs-key-hashes";
+import { isUnprotectedDocId } from "../utilities.js";
+import { KEYHIVE_DB_KEY, KEYHIVE_PREKEY_SECRETS_KEY } from "./keyhive.js";
 
 // Outer envelope wire format (around keyhive's content envelope):
 //   [1] version
@@ -45,14 +39,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   #queue: PromiseQueue;
   #onEncrypted?: () => void;
   #storage?: StorageAdapterInterface;
-  #lastPcsKeyHash: Map<string, Uint8Array> = new Map();
-  #persistQueued = false;
-  // Docs dropped because of a missing PCS key. A rotation will restore it.
-  #docsAwaitingPcsKey: Set<string> = new Set();
 
-  // Hashes of leaf-secret storage entries already imported into this keyhive,
-  // so a miss only imports entries it hasn't seen.
-  #importedLeafSecrets: Set<string> = new Set();
   // Byte-length of the prekey-secrets archive blob last imported, so a miss
   // only re-imports it when a sibling instance has rewritten it.
   #importedPrekeyArchiveLen = -1;
@@ -89,110 +76,33 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   clearCachedKeyMaterial(): void {
     this.#blobKeys.clear();
     this.#delivered.clear();
-    this.#importedLeafSecrets.clear();
   }
 
-  async loadPersistedPcsKeyHashes(): Promise<void> {
-    if (!this.#storage) return;
-    const data = await this.#storage.load([
-      KEYHIVE_DB_KEY,
-      PCS_KEY_HASHES_STORAGE_KEY,
-    ]);
-    if (!data) return;
-    try {
-      const decoded: Record<string, number[]> = JSON.parse(
-        new TextDecoder().decode(data)
-      );
-      for (const [docId, hashArray] of Object.entries(decoded)) {
-        this.#lastPcsKeyHash.set(docId, new Uint8Array(hashArray));
-      }
-    } catch {
-      // Ignore invalid persisted data.
-    }
-  }
-
-  // Import secrets another instance of this identity wrote to shared storage but
-  // this instance has not yet seen. Both stores hold `importPrekeySecrets`-shaped
-  // blobs ("leaf secret" == prekey secret); they are the archive/events split:
-  //   - KEYHIVE_LEAF_SECRETS_KEY: incremental events (e.g. a forcePcsUpdate
-  //     rotation secret), cursor-tracked by entry hash.
-  //   - KEYHIVE_PREKEY_SECRETS_KEY: the consolidated archive (full export),
-  //     rewritten when a prekey is created/rotated. A live miss must re-read it
-  //     too (not just init/refresh) to pick up a prekey a sibling just created.
-  // Returns true if any new secret was imported. Called only on an
+  // Import the prekey-secrets archive (KEYHIVE_PREKEY_SECRETS_KEY) if another
+  // instance of this identity has rewritten it since this instance last read
+  // it. It is rewritten when a prekey is created or rotated, so a live miss has
+  // to re-read it (not just init/refresh) to pick up a prekey a sibling just
+  // created. Returns true if it imported anything. Called only on an
   // encrypt/decrypt miss, so the common path pays nothing.
-  async #importNewLeafSecrets(): Promise<boolean> {
+  async #importNewPrekeySecrets(): Promise<boolean> {
     if (!this.#storage) return false;
-    let newlyImported = 0;
     try {
-      const chunks = await this.#storage.loadRange([
-        KEYHIVE_DB_KEY,
-        KEYHIVE_LEAF_SECRETS_KEY,
-      ]);
-      for (const chunk of chunks) {
-        if (!chunk.data) continue;
-        const hashKey = chunk.key[chunk.key.length - 1] as string;
-        if (this.#importedLeafSecrets.has(hashKey)) continue;
-        await this.#keyhive.importPrekeySecrets(chunk.data);
-        this.#importedLeafSecrets.add(hashKey);
-        newlyImported++;
-      }
-
-      // Re-read the consolidated prekey-secrets archive when it has grown/changed.
       // Length is a cheap change signal: the archive only ever accumulates
       // secrets, so a different length means a sibling added one.
       const archive = await this.#storage.load([
         KEYHIVE_DB_KEY,
         KEYHIVE_PREKEY_SECRETS_KEY,
       ]);
-      if (archive && archive.byteLength !== this.#importedPrekeyArchiveLen) {
-        await this.#keyhive.importPrekeySecrets(archive);
-        this.#importedPrekeyArchiveLen = archive.byteLength;
-        newlyImported++;
+      if (!archive || archive.byteLength === this.#importedPrekeyArchiveLen) {
+        return false;
       }
+      await this.#keyhive.importPrekeySecrets(archive);
+      this.#importedPrekeyArchiveLen = archive.byteLength;
+      return true;
     } catch (e) {
-      log.error("[KeyhiveBlobInterceptor] importNewLeafSecrets failed:", e);
+      log.error("[KeyhiveBlobInterceptor] importNewPrekeySecrets failed:", e);
+      return false;
     }
-    return newlyImported > 0;
-  }
-
-  #queuePersist(): void {
-    if (!this.#storage || this.#persistQueued) return;
-    this.#persistQueued = true;
-    queueMicrotask(() => {
-      this.#persistQueued = false;
-      void this.#persistPcsKeyHashes().catch((e) => {
-        log.error(
-          "[KeyhiveBlobInterceptor] persisting PCS key hashes failed:",
-          e
-        );
-      });
-    });
-  }
-
-  async #persistPcsKeyHashes(): Promise<void> {
-    if (!this.#storage) return;
-    const obj: Record<string, number[]> = {};
-    for (const [docId, hash] of this.#lastPcsKeyHash) {
-      obj[docId] = Array.from(hash);
-    }
-    const bytes = new TextEncoder().encode(JSON.stringify(obj));
-    await this.#storage.save(
-      [KEYHIVE_DB_KEY, PCS_KEY_HASHES_STORAGE_KEY],
-      bytes
-    );
-  }
-
-  get trackedDocIds(): string[] {
-    return [...this.#lastPcsKeyHash.keys()];
-  }
-
-  get docIdsAwaitingPcsKey(): string[] {
-    return [...this.#docsAwaitingPcsKey];
-  }
-
-  lastPcsKeyHashForDoc(documentId: string): Uint8Array | undefined {
-    return this.#lastPcsKeyHash.get(documentId);
   }
 
   async transformOutgoing(
@@ -215,15 +125,15 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       }
       let pcsHash = await this.#keyhive.tryPcsKeyHash(docId);
       if (!pcsHash) {
-        // A sibling instance (e.g. the tab) may have rotated the key and written
-        // the new leaf secret to shared storage. Import and retry once.
-        await this.#importNewLeafSecrets();
+        // A sibling instance (e.g. the tab) may have created a prekey this
+        // instance has not seen. Import and retry once.
+        await this.#importNewPrekeySecrets();
         pcsHash = await this.#keyhive.tryPcsKeyHash(docId);
         if (!pcsHash) {
           // Encrypt anyway. `tryEncryptKeyed` rotates when there is no
           // derivable key.
           log.debug(
-            `[KeyhiveBlobInterceptor] transformOutgoing: no derivable PCS key for ${documentId} (even after importing leaf secrets); encrypting anyway so keyhive rotates`
+            `[KeyhiveBlobInterceptor] transformOutgoing: no derivable PCS key for ${documentId} (even after importing prekey secrets); encrypting anyway so keyhive rotates`
           );
         }
       }
@@ -241,14 +151,12 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
         // We had no derivable key and the rotation did not work either, so
         // this agent cannot encrypt for this document at all (perhaps it
         // is not yet in the document's CGKA tree).
-        this.#docsAwaitingPcsKey.add(documentId);
         log.debug(
           `[KeyhiveBlobInterceptor] transformOutgoing: could not rotate to get a PCS key for ${documentId}; dropping outgoing blob (a later save retries): %O`,
           e
         );
         return null;
       }
-      this.#docsAwaitingPcsKey.delete(documentId);
       this.#onEncrypted?.();
       const encrypted = result.encryptedContent();
       const selfKey = result.applicationSecret;
@@ -287,13 +195,6 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       const out = encodeOuterEnvelope(encrypted.toBytes(), predsCipher);
 
       this.#blobKeys.set(commitId, selfKey);
-
-      const newHash = encrypted.pcsKeyHash;
-      const oldHash = this.#lastPcsKeyHash.get(documentId);
-      if (!oldHash || !arraysEqual(oldHash, newHash)) {
-        this.#lastPcsKeyHash.set(documentId, newHash);
-        this.#queuePersist();
-      }
       return out;
     });
   }
@@ -457,7 +358,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   }
 
   // Recover a blob's application secret through keyhive/CGKA (the chain entry
-  // point), importing sibling-written leaf secrets and retrying once on a miss.
+  // point), importing sibling-written prekey secrets and retrying once on a miss.
   async #decryptViaCgka(
     docId: KeyhiveDocumentId,
     encrypted: Encrypted
@@ -469,7 +370,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
         applicationSecret: res.applicationSecret,
       };
     } catch (firstError) {
-      if (await this.#importNewLeafSecrets()) {
+      if (await this.#importNewPrekeySecrets()) {
         try {
           const res = await this.#keyhive.tryDecryptKeyed(docId, encrypted);
           return {
@@ -478,14 +379,14 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
           };
         } catch (retryError) {
           log.debug(
-            "[KeyhiveBlobInterceptor] CGKA decrypt failed after importing new leaf secrets; leaving pending:",
+            "[KeyhiveBlobInterceptor] CGKA decrypt failed after importing new prekey secrets; leaving pending:",
             retryError
           );
           return null;
         }
       }
       log.debug(
-        "[KeyhiveBlobInterceptor] CGKA decrypt failed (no new leaf secrets to import); leaving pending:",
+        "[KeyhiveBlobInterceptor] CGKA decrypt failed (no new prekey secrets to import); leaving pending:",
         firstError
       );
       return null;

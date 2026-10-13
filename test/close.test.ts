@@ -38,15 +38,13 @@ async function buildHive(debounceMs: number) {
   const emitter = new KeyhiveEventEmitter();
 
   const blobInterceptor = {
-    trackedDocIds: [] as string[],
-    docIdsAwaitingPcsKey: [] as string[],
     clearCachedKeyMaterial: vi.fn(),
   };
 
   const hive = new AutomergeRepoKeyhive(
     {} as any,
     keyhive,
-    { async saveLeafSecret() {} } as any,
+    {} as any,
     "test-peer" as PeerId,
     emitter,
     adapter as any,

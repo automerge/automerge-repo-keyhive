@@ -67,22 +67,19 @@ describe("transformOutgoing when no PCS key is derivable", () => {
     expect(result).toBeNull();
   });
 
-  it("records the document as awaiting a key only when rotation fails", async () => {
+  it("looks the key up again after importing a sibling's stored secrets", async () => {
     const calls: Calls = { pcsKeyHash: 0, encrypt: 0 };
     const interceptor = new KeyhiveBlobInterceptor(
       keyhiveWithNoPcsKey(calls),
       new PromiseQueue()
     );
-    const id = docId();
 
-    expect(interceptor.docIdsAwaitingPcsKey).toEqual([]);
     await interceptor.transformOutgoing(
-      id,
+      docId(),
       "bb".repeat(32),
       [],
       new Uint8Array([1])
     );
-    expect(interceptor.docIdsAwaitingPcsKey).toEqual([id]);
     expect(calls.pcsKeyHash).toBe(2);
   });
 

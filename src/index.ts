@@ -7,7 +7,6 @@ export {
   LegacyAutomergeRepoKeyhive,
   AutomergeRepoKeyhive,
   AutomergeRepoKeyhiveBase,
-  NUDGE_FIELD,
 } from "./keyhive/automerge-repo-keyhive.js";
 export type {
   DocMember,
