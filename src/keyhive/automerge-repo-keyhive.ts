@@ -18,10 +18,8 @@ import {
 import { KeyhiveBlobInterceptor } from "./blob-interceptor.js";
 import {
   Access,
-  Capability,
   ChangeId,
   ContactCard,
-  Document as KeyhiveDocument,
   DocumentId as KeyhiveDocumentId,
   GroupId,
   Identifier,
@@ -48,11 +46,6 @@ export type CreateKeyhiveNetworkAdapter = (
   networkAdapter: NetworkAdapter,
   options?: WrapNetworkAdapterOptions
 ) => KeyhiveNetworkAdapter;
-
-/**
- * Field written into a document by the membership "nudge" edit.
- */
-export const NUDGE_FIELD = "__automerge-repo-keyhive__last-added-member-ts";
 
 /** The document as the subject a membership call takes. */
 function memberedDoc(docUrl: AutomergeUrl) {
@@ -145,12 +138,6 @@ export abstract class AutomergeRepoKeyhiveBase {
   }
 
   /**
-   * Called after this instance changes a document's membership locally.
-   * Default implementation is a no-op.
-   */
-  protected noteLocalMembershipChange(_docUrl: AutomergeUrl): void {}
-
-  /**
    * Build a subduction MemorySigner from this hive's Ed25519 key pair so
    * subduction and keyhive sign as the same peer. Requires that the
    * key pair was created extractable (which the default path in
@@ -199,7 +186,6 @@ export abstract class AutomergeRepoKeyhiveBase {
     await withDocContext("addMemberToDoc", docUrl, () =>
       this.keyhive.addMember(contactCard.id, memberedDoc(docUrl), access, [])
     );
-    this.noteLocalMembershipChange(docUrl);
   }
 
   /**
@@ -242,7 +228,6 @@ export abstract class AutomergeRepoKeyhiveBase {
         []
       )
     );
-    this.noteLocalMembershipChange(docUrl);
   }
 
   async getPublicAccess(docUrl: AutomergeUrl): Promise<Access | undefined> {
@@ -599,14 +584,6 @@ export function keyhiveIdFactory(
  */
 export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
   #linkRepoSchedule: (() => void) | null = null;
-  #repo: Repo | null = null;
-  // Per-doc set of member id hexes already seen. A membership increase caused
-  // by our own agent triggers a single rotation and nudge edit, giving the new
-  // member an entry point into the document's predecessor app secret chain.
-  #seenMembers: Map<string, Set<string>> = new Map();
-  // Document ids (the string after "automerge:") whose membership this
-  // instance changed locally and the nudge check has not yet examined.
-  #docsWithLocalMembershipChanges: Set<string> = new Set();
 
   constructor(
     active: Active,
@@ -628,10 +605,6 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
       idFactory,
       createKeyhiveNetworkAdapter
     );
-  }
-
-  protected override noteLocalMembershipChange(docUrl: AutomergeUrl): void {
-    this.#docsWithLocalMembershipChanges.add(docUrl.replace(/^automerge:/, ""));
   }
 
   /**
@@ -675,12 +648,9 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
         } catch (e) {
           log.error(`[AMRepoKeyhiveSubduction] shareConfigChanged() threw:`, e);
         }
-        // Membership may have changed. Nudge any reader our agent just added.
-        void this.#checkForMembershipNudges();
       }, debounceMs);
     };
 
-    this.#repo = repo;
     this.#linkRepoSchedule = schedule;
     this.emitter.on("update", schedule);
     this.networkAdapter.on("ingest-remote", schedule);
@@ -691,128 +661,6 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
    */
   notifySameAgentKeyhiveChange(): void {
     this.#linkRepoSchedule?.();
-  }
-
-  /**
-   * Everyone we granted access to, anywhere under this document's delegations.
-   */
-  async #individualsWeGrantedAccessTo(
-    doc: KeyhiveDocument,
-    ourIdHex: string
-  ): Promise<Set<string>> {
-    const granted = new Set<string>();
-    const seenGroups = new Set<string>();
-
-    const walk = async (
-      capabilities: Capability[],
-      grantedByUs: boolean
-    ): Promise<void> => {
-      for (const capability of capabilities) {
-        const byUs =
-          grantedByUs ||
-          uint8ArrayToHex(capability.proof.verifyingKey) === ourIdHex;
-        const idHex = uint8ArrayToHex(capability.who.id.toBytes());
-        if (capability.who.isGroup) {
-          // A cycle would otherwise not terminate.
-          if (seenGroups.has(idHex)) continue;
-          seenGroups.add(idHex);
-          const group = await this.keyhive.getGroup(
-            new GroupId(capability.who.id.toBytes())
-          );
-          if (group) await walk(await group.members(), byUs);
-          continue;
-        }
-        if (byUs) granted.add(idHex);
-      }
-    };
-
-    await walk(await doc.members(), false);
-    return granted;
-  }
-
-  /**
-   * Give any reader our agent just added a way into the document's history.
-   *
-   * A simple add leaves the new member with no derivable key, so we rotate
-   * the PCS key via `forcePcsUpdate` and then write a nudge edit under it.
-   * That edit encrypts under the post-rotation key and gives a way into the
-   * predecessor app secret chain for the new member.
-   *
-   * Who counts as new is decided by the document's CGKA membership, not by its
-   * delegations. Adding someone to a group that already has access puts them
-   * in the CGKA while the document's own members are unchanged.
-   */
-  async #checkForMembershipNudges(): Promise<void> {
-    const repo = this.#repo;
-    if (!repo) return;
-    // Zero-padded 64-hex id, matching the members' `who.id` and `verifyingKey`
-    // hexes.
-    const ourIdHex = uint8ArrayToHex(this.keyhive.id.toBytes());
-    const docIds = new Set([
-      ...this.blobInterceptor.trackedDocIds,
-      ...this.#docsWithLocalMembershipChanges,
-      // Never encrypted, so absent from trackedDocIds.
-      ...this.blobInterceptor.docIdsAwaitingPcsKey,
-    ]);
-    for (const documentId of docIds) {
-      try {
-        const docId = docIdFromAutomergeUrl(
-          `automerge:${documentId}` as AutomergeUrl
-        );
-        const doc = await this.keyhive.getDocument(docId);
-        if (!doc) {
-          this.#docsWithLocalMembershipChanges.delete(documentId);
-          continue;
-        }
-        const currentIds = new Set(
-          (await doc.cgkaMembers()).map((id) => uint8ArrayToHex(id.toBytes()))
-        );
-        const seen = this.#seenMembers.get(documentId);
-        const candidates = seen
-          ? [...currentIds].filter(
-              (idHex) => idHex !== ourIdHex && !seen.has(idHex)
-            )
-          : null;
-        // Nothing joined since the last check, which is the usual case, so
-        // skip walking the delegations to find out who we let in.
-        if (candidates && candidates.length === 0) {
-          this.#docsWithLocalMembershipChanges.delete(documentId);
-          continue;
-        }
-        const grantedByUs = await this.#individualsWeGrantedAccessTo(
-          doc,
-          ourIdHex
-        );
-        // Treat everyone we did not grant access to as already known.
-        // A restart nudges once for our own adds.
-        const added =
-          candidates ?? [...currentIds].filter((idHex) => idHex !== ourIdHex);
-        const addedByUs = added.filter((idHex) =>
-          grantedByUs.has(idHex)
-        ).length;
-        // Record the new membership regardless, so a given add nudges once.
-        this.#seenMembers.set(documentId, currentIds);
-        // We no longer need to track this as a local change.
-        this.#docsWithLocalMembershipChanges.delete(documentId);
-        if (addedByUs === 0) continue;
-
-        // Rotate (so the new member has a derivable current key), persist the
-        // rotated leaf secret for any sibling instance, then write the nudge.
-        const leafSecret = await this.keyhive.forcePcsUpdate(docId);
-        await this.keyhiveStorage.saveLeafSecret(leafSecret);
-        const handle = await repo.find(
-          `automerge:${documentId}` as AutomergeUrl
-        );
-        handle.change((d: any) => {
-          d[NUDGE_FIELD] = Date.now();
-        });
-      } catch (e) {
-        log.error(
-          `[AMRepoKeyhiveSubduction] membership nudge check failed for ${documentId}:`,
-          e
-        );
-      }
-    }
   }
 
   /**
@@ -832,7 +680,6 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
         []
       )
     );
-    this.noteLocalMembershipChange(docUrl);
   }
 
   async addSyncServerRelayToGroup(groupId: GroupId): Promise<void> {

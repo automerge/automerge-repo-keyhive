@@ -49,7 +49,6 @@ export const KEYHIVE_DB_KEY = "keyhive-db";
 export const KEYHIVE_ARCHIVES_KEY = "/archives/";
 export const KEYHIVE_EVENTS_KEY = "/ops/";
 export const KEYHIVE_PREKEY_SECRETS_KEY = "/prekey-secrets";
-export const KEYHIVE_LEAF_SECRETS_KEY = "/leaf-secrets/";
 
 /**
  * @deprecated Kept public only for prebuilt bundles compiled against 0.3.
@@ -570,7 +569,6 @@ async function buildHive(
     },
     options.storage
   );
-  await blobInterceptor.loadPersistedPcsKeyHashes();
 
   const hive = new AutomergeRepoKeyhive(
     active,
@@ -813,20 +811,6 @@ export class KeyhiveStorage {
       ],
       canonical
     );
-  }
-
-  // Persist a single rotated leaf secret (the bytes returned by
-  // `forcePcsUpdate`) as one content-addressed entry, so a sibling instance of
-  // this identity can pick up just the new secret on an encrypt/decrypt miss.
-  async saveLeafSecret(secretBytes: Uint8Array): Promise<string> {
-    const canonical = new Uint8Array(secretBytes);
-    const hash = await crypto.subtle.digest("SHA-256", canonical);
-    const hashHex = uint8ArrayToHex(new Uint8Array(hash));
-    await this.storage.save(
-      [KEYHIVE_DB_KEY, KEYHIVE_LEAF_SECRETS_KEY, hashHex],
-      canonical
-    );
-    return hashHex;
   }
 
   async savePrekeySecrets(kh: Keyhive): Promise<void> {

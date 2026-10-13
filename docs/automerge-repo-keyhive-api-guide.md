@@ -248,15 +248,9 @@ const card = ContactCard.fromJson(memberContactCardJson);
 await hive.addMemberToDoc(docUrl, card, Access.edit());
 ```
 
-For the subduction configuration, adding any member also rotates the document key and
-writes a small "nudge" edit so the new member can decrypt prior history. The
-edit sets a timestamp on a namespaced field at the document root:
-`__automerge-repo-keyhive__last-added-member-ts`. Applications that iterate
-document keys should skip it, and can import `NUDGE_FIELD` rather than hardcoding
-the string.
-
-The rotation fires for every member this agent adds and is debounced after
-`shareConfigDebounceMs`.
+A new member can read the document's whole history, including what was written
+before they were added, as soon as they have synced. The same holds for someone
+added to a group that already has access to the document.
 
 ### Revoke a member
 
@@ -485,8 +479,6 @@ pair):
 - `keyhive-db/archives/...`: compacted keyhive archives.
 - `keyhive-db/ops/...`: individual keyhive events, content-addressed.
 - `keyhive-db/prekey-secrets`: exported prekey secrets.
-- `keyhive-db/leaf-secrets/...`: rotated document key secrets, so sibling
-  instances of the same identity can decrypt.
 
 Multiple instances of the same identity (for example, several tabs sharing a
 shared worker identity) may share this storage.
