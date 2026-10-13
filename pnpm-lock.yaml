@@ -5,24 +5,24 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  '@automerge/automerge-repo': 2.6.0-subduction.48
+  '@automerge/automerge-repo': 2.6.0-subduction.49
 
 importers:
 
   .:
     dependencies:
       '@automerge/automerge-repo':
-        specifier: 2.6.0-subduction.48
-        version: 2.6.0-subduction.48
+        specifier: 2.6.0-subduction.49
+        version: 2.6.0-subduction.49
       '@automerge/automerge-repo-network-websocket':
-        specifier: 2.6.0-subduction.48
-        version: 2.6.0-subduction.48
+        specifier: 2.6.0-subduction.49
+        version: 2.6.0-subduction.49
       '@automerge/automerge-subduction':
-        specifier: 0.16.1
-        version: 0.16.1
+        specifier: 0.20.1
+        version: 0.20.1
       '@keyhive/keyhive':
-        specifier: 0.3.0-alpha.1
-        version: 0.3.0-alpha.1
+        specifier: 0.4.0-alpha.1
+        version: 0.4.0-alpha.1
       '@noble/hashes':
         specifier: ^2.2.0
         version: 2.2.0
@@ -75,16 +75,16 @@ importers:
 
 packages:
 
-  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.48':
-    resolution: {integrity: sha512-TRKAq4iTdrSpOQYxyKZMJDJ5Civa+vONrAHBZkpK+DGShzqBB6vCdTCsrBGBF2Q63H33qQM0XYBQEQKIa/zM+Q==}
+  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.49':
+    resolution: {integrity: sha512-9kDSyUW0Zcgz0nOYfu8K3c0IQqkPgdTrJPuhjke11lJ7oM+vJxtOYEstkJ/6xH78vkZU8i/96GbpjpTOAZgw8g==}
     engines: {node: '>=22.13'}
 
-  '@automerge/automerge-repo@2.6.0-subduction.48':
-    resolution: {integrity: sha512-HNS1YsD0XmQ0vtwIincF7NvEBrQuOMnk+mjCVluRiIpUFvcaVeNAFXCCyBVeXubmg88AHe+LkIQ96v/lyHZ7Wg==}
+  '@automerge/automerge-repo@2.6.0-subduction.49':
+    resolution: {integrity: sha512-2RRd2rrgrAMIj4hXtDCvNtqqpurjkw9I8Hdv9W+CRhMIZPl8QaAVmG1Bs4+TKBELw6WLQA6ISlrpnIChGzhpDA==}
     engines: {node: '>=22.13'}
 
-  '@automerge/automerge-subduction@0.16.1':
-    resolution: {integrity: sha512-alH7U4eYn0O7sT6hNLv7CJhNODJi+QD6qfRQTNfZCxL3Q5JZdJ8lFpdvXUkBf+I3bu0GLvVlTaYPWGrBihjpIw==}
+  '@automerge/automerge-subduction@0.20.1':
+    resolution: {integrity: sha512-lkRDaVr1I+C1N/IKSvn+TtT7WJnmxM0ntfUshG40Xi3INTL2//e8NcMJ8tEXh4GZYdCof37aG/diNuMLndHApQ==}
 
   '@automerge/automerge@3.3.2':
     resolution: {integrity: sha512-9vCdCL7pdQwUra66SBxPVHr+/t9epXKni9KDeak2rNBFMzABVh2u6gSpcwxi3jkR5qr047jVqZv9DlrOfVxLFw==}
@@ -348,8 +348,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@keyhive/keyhive@0.3.0-alpha.1':
-    resolution: {integrity: sha512-2MsnK989GTGR+j+2LwyiekeaXYAWcBUY5Em4b6nVOLRmLJn/rtdgaB9EfOi52gkxW0TqAi3njrHXX0eJBdoxXA==}
+  '@keyhive/keyhive@0.4.0-alpha.1':
+    resolution: {integrity: sha512-tZI5cJecpopDcAvOqg9KBlKdcMR4rkW2oS4o3pKZAuI6lLgRsQBDRxxzUSH4AihPPaNaUKXSsLLGXRMvwZOKbg==}
 
   '@noble/ed25519@3.0.0':
     resolution: {integrity: sha512-QyteqMNm0GLqfa5SoYbSC3+Pvykwpn95Zgth4MFVSMKBB75ELl9tX1LAVsN4c3HXOrakHsF2gL4zWDAYCcsnzg==}
@@ -1208,9 +1208,9 @@ packages:
 
 snapshots:
 
-  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.48':
+  '@automerge/automerge-repo-network-websocket@2.6.0-subduction.49':
     dependencies:
-      '@automerge/automerge-repo': 2.6.0-subduction.48
+      '@automerge/automerge-repo': 2.6.0-subduction.49
       cbor-x: 1.6.4
       debug: 4.4.3
       eventemitter3: 5.0.4
@@ -1220,10 +1220,10 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@automerge/automerge-repo@2.6.0-subduction.48':
+  '@automerge/automerge-repo@2.6.0-subduction.49':
     dependencies:
       '@automerge/automerge': 3.3.2
-      '@automerge/automerge-subduction': 0.16.1
+      '@automerge/automerge-subduction': 0.20.1
       bs58check: 4.0.0
       cbor-x: 1.6.4
       debug: 4.4.3
@@ -1238,7 +1238,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@automerge/automerge-subduction@0.16.1': {}
+  '@automerge/automerge-subduction@0.20.1': {}
 
   '@automerge/automerge@3.3.2': {}
 
@@ -1410,7 +1410,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@keyhive/keyhive@0.3.0-alpha.1': {}
+  '@keyhive/keyhive@0.4.0-alpha.1': {}
 
   '@noble/ed25519@3.0.0': {}
 
