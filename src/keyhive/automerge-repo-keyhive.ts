@@ -1,6 +1,7 @@
 import { log } from "../logging.js";
 import {
   AutomergeUrl,
+  decodeHeads,
   Heads,
   NetworkAdapter,
   PeerId,
@@ -89,6 +90,13 @@ export abstract class AutomergeRepoKeyhiveBase {
    * `linkRepo`.
    */
   protected shareConfigTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * The repo passed to `linkRepo`. Used to read a document's current heads,
+   * which {@link revokeMemberFromDoc} records as the revocation's retained
+   * heads.
+   */
+  protected repo: Repo | null = null;
 
   /**
    * Cleanup callbacks for resources wired up before this instance existed.
@@ -206,9 +214,19 @@ export abstract class AutomergeRepoKeyhiveBase {
       typeof member === "string"
         ? new Identifier(hexToUint8Array(member))
         : member;
-    await withDocContext("revokeMemberFromDoc", docUrl, () =>
-      this.keyhive.revokeMember(identifier, true, memberedDoc(docUrl))
-    );
+    await withDocContext("revokeMemberFromDoc", docUrl, async () => {
+      if (this.repo) {
+        const handle = await this.repo.find(docUrl);
+        const heads = decodeHeads(handle.heads()).map(
+          (head) => new ChangeId(hexToUint8Array(head))
+        );
+        await this.keyhive.setContentHeads(
+          docIdFromAutomergeUrl(docUrl),
+          heads
+        );
+      }
+      return this.keyhive.revokeMember(identifier, true, memberedDoc(docUrl));
+    });
   }
 
   /**
@@ -361,6 +379,7 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
       return;
     }
     this.#linked = true;
+    this.repo = repo;
     const debounceMs = options?.debounceMs ?? 2000;
     const onBefore = options?.onBeforeShareConfigChanged;
     let inProgress = false;
@@ -607,6 +626,7 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
     };
 
     this.#linkRepoSchedule = schedule;
+    this.repo = repo;
     this.emitter.on("update", schedule);
     this.networkAdapter.on("ingest-remote", schedule);
   }
