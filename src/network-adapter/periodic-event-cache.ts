@@ -1,14 +1,11 @@
 import { log } from "../logging.js";
-import { Identifier, Keyhive } from "@keyhive/keyhive/slim";
+import { Keyhive } from "@keyhive/keyhive/slim";
 import { PeerId } from "@automerge/automerge-repo/slim";
 import { cborByteString } from "./cbor-builder.js";
 import { getPendingOpHashes } from "../keyhive/keyhive.js";
 import { keyhiveIdentifierFromPeerId } from "../utilities.js";
 import { Metrics } from "./metrics.js";
-import {
-  EventBytesCache,
-  fetchAgentAndPublicEvents,
-} from "./event-bytes-cache.js";
+import { EventBytesCache, fetchAgentEvents } from "./event-bytes-cache.js";
 import type { EventCache } from "./event-cache.js";
 import type { PeerHashes, EventBytesResult } from "./sync-data.js";
 
@@ -23,7 +20,6 @@ import type { PeerHashes, EventBytesResult } from "./sync-data.js";
 export class PeriodicEventCache implements EventCache {
   // Pre-computed per-agent hash maps (rebuilt on refresh)
   private agentHashes: Map<string, PeerHashes> = new Map();
-  private publicHashes: PeerHashes = new Map();
 
   // hash string -> raw event bytes
   // NOTE: events are immutable so both eventBytes and eventCborBytes grow
@@ -39,7 +35,6 @@ export class PeriodicEventCache implements EventCache {
   // Fallback cache for event bytes misses
   private eventBytesCache = new EventBytesCache();
 
-  private publicIdStr: string = Identifier.publicId().toBytes().toString();
   // Cache PeerId -> agentIdStr to avoid repeated hex decode and WASM call
   private peerIdToAgentIdStr: Map<PeerId, string> = new Map();
 
@@ -58,11 +53,6 @@ export class PeriodicEventCache implements EventCache {
   ): Promise<Uint8Array[]> {
     metrics?.recordCacheHit();
     return Promise.resolve(this.pendingOpHashes);
-  }
-
-  getPublicHashes(_keyhive: Keyhive, metrics?: Metrics): Promise<PeerHashes> {
-    metrics?.recordCacheHit();
-    return Promise.resolve(this.publicHashes);
   }
 
   getHashesForPeer(
@@ -109,7 +99,7 @@ export class PeriodicEventCache implements EventCache {
     }
 
     const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
-    const fetchedEvents = await fetchAgentAndPublicEvents(keyhive, keyhiveId);
+    const fetchedEvents = await fetchAgentEvents(keyhive, keyhiveId);
     this.eventBytesCache.storeAndCollect(
       fetchedEvents,
       missingHashes,
@@ -212,7 +202,6 @@ export class PeriodicEventCache implements EventCache {
 
     // "Atomic" swap
     this.agentHashes = newAgentHashes;
-    this.publicHashes = newAgentHashes.get(this.publicIdStr) ?? new Map();
     this.pendingOpHashes = newPendingOpHashes;
     this.lastTotalOps = stats.totalOps;
 

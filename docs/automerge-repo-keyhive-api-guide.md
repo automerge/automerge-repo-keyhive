@@ -18,8 +18,7 @@ pieces you may need for custom setups. It is written for use with the default [s
   to documents.
 - **Access levels.** Every document has members, and each member has one of
   four levels: `relay` (sync bytes but no read access), `read`, `edit`,
-  and `admin`. If access is granted to a special "public" member, everyone has
-  that access level.
+  and `admin`.
 - **Peer id.** ARK peer ids are the base64-encoded verifying key, optionally
   followed by `-<suffix>`. The suffix lets several peers (for example, several
   browser tabs) share one keyhive identity while remaining distinct peers on
@@ -198,7 +197,7 @@ empty list) for unprotected documents, and membership operations throw an
 import { isUnprotectedDoc } from "@automerge/automerge-repo-keyhive";
 
 if (!isUnprotectedDoc(docUrl)) {
-  const access = await hive.bestAccessForDoc(id, docUrl);
+  const access = await hive.accessForDoc(id, docUrl);
   // gate the UI on access
 }
 ```
@@ -237,7 +236,7 @@ keys.
 throwing.
 
 All membership mutations (`addMemberToDoc`, `revokeMemberFromDoc`,
-`setPublicAccess`, `addSyncServerRelayToDoc`) throw on failure: on unprotected
+`addSyncServerRelayToDoc`) throw on failure: on unprotected
 documents (`UnprotectedDocError`), on documents keyhive does not know yet, and on
 unresolvable members. Wrap them in try/catch where failure is expected.
 
@@ -265,7 +264,7 @@ await hive.revokeMemberFromDoc(docUrl, member.id);
 
 ```ts
 const members = await hive.listMembers(docUrl);
-// [{ id, access, isSelf, isPublic, isSyncServer }, ...]
+// [{ id, access, isSelf, isSyncServer }, ...]
 
 for (const member of members) {
   console.log(member.id, member.access.toString(), member.isSelf);
@@ -277,25 +276,6 @@ list rendering and for `revokeMemberFromDoc`. `access` is an ordered
 `Access` value, so member rows can be compared with `atLeast` or sorted by
 `level`. The raw keyhive capabilities remain available via
 `docMemberCapabilities(docUrl)`.
-
-### Public access
-
-Public access is a grant to a special "public" member:
-
-```ts
-// Make a document publicly editable
-await hive.setPublicAccess(docUrl, Access.edit());
-
-// Check public access
-const access = await hive.getPublicAccess(docUrl); // Access | undefined
-
-// Revoke public access
-import { Identifier, uint8ArrayToHex } from "@automerge/automerge-repo-keyhive";
-await hive.revokeMemberFromDoc(
-  docUrl,
-  uint8ArrayToHex(Identifier.publicId().toBytes())
-);
-```
 
 ### Grant the sync server relay access
 
@@ -340,14 +320,11 @@ the group later grants it to them too.
 // A specific agent's direct access
 const access = await hive.accessForDoc(identifier, docUrl);
 
-// The higher of direct and public access
-const best = await hive.bestAccessForDoc(hive.active.individual.id, docUrl);
-
 // All members and their capabilities
 const memberships = await hive.docMemberCapabilities(docUrl);
 ```
 
-All three return `undefined` or an empty list for unprotected documents.
+Both return `undefined` or an empty list for unprotected documents.
 
 ### Keyhive statistics
 

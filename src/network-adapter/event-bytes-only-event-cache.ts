@@ -1,4 +1,4 @@
-import { Identifier, Keyhive } from "@keyhive/keyhive/slim";
+import { Keyhive } from "@keyhive/keyhive/slim";
 import { PeerId } from "@automerge/automerge-repo/slim";
 import { getPendingOpHashes } from "../keyhive/keyhive.js";
 import {
@@ -6,10 +6,7 @@ import {
   keyhiveIdentifierFromPeerId,
 } from "../utilities.js";
 import { Metrics } from "./metrics.js";
-import {
-  EventBytesCache,
-  fetchAgentAndPublicEvents,
-} from "./event-bytes-cache.js";
+import { EventBytesCache, fetchAgentEvents } from "./event-bytes-cache.js";
 import type { EventCache } from "./event-cache.js";
 import type { PeerHashes, EventBytesResult } from "./sync-data.js";
 
@@ -21,17 +18,6 @@ export class EventBytesOnlyEventCache implements EventCache {
     _metrics?: Metrics
   ): Promise<Uint8Array[]> {
     return await getPendingOpHashes(keyhive);
-  }
-
-  async getPublicHashes(
-    keyhive: Keyhive,
-    _metrics?: Metrics
-  ): Promise<PeerHashes> {
-    const agent = await keyhive.getAgent(Identifier.publicId());
-    if (!agent) {
-      return new Map();
-    }
-    return await getEventHashesForAgent(keyhive, agent);
   }
 
   async getHashesForPeer(
@@ -63,7 +49,7 @@ export class EventBytesOnlyEventCache implements EventCache {
     }
 
     const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
-    const fetchedEvents = await fetchAgentAndPublicEvents(keyhive, keyhiveId);
+    const fetchedEvents = await fetchAgentEvents(keyhive, keyhiveId);
     this.eventBytesCache.storeAndCollect(
       fetchedEvents,
       missingHashes,

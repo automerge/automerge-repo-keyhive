@@ -67,35 +67,13 @@ export class EventBytesCache {
   }
 }
 
-// Fetch public events from keyhive WASM API.
-async function fetchPublicEvents(
-  keyhive: Keyhive
-): Promise<Map<Uint8Array, Uint8Array>> {
-  const agent = await keyhive.getAgent(Identifier.publicId());
-  return agent
-    ? await getEventsForAgent(keyhive, agent)
-    : new Map<Uint8Array, Uint8Array>();
-}
-
-// Fetch events for a specific agent plus public events from keyhive WASM API.
-export async function fetchAgentAndPublicEvents(
+// Fetch events for a specific agent from keyhive WASM API.
+export async function fetchAgentEvents(
   keyhive: Keyhive,
   agentId: Identifier
 ): Promise<Map<Uint8Array, Uint8Array>> {
-  const wasmEvents = new Map<Uint8Array, Uint8Array>();
-
   const agent = await keyhive.getAgent(agentId);
-  if (agent) {
-    const peerEvents = await getEventsForAgent(keyhive, agent);
-    for (const [hash, event] of peerEvents) {
-      wasmEvents.set(hash, event);
-    }
-  }
-
-  const publicEvents = await fetchPublicEvents(keyhive);
-  for (const [hash, event] of publicEvents) {
-    wasmEvents.set(hash, event);
-  }
-
-  return wasmEvents;
+  return agent
+    ? await getEventsForAgent(keyhive, agent)
+    : new Map<Uint8Array, Uint8Array>();
 }
