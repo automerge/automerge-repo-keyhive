@@ -18,7 +18,7 @@ import {
 
 // Rust source of truth for the wire shape:
 //   subduction_keyhive/src/wire.rs              SUK\0 + 4B BE length frame
-//   subduction_keyhive/src/signed_message.rs    {contactCard: String, signed: bytes}
+//   subduction_keyhive/src/signed_message.rs    {contactCard: bytes, signed: bytes}
 //   subduction_keyhive/src/message.rs           externally-tagged enum, snake_case fields
 //   subduction_keyhive/src/peer_id.rs           {verifying_key: [u8;32], suffix: Option<String>}
 //
@@ -64,32 +64,30 @@ describe("subduction-transport codec", () => {
   describe("SignedMessage CBOR map shape", () => {
     it("uses camelCase wire keys 'contactCard' and 'signed' (not snake_case)", () => {
       const cbor = encodeSignedMessage({
-        contactCard: '{"some":"json"}',
+        contactCard: new Uint8Array([0x0a, 0x0b]),
         signed: new Uint8Array([0x01, 0x02, 0x03]),
       });
       const raw = cborDecode(cbor) as Record<string, unknown>;
 
       const keys = Object.keys(raw).sort();
       expect(keys).toEqual(["contactCard", "signed"]);
-      // contactCard must be a JSON text string, not bytes or null.
-      expect(typeof raw.contactCard).toBe("string");
-      expect(raw.contactCard).toBe('{"some":"json"}');
-      // signed must be a CBOR byte string (decoded as Uint8Array/Buffer).
+      // Both must be CBOR byte strings (decoded as Uint8Array/Buffer).
+      expect(raw.contactCard instanceof Uint8Array).toBe(true);
+      expect(Array.from(raw.contactCard as Uint8Array)).toEqual([0x0a, 0x0b]);
       expect(raw.signed instanceof Uint8Array).toBe(true);
       expect(Array.from(raw.signed as Uint8Array)).toEqual([0x01, 0x02, 0x03]);
     });
 
-    it("absent contact card is the empty-string sentinel, not null/missing", () => {
+    it("absent contact card is an empty byte string, not null/missing", () => {
       const cbor = encodeSignedMessage({
-        contactCard: "",
+        contactCard: new Uint8Array(),
         signed: new Uint8Array([0xab]),
       });
       const raw = cborDecode(cbor) as Record<string, unknown>;
-      // The "contactCard" key must be present and be the empty string.
-      // Rust's `from_cbor` deserialises into `String` (not `Option<String>`)
-      // and treats `""` as "no contact card".
-      expect(Object.keys(raw)).toContain("contactCard");
-      expect(raw.contactCard).toBe("");
+      // Rust deserialises the key as bytes and treats empty as "no contact
+      // card".
+      expect(raw.contactCard instanceof Uint8Array).toBe(true);
+      expect((raw.contactCard as Uint8Array).length).toBe(0);
     });
   });
 

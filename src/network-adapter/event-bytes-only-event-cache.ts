@@ -3,6 +3,7 @@ import { PeerId } from "@automerge/automerge-repo/slim";
 import { getPendingOpHashes } from "../keyhive/keyhive.js";
 import {
   getEventHashesForAgent,
+  hasIndividual,
   keyhiveIdentifierFromPeerId,
 } from "../utilities.js";
 import { Metrics } from "./metrics.js";
@@ -26,11 +27,13 @@ export class EventBytesOnlyEventCache implements EventCache {
     _metrics?: Metrics
   ): Promise<PeerHashes | null> {
     const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
-    const agent = await keyhive.getAgent(keyhiveId);
-    if (!agent) {
+    if (!(await hasIndividual(keyhive, keyhiveId))) {
       return null;
     }
-    return await getEventHashesForAgent(keyhive, agent);
+    return await getEventHashesForAgent(
+      keyhive,
+      await keyhive.getPrincipal(keyhiveId)
+    );
   }
 
   async getEventBytesForPeer(

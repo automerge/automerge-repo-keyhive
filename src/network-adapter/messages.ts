@@ -2,12 +2,12 @@ import { log } from "../logging.js";
 import { type Message, type PeerId } from "@automerge/automerge-repo/slim";
 import { encode, decode } from "cbor-x";
 
-import { ContactCard, Signed, Keyhive } from "@keyhive/keyhive/slim";
+import { ContactCard, Keyhive, SignedBytes } from "@keyhive/keyhive/slim";
 import { verifyingKeyPeerIdWithoutSuffix } from "../utilities.js";
 
 export type KeyhiveMessageData = {
   contactCard?: ContactCard;
-  signed: Signed;
+  signed: SignedBytes;
 };
 
 export type KeyhiveMessage = {
@@ -16,11 +16,13 @@ export type KeyhiveMessage = {
 };
 
 export function encodeKeyhiveMessageData(msg: KeyhiveMessageData): Uint8Array {
-  const contactCardJson = msg.contactCard ? msg.contactCard.toJson() : "";
+  const contactCardBytes = msg.contactCard
+    ? msg.contactCard.toBytes()
+    : new Uint8Array();
   const signedBytes = msg.signed.toBytes();
 
   return encode({
-    contactCard: contactCardJson,
+    contactCard: contactCardBytes,
     signed: signedBytes,
   });
 }
@@ -30,20 +32,20 @@ export function decodeKeyhiveMessageData(
 ): KeyhiveMessageData | undefined {
   try {
     const decoded = decode(encoded) as {
-      contactCard: string;
+      contactCard: Uint8Array;
       signed: Uint8Array;
     };
 
-    if (decoded.contactCard !== "") {
+    if (decoded.contactCard.length > 0) {
       log.debug(
         "[AMRepoKeyhive] decodeKeyhiveMessageData: parsing contact card from message"
       );
     }
     const contactCard =
-      decoded.contactCard === ""
+      decoded.contactCard.length === 0
         ? undefined
-        : ContactCard.fromJson(decoded.contactCard);
-    const signed = Signed.fromBytes(decoded.signed);
+        : ContactCard.fromBytes(decoded.contactCard);
+    const signed = SignedBytes.fromBytes(decoded.signed);
 
     return {
       contactCard,
@@ -96,7 +98,7 @@ export function verifyData(peerId: PeerId, data: KeyhiveMessageData): boolean {
   }
 }
 
-function peerIdFromSigned(signed: Signed, suffix: string = ""): PeerId {
+function peerIdFromSigned(signed: SignedBytes, suffix: string = ""): PeerId {
   return peerIdFromVerifyingKey(signed.verifyingKey, suffix);
 }
 

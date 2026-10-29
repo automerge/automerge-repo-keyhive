@@ -1,6 +1,6 @@
 import { Identifier, Keyhive } from "@keyhive/keyhive/slim";
 import { cborByteString } from "./cbor-builder.js";
-import { getEventsForAgent } from "../utilities.js";
+import { getEventsForAgent, hasIndividual } from "../utilities.js";
 
 const MAX_ENTRIES = 100000;
 
@@ -72,8 +72,8 @@ export async function fetchAgentEvents(
   keyhive: Keyhive,
   agentId: Identifier
 ): Promise<Map<Uint8Array, Uint8Array>> {
-  const agent = await keyhive.getAgent(agentId);
-  return agent
-    ? await getEventsForAgent(keyhive, agent)
-    : new Map<Uint8Array, Uint8Array>();
+  if (!(await hasIndividual(keyhive, agentId))) {
+    return new Map<Uint8Array, Uint8Array>();
+  }
+  return await getEventsForAgent(keyhive, await keyhive.getPrincipal(agentId));
 }

@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import {
-  Access,
   CiphertextStore,
   Identifier,
   Keyhive,
   MemberedId,
+  Power,
   Signer,
   type DocumentId as KeyhiveDocumentId,
 } from "@keyhive/keyhive/slim";
@@ -34,8 +34,7 @@ async function makePeer(): Promise<Peer> {
 
 /** Deliver every keyhive event `from` has for `to`, as a sync would. */
 async function sync(from: Peer, to: Peer): Promise<void> {
-  const agent = await from.keyhive.getAgent(to.id);
-  if (!agent) throw new Error("sender does not know the receiver");
+  const agent = await from.keyhive.getPrincipal(to.id);
   const events = await from.keyhive.eventsForAgent(agent);
   await to.keyhive.ingestEventsBytes([...events.values()]);
 }
@@ -96,8 +95,7 @@ describe("a member added to a document", () => {
       await alice.keyhive.addMember(
         bob.id,
         MemberedId.document(docId),
-        Access.read(),
-        []
+        Power.read()
       );
     });
 
@@ -113,14 +111,12 @@ describe("a member added to a document", () => {
       await alice.keyhive.addMember(
         group.toIdentifier(),
         MemberedId.document(docId),
-        Access.read(),
-        []
+        Power.read()
       );
       await alice.keyhive.addMember(
         bob.id,
         MemberedId.group(group),
-        Access.read(),
-        []
+        Power.read()
       );
     });
 
