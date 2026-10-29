@@ -156,6 +156,8 @@ export class PeriodicEventCache implements EventCache {
       allAgentEvents.membershipSources
     );
     const cgkaSourceHashes = buildSourceHashes(allAgentEvents.cgkaSources);
+    // Keyed by agent, so each agent is looked up below as its own source
+    const explanationHashes = buildSourceHashes(allAgentEvents.explanations);
 
     // Build agent -> sources indexes
     const agentPrekeySources = buildAgentSources(
@@ -172,6 +174,7 @@ export class PeriodicEventCache implements EventCache {
       ...agentPrekeySources.keys(),
       ...agentMembershipSources.keys(),
       ...agentCgkaSources.keys(),
+      ...explanationHashes.keys(),
     ]);
     for (const agentIdStr of allAgentIds) {
       const peerHashes: PeerHashes = new Map();
@@ -191,6 +194,12 @@ export class PeriodicEventCache implements EventCache {
       collectSourceHashes(
         agentCgkaSources.get(agentIdStr),
         cgkaSourceHashes,
+        allHashes,
+        peerHashes
+      );
+      collectSourceHashes(
+        [agentIdStr],
+        explanationHashes,
         allHashes,
         peerHashes
       );
