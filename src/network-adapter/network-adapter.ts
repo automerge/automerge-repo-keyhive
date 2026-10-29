@@ -187,6 +187,12 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
         );
         return;
       }
+      if (this.hardcodedRemoteId && payload.peerId !== this.hardcodedRemoteId) {
+        log.debug(
+          `[AMRepoKeyhive] Not sharing with ${payload.peerId}. Ignoring peer-candidate.`
+        );
+        return;
+      }
       log.debug(`[AMRepoKeyhive] peer-candidate: ${payload.peerId}`);
       this.emit("peer-candidate", payload);
       this.peers.set(payload.peerId, new Peer());
@@ -282,6 +288,12 @@ export class KeyhiveNetworkAdapter extends NetworkAdapter {
   send(message: Message, contactCard?: ContactCard): void {
     if (this.peerId === undefined) {
       throw new Error("peerId must be defined!");
+    }
+    if (this.hardcodedRemoteId && message.targetId !== this.hardcodedRemoteId) {
+      log.debug(
+        `[AMRepoKeyhive] Not sharing with ${message.targetId}. Dropping message.`
+      );
+      return;
     }
     if (message.type === "subduction-connection") {
       this.networkAdapter.send(message);
