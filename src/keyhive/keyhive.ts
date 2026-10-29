@@ -11,6 +11,7 @@ import {
   StorageKey,
 } from "@automerge/automerge-repo/slim";
 import {
+  arraysEqual,
   peerIdFromSigner,
   uint8ArrayToHex,
   unwrapWasmError,
@@ -49,6 +50,7 @@ export const KEYHIVE_DB_KEY = "keyhive-db";
 export const KEYHIVE_ARCHIVES_KEY = "/archives/";
 export const KEYHIVE_EVENTS_KEY = "/ops/";
 export const KEYHIVE_PREKEY_SECRETS_KEY = "/prekey-secrets";
+const COMPACTION_LOCK = "automerge-repo-keyhive-compaction";
 
 /**
  * @deprecated Kept public only for prebuilt bundles compiled against 0.3.
@@ -814,6 +816,20 @@ export class KeyhiveStorage {
   }
 
   async compact(kh: Keyhive): Promise<void> {
+    // Instances sharing this storage (tabs, workers) must not compact at the
+    // same time, or each can remove the archive the other has just written.
+    // Web Locks are shared by all tabs and workers of an origin. Where they are
+    // unavailable (Node, insecure contexts), only the re-read before each
+    // removal in compactUnlocked protects other instances' archives.
+    const locks = globalThis.navigator?.locks;
+    if (locks) {
+      await locks.request(COMPACTION_LOCK, () => this.compactUnlocked(kh));
+    } else {
+      await this.compactUnlocked(kh);
+    }
+  }
+
+  private async compactUnlocked(kh: Keyhive): Promise<void> {
     const keyhiveArchiveChunks = await this.storage.loadRange([
       KEYHIVE_DB_KEY,
       KEYHIVE_ARCHIVES_KEY,
@@ -823,8 +839,9 @@ export class KeyhiveStorage {
       KEYHIVE_EVENTS_KEY,
     ]);
 
-    // Nothing to compact if no events and at most one archive
-    if (keyhiveEventsChunks.length === 0 && keyhiveArchiveChunks.length <= 1) {
+    // Nothing to compact if no events and one archive. With no archive at
+    // all, write ours: storage may have lost state this instance still holds.
+    if (keyhiveEventsChunks.length === 0 && keyhiveArchiveChunks.length === 1) {
       return;
     }
 
@@ -878,10 +895,16 @@ export class KeyhiveStorage {
     // Write the new compacted archive
     await this.saveKeyhiveWithHash(kh);
 
-    // Remove old archives (skip the one we just wrote)
+    // Remove the archives we read and ingested, except the one we just wrote.
+    // Another instance may have rewritten one since we read it, so re-read
+    // each and keep it if it changed. The storage API has no
+    // compare-and-remove, so a write landing between the re-read and the
+    // removal is still lost.
     const currentCompactHash = uint8ArrayToHex(this.keyhiveStorageId);
     for (const chunk of keyhiveArchiveChunks) {
-      if (chunk.key[2] !== currentCompactHash) {
+      if (chunk.key[2] === currentCompactHash || !chunk.data) continue;
+      const current = await this.storage.load(chunk.key);
+      if (current && arraysEqual(current, chunk.data)) {
         await this.storage.remove(chunk.key);
       }
     }
