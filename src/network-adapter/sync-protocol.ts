@@ -926,7 +926,7 @@ export class SyncProtocol {
     }
   }
 
-  // Returns intersection of hashes both peers can access, plus public hashes.
+  // Returns intersection of hashes both peers can access.
   private async getHashesForPeerPair(
     peerA: PeerId,
     peerB: PeerId,
@@ -939,14 +939,9 @@ export class SyncProtocol {
     const hashesForB =
       (await this.cache.getHashesForPeer(this.keyhive, peerB, metrics)) ??
       new Map<string, Uint8Array>();
-
-    const publicHashes = await this.cache.getPublicHashes(
-      this.keyhive,
-      metrics
-    );
     metrics?.recordHashLookupTime(Date.now() - hashLookupStart);
 
-    const result = new Map<string, Uint8Array>(publicHashes);
+    const result = new Map<string, Uint8Array>();
     for (const [hashString, hashBytes] of hashesForA.entries()) {
       if (hashesForB.has(hashString)) {
         result.set(hashString, hashBytes);

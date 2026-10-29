@@ -212,32 +212,6 @@ export abstract class AutomergeRepoKeyhiveBase {
   }
 
   /**
-   * Grant `access` on the document to everyone via the special public
-   * member. Throws if the document is unprotected or is not known to
-   * keyhive.
-   */
-  async setPublicAccess(docUrl: AutomergeUrl, access: Access): Promise<void> {
-    if (isUnprotectedDoc(docUrl)) {
-      throw new UnprotectedDocError("setPublicAccess", docUrl);
-    }
-    await withDocContext("setPublicAccess", docUrl, () =>
-      this.keyhive.addMember(
-        Identifier.publicId(),
-        memberedDoc(docUrl),
-        access,
-        []
-      )
-    );
-  }
-
-  async getPublicAccess(docUrl: AutomergeUrl): Promise<Access | undefined> {
-    if (isUnprotectedDoc(docUrl)) return undefined;
-    const publicId = Identifier.publicId();
-    const docId = docIdFromAutomergeUrl(docUrl);
-    return await this.keyhive.accessForDoc(publicId, docId);
-  }
-
-  /**
    * The document's keyhive id. Accepts a `DocumentId` as well as an
    * `AutomergeUrl` because tool bundles built against 0.3 still pass an
    * `DocumentId`.
@@ -260,21 +234,6 @@ export abstract class AutomergeRepoKeyhiveBase {
     return await this.keyhive.accessForDoc(id, docId);
   }
 
-  /**
-   * The most permissive of `id`'s direct access and the document's public
-   * access, or undefined if none (including for unprotected docs).
-   */
-  async bestAccessForDoc(
-    id: Identifier,
-    docUrl: AutomergeUrl
-  ): Promise<Access | undefined> {
-    if (isUnprotectedDoc(docUrl)) return undefined;
-    return await this.keyhive.bestAccessForDoc(
-      id,
-      docIdFromAutomergeUrl(docUrl)
-    );
-  }
-
   /** All member capabilities for the document (empty for unprotected docs). */
   async docMemberCapabilities(
     docUrl: AutomergeUrl | KeyhiveDocumentId
@@ -290,7 +249,6 @@ export abstract class AutomergeRepoKeyhiveBase {
   async listMembers(docUrl: AutomergeUrl): Promise<DocMember[]> {
     const capabilities = await this.docMemberCapabilities(docUrl);
     const selfHex = uint8ArrayToHex(this.active.individual.id.toBytes());
-    const publicHex = uint8ArrayToHex(Identifier.publicId().toBytes());
     const serverHex = this.syncServerIdentifierHex();
     return capabilities.map((capability) => {
       const id = uint8ArrayToHex(capability.who.id.toBytes());
@@ -298,7 +256,6 @@ export abstract class AutomergeRepoKeyhiveBase {
         id,
         access: capability.can,
         isSelf: id === selfHex,
-        isPublic: id === publicHex,
         isSyncServer: serverHex !== null && id === serverHex,
       };
     });
@@ -356,8 +313,6 @@ export interface DocMember {
   access: Access;
   /** Returns true if this member is this hive's own identity. */
   isSelf: boolean;
-  /** Returns true if this member is the special public member. */
-  isPublic: boolean;
   /** Returns true if this member is the sync server configured for this hive. */
   isSyncServer: boolean;
 }
@@ -436,8 +391,8 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
       minAccess: Access
     ): Promise<boolean> => {
       try {
-        const best = await keyhive.bestAccessForDoc(id, docId);
-        return best !== undefined && best.atLeast(minAccess);
+        const access = await keyhive.accessForDoc(id, docId);
+        return access !== undefined && access.atLeast(minAccess);
       } catch (e) {
         log.error(`[SubductionPolicy] hasAccess threw for docId=${docId}:`, e);
         return false;
