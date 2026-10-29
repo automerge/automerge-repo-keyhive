@@ -1,7 +1,8 @@
 import { log } from "../logging.js";
 import { Message, PeerId } from "@automerge/automerge-repo/slim";
 import { ContactCard, Keyhive } from "@keyhive/keyhive/slim";
-import { encode, decode } from "cbor-x";
+import { encode } from "cbor-x";
+import { decodeCbor } from "./cbor-decode.js";
 import {
   buildSyncResponseCbor,
   buildSyncOpsCbor,
@@ -352,7 +353,7 @@ export class SyncProtocol {
     }
     const peerId = this.requirePeerId();
 
-    const requestData = decode(message.data as Uint8Array);
+    const requestData = decodeCbor(message.data as Uint8Array);
     const peerFoundHashes: Uint8Array[] = requestData.found || [];
     const peerPendingHashes: Uint8Array[] = requestData.pending || [];
 
@@ -488,7 +489,7 @@ export class SyncProtocol {
     }
     const peerId = this.requirePeerId();
 
-    const responseData = decode(message.data as Uint8Array);
+    const responseData = decodeCbor(message.data as Uint8Array);
     const requestedHashes: Uint8Array[] = responseData.requested || [];
     const foundEvents: Uint8Array[] = responseData.found || [];
     const syncResponderTotal: number | undefined =
@@ -619,7 +620,7 @@ export class SyncProtocol {
     }
     const peerId = this.requirePeerId();
 
-    const decoded = decode(message.data as Uint8Array);
+    const decoded = decodeCbor(message.data as Uint8Array);
 
     // Handle both old array format and new map format with metadata
     let receivedEvents: Uint8Array[];
@@ -686,7 +687,7 @@ export class SyncProtocol {
     }
     const peerId = this.requirePeerId();
 
-    const checkData = decode(message.data as Uint8Array);
+    const checkData = decodeCbor(message.data as Uint8Array);
     const theirTotalForUs: number = checkData.senderTotal;
     const theirSyncpoint: number = checkData.senderSyncpoint;
     const theirDigest: Uint8Array =
@@ -770,7 +771,7 @@ export class SyncProtocol {
       return;
     }
 
-    const confirmData = decode(message.data as Uint8Array);
+    const confirmData = decodeCbor(message.data as Uint8Array);
     const confirmerTotal: number = confirmData.confirmerTotal;
 
     metrics.recordSyncConfirmationReceived();
