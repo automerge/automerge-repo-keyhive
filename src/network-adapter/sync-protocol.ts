@@ -804,6 +804,10 @@ export class SyncProtocol {
       } catch (error) {
         log.error(`[AMRepoKeyhive] Error ingesting events: ${error}`);
       }
+      // ingestEventsBytes decodes the whole batch first and throws if any
+      // element fails, so store the batch only once a call has returned.
+      // Undecodable bytes in storage would break every later load.
+      let decoded = pendingEvents !== null;
 
       if (pendingEvents) {
         metrics.recordIngestion(events.length, pendingEvents.length);
@@ -830,6 +834,7 @@ export class SyncProtocol {
               await this.keyhiveStorage.withSuppressedEventWrites(() =>
                 this.keyhive.ingestEventsBytes(events)
               );
+            decoded = true;
             if (retryPending.length === 0) {
               log.debug(
                 `[AMRepoKeyhive] Successfully ingested all events after reading from storage`
@@ -861,7 +866,7 @@ export class SyncProtocol {
               error
             )
           );
-      } else {
+      } else if (decoded) {
         void this.saveReceivedEvents(events).catch((error) =>
           log.error("[AMRepoKeyhive] Failed to save received events:", error)
         );
