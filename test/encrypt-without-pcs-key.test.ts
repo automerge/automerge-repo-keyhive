@@ -28,7 +28,7 @@ interface Calls {
 }
 
 /**
- * A keyhive whose tree has no derivable key. `tryEncryptKeyed` throws, which
+ * A keyhive whose tree has no derivable key. `tryEncrypt` throws, which
  * lets the test see whether it was reached at all without having to build a
  * valid encryption result.
  */
@@ -41,7 +41,7 @@ function keyhiveWithNoPcsKey(calls: Calls, pcsHash?: Uint8Array): Keyhive {
       calls.pcsKeyHash++;
       return pcsHash;
     },
-    async tryEncryptKeyed() {
+    async tryEncrypt() {
       calls.encrypt++;
       throw new Error("rotation not possible for this agent");
     },
