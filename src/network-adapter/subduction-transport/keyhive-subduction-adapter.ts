@@ -5,7 +5,7 @@ import { log } from "../../logging.js";
 
 import type { Message, PeerId } from "@automerge/automerge-repo/slim";
 import type { Subduction } from "@automerge/automerge-subduction/slim";
-import { ContactCard, Keyhive, Signed } from "@keyhive/keyhive/slim";
+import { ContactCard, Keyhive, SignedBytes } from "@keyhive/keyhive/slim";
 import { EventEmitter } from "eventemitter3";
 
 import { Metrics } from "../metrics.js";
@@ -333,9 +333,8 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
 
     const signed = await this.keyhive.trySign(payload);
     const signedBytes = signed.toBytes();
-    const contactCardJson = contactCard ? contactCard.toJson() : "";
     return encodeSignedMessage({
-      contactCard: contactCardJson,
+      contactCard: contactCard ? contactCard.toBytes() : new Uint8Array(),
       signed: signedBytes,
     });
   }
@@ -349,11 +348,14 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
       return;
     }
 
-    let signed: Signed;
+    let signed: SignedBytes;
     try {
-      signed = Signed.fromBytes(signedMessage.signed);
+      signed = SignedBytes.fromBytes(signedMessage.signed);
     } catch (err) {
-      log.error("[KeyhiveSubductionAdapter] Signed.fromBytes failed:", err);
+      log.error(
+        "[KeyhiveSubductionAdapter] SignedBytes.fromBytes failed:",
+        err
+      );
       return;
     }
 
@@ -384,9 +386,9 @@ export class KeyhiveSubductionAdapter extends EventEmitter<KeyhiveSubductionAdap
       return;
     }
 
-    if (signedMessage.contactCard !== "") {
+    if (signedMessage.contactCard.length > 0) {
       try {
-        const contactCard = ContactCard.fromJson(signedMessage.contactCard);
+        const contactCard = ContactCard.fromBytes(signedMessage.contactCard);
         await this.keyhiveQueue.run(() =>
           receiveContactCard(this.keyhive, contactCard, this.keyhiveStorage)
         );

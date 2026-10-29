@@ -15,10 +15,10 @@
 //   +-------+-----------+---------------------------+
 //
 // SignedMessage (CBOR map, camelCase keys):
-//   { contactCard: <text-string of JSON or "">, signed: <bincode bytes> }
+//   { contactCard: <byte string, empty when absent>, signed: <byte string> }
 //
-// signed is bincode-1.3 encoded `Signed<Vec<u8>>` from keyhive-wasm
-// (matches `Signed.toBytes()`). Its payload is a CBOR-encoded
+// contactCard is `ContactCard.toBytes()`. signed is the `KH` frame of a
+// `Signed<Bytes>` (`SignedBytes.toBytes()`). Its payload is a CBOR-encoded
 // KeyhiveMessage (externally-tagged enum, snake_case field names).
 //
 // KeyhiveMessage CBOR shape (one of):
@@ -102,11 +102,11 @@ export function decodeSukFrame(bytes: Uint8Array): Uint8Array {
 }
 
 /**
- * Wire shape of the outer SignedMessage map. `signed` is bincode bytes,
- * `contactCard` is a JSON string (empty string when absent).
+ * Wire shape of the outer SignedMessage map. `contactCard` is empty when
+ * absent.
  */
 export interface SubductionSignedMessage {
-  contactCard: string;
+  contactCard: Uint8Array;
   signed: Uint8Array;
 }
 
@@ -118,9 +118,9 @@ export function decodeSignedMessage(
   bytes: Uint8Array
 ): SubductionSignedMessage {
   const obj = decode(bytes) as { contactCard?: unknown; signed?: unknown };
-  if (typeof obj?.contactCard !== "string") {
+  if (!(obj?.contactCard instanceof Uint8Array)) {
     throw new SukFrameError(
-      `decoded SignedMessage missing string contactCard field`
+      `decoded SignedMessage missing bytes contactCard field`
     );
   }
   // ciborium's default `Vec<u8>` serialization on the server side emits a

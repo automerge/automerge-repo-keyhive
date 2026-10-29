@@ -10,7 +10,7 @@ export type SyncServer = {
 };
 
 export async function syncServerFromContactCard(
-  contactCardJson: string,
+  contactCardBytes: Uint8Array,
   serverPeerId: PeerId,
   keyhive: Keyhive,
   keyhiveStorage: KeyhiveStorage
@@ -18,14 +18,16 @@ export async function syncServerFromContactCard(
   log.debug(
     "[AMRepoKeyhive] syncServerFromContactCard: parsing server contact card"
   );
-  const serverContactCard = ContactCard.fromJson(contactCardJson);
+  const serverContactCard = ContactCard.fromBytes(contactCardBytes);
   const serverIndividual = await receiveContactCard(
     keyhive,
     serverContactCard,
     keyhiveStorage
   );
   if (!serverIndividual) {
-    throw Error(`Invalid server contact card: ${contactCardJson}`);
+    throw Error(
+      `Invalid server contact card: ${serverContactCard.id.toString()}`
+    );
   }
 
   const individualId = serverIndividual.id.toBytes();

@@ -33,6 +33,7 @@ export const ENVELOPE_VERSION = 1;
 export const COMMIT_ID_BYTES = 32;
 /** @internal Exported for tests. */
 export const PRED_ENTRY_BYTES = COMMIT_ID_BYTES + 32;
+const NO_ASSOCIATED_DATA = new Uint8Array();
 
 export class KeyhiveBlobInterceptor implements BlobInterceptor {
   #keyhive: Keyhive;
@@ -182,15 +183,12 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
         entry.set(parentKey, COMMIT_ID_BYTES);
         entries.push(entry);
       }
-      // The commit id rides along as "associated data", but it is never
-      // authenticated or checked on decrypt. Its only effect is as one input
-      // to the deterministic nonce derivation (key, plaintext, associated
-      // data). The derived nonce is carried in the sealed blob, so
-      // symmetricDecrypt reads it from there and needs no associated data.
+      // No associated data: the bulk load path decrypts without a commit id
+      // to check against.
       const predsCipher = symmetricEncrypt(
         selfKey,
         concatBytes(entries),
-        hexToBytes(commitId)
+        NO_ASSOCIATED_DATA
       );
       const out = encodeOuterEnvelope(encrypted.toBytes(), predsCipher);
 
@@ -263,7 +261,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     let decrypted: Uint8Array | undefined;
     if (cachedKey) {
       try {
-        decrypted = encrypted.decryptWithKey(cachedKey);
+        decrypted = encrypted.decryptWithKey(cachedKey, docId);
       } catch {
         log.debug(
           `[KeyhiveBlobInterceptor] cached key failed for commit ${commitId}; retrying via CGKA`
@@ -291,7 +289,9 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     // that already succeeded.
     let preds: Array<{ idHex: string; key: Uint8Array }>;
     try {
-      preds = decodePreds(symmetricDecrypt(selfKey, envelope.predsCipher));
+      preds = decodePreds(
+        symmetricDecrypt(selfKey, envelope.predsCipher, NO_ASSOCIATED_DATA)
+      );
     } catch {
       return true;
     }
@@ -347,7 +347,11 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     this.#blobKeys.set(parentHex, key);
     // Seed the parent's own predecessors so deeper links also fill in.
     try {
-      const predsPlain = symmetricDecrypt(key, envelope.predsCipher);
+      const predsPlain = symmetricDecrypt(
+        key,
+        envelope.predsCipher,
+        NO_ASSOCIATED_DATA
+      );
       for (const { idHex, key: k } of decodePreds(predsPlain)) {
         if (!this.#blobKeys.has(idHex)) this.#blobKeys.set(idHex, k);
       }
