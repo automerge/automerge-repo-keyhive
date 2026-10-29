@@ -36,7 +36,8 @@
 // KeyhivePeerId (CBOR map):
 //   { verifying_key: <32-byte byte string>, suffix: null | <text string> }
 
-import { decode, encode } from "cbor-x";
+import { encode } from "cbor-x";
+import { decodeCbor } from "../cbor-decode.js";
 import type { PeerId } from "@automerge/automerge-repo/slim";
 
 export const SUK_SCHEMA = new Uint8Array([0x53, 0x55, 0x4b, 0x00]); // "SUK\0"
@@ -117,7 +118,7 @@ export function encodeSignedMessage(msg: SubductionSignedMessage): Uint8Array {
 export function decodeSignedMessage(
   bytes: Uint8Array
 ): SubductionSignedMessage {
-  const obj = decode(bytes) as { contactCard?: unknown; signed?: unknown };
+  const obj = decodeCbor(bytes) as { contactCard?: unknown; signed?: unknown };
   if (!(obj?.contactCard instanceof Uint8Array)) {
     throw new SukFrameError(
       `decoded SignedMessage missing bytes contactCard field`
@@ -304,7 +305,7 @@ export function encodeSubductionKeyhiveMessage(
 export function decodeSubductionKeyhiveMessage(
   payload: Uint8Array
 ): SubductionDecodeOutput {
-  const obj = decode(payload) as Record<string, unknown>;
+  const obj = decodeCbor(payload) as Record<string, unknown>;
   const variants = Object.keys(obj);
   if (variants.length !== 1) {
     throw new SukFrameError(
@@ -341,7 +342,7 @@ function decodeInlineForType(
     return {};
   }
   const obj = (
-    inlineDataCbor.length === 0 ? {} : decode(inlineDataCbor)
+    inlineDataCbor.length === 0 ? {} : decodeCbor(inlineDataCbor)
   ) as Record<string, unknown>;
   switch (type) {
     case "keyhive-sync-request":

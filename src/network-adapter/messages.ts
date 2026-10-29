@@ -1,6 +1,7 @@
 import { log } from "../logging.js";
 import { type Message, type PeerId } from "@automerge/automerge-repo/slim";
-import { encode, decode } from "cbor-x";
+import { encode } from "cbor-x";
+import { decodeCbor } from "./cbor-decode.js";
 
 import { ContactCard, Keyhive, SignedBytes } from "@keyhive/keyhive/slim";
 import { verifyingKeyPeerIdWithoutSuffix } from "../utilities.js";
@@ -31,7 +32,7 @@ export function decodeKeyhiveMessageData(
   encoded: Uint8Array
 ): KeyhiveMessageData | undefined {
   try {
-    const decoded = decode(encoded) as {
+    const decoded = decodeCbor(encoded) as {
       contactCard: Uint8Array;
       signed: Uint8Array;
     };

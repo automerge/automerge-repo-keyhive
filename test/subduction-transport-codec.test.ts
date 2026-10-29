@@ -5,6 +5,7 @@ import { encode as cborEncode, decode as cborDecode } from "cbor-x";
 import { initKeyhiveWasm } from "../src/index.js";
 import { peerIdFromVerifyingKey } from "../src/network-adapter/messages.js";
 import {
+  decodeSignedMessage,
   decodeSubductionKeyhiveMessage,
   decodeSukFrame,
   encodeSubductionKeyhiveMessage,
@@ -327,5 +328,12 @@ describe("subduction-transport codec", () => {
       expect(inline.syncRequesterTotal).toBe(3);
       expect(inline.sync_responder_total).toBeUndefined();
     });
+  });
+
+  it("refuses an input declaring an array longer than itself before decoding it", () => {
+    const declares65536Items = new Uint8Array([0x9a, 0x00, 0x01, 0x00, 0x00]);
+    expect(() => decodeSignedMessage(declares65536Items)).toThrow(
+      /^\[cbor\] unexpected end of input/
+    );
   });
 });
