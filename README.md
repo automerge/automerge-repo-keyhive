@@ -46,8 +46,8 @@ Initialize a hive and its repo, connected to a subduction sync server:
 
 ```ts
 import {
-  Access,
   initializeAutomergeRepoKeyhive,
+  Power,
 } from "@automerge/automerge-repo-keyhive";
 import { Repo } from "@automerge/automerge-repo";
 import { IndexedDBStorageAdapter } from "@automerge/automerge-repo-storage-indexeddb";
@@ -56,7 +56,8 @@ const { hive, repo } = await initializeAutomergeRepoKeyhive({
   createRepo: (config) => new Repo(config),
   storage: new IndexedDBStorageAdapter("my-app-keyhive"),
   peerIdSuffix: "my-app",
-  syncServer: "keyhive", // the identity of keyhive.sync.automerge.org
+  // The contact card and peer id of the server at the endpoint below.
+  syncServer: { contactCard: serverContactCard, peerId: serverPeerId },
   repo: {
     storage: new IndexedDBStorageAdapter(),
     subductionWebsocketEndpoints: ["wss://keyhive.sync.automerge.org"],
@@ -71,5 +72,5 @@ const handle = await repo.create2({ title: "hello" });
 // Let the sync server relay the (encrypted) document, then grant a
 // collaborator access using the contact card they shared with you.
 await hive.addSyncServerRelayToDoc(handle.url);
-await hive.addMemberToDoc(handle.url, collaboratorContactCard, Access.edit());
+await hive.addMemberToDoc(handle.url, collaboratorContactCard, Power.edit());
 ```

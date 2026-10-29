@@ -7,33 +7,23 @@ import {
   parseAutomergeUrl,
 } from "@automerge/automerge-repo/slim";
 import {
+  CausalDecryption,
   ChangeId,
   DocumentId as KeyhiveDocumentId,
   Encrypted,
   Keyhive,
-  symmetricEncrypt,
-  symmetricDecrypt,
 } from "@keyhive/keyhive/slim";
-import { blake3 } from "@noble/hashes/blake3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { PromiseQueue } from "../network-adapter/pending.js";
 import { isUnprotectedDocId } from "../utilities.js";
 import { KEYHIVE_DB_KEY, KEYHIVE_PREKEY_SECRETS_KEY } from "./keyhive.js";
 
-// Outer envelope wire format (around keyhive's content envelope):
-//   [1] version
-//   [4] inner length (uint32 LE)
-//   [.] inner = keyhive Encrypted.toBytes()
-//   [.] predsCipher = symmetricEncrypt(selfKey, predecessor entries)
-// Each predecessor entry (inside predsCipher, once decrypted) is 64 bytes:
-//   [32] predecessor commit id  [32] that predecessor's application secret.
-/** @internal Exported for tests. */
-export const ENVELOPE_VERSION = 1;
-/** @internal Exported for tests. */
-export const COMMIT_ID_BYTES = 32;
-/** @internal Exported for tests. */
-export const PRED_ENTRY_BYTES = COMMIT_ID_BYTES + 32;
+type LoadBlob = (commitIdHex: string) => Promise<Uint8Array | null>;
 
+// Each blob is one keyhive block whose content ref is the blob's commit id
+// and whose predecessors are the commit's parents. The block contains its
+// parents' keys, so a reader who can decrypt it can decrypt them, and theirs
+// in turn, with `tryCausalDecrypt`.
 export class KeyhiveBlobInterceptor implements BlobInterceptor {
   #keyhive: Keyhive;
   #queue: PromiseQueue;
@@ -44,18 +34,11 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   // only re-imports it when a sibling instance has rewritten it.
   #importedPrekeyArchiveLen = -1;
 
-  // commitId hex -> the 32-byte application secret used to encrypt/decrypt that
-  // blob. Populated on every encrypt and decrypt. On encrypt it lets us attach
-  // a blob's predecessors' keys to its outgoing envelope; on decrypt it lets a
-  // descendant's chain supply the key for an ancestor we could not reach via
-  // CGKA (a member added later reading prior history).
-  #blobKeys: Map<string, Uint8Array> = new Map();
-
   // commitId hexes whose plaintext has already been returned to
   // `loadIncremental` (and so applied to the doc). Once a blob is delivered its
   // whole loadable ancestor subtree was delivered with it, so a later incoming
-  // descendant can stop the predecessor walk here instead of re-loading and
-  // re-decrypting the entire history on every message.
+  // descendant can stop the walk here instead of re-loading and re-decrypting
+  // the entire history on every message.
   #delivered: Set<string> = new Set();
 
   constructor(
@@ -71,10 +54,9 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   }
 
   /**
-   * Drop the cached key material and its delivery bookkeeping.
+   * Drop the delivery bookkeeping.
    */
   clearCachedKeyMaterial(): void {
-    this.#blobKeys.clear();
     this.#delivered.clear();
   }
 
@@ -110,7 +92,7 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
     commitId: string,
     parents: string[],
     blob: Uint8Array,
-    loadBlob?: (commitIdHex: string) => Promise<Uint8Array | null>
+    loadBlob?: LoadBlob
   ): Promise<Uint8Array | null> {
     const { binaryDocumentId, unprotected } = parseDocId(documentId);
     if (unprotected) return blob;
@@ -130,21 +112,21 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
         await this.#importNewPrekeySecrets();
         pcsHash = await this.#keyhive.tryPcsKeyHash(docId);
         if (!pcsHash) {
-          // Encrypt anyway. `tryEncryptKeyed` rotates when there is no
-          // derivable key.
+          // Encrypt anyway. `tryEncrypt` rotates when there is no derivable
+          // key.
           log.debug(
             `[KeyhiveBlobInterceptor] transformOutgoing: no derivable PCS key for ${documentId} (even after importing prekey secrets); encrypting anyway so keyhive rotates`
           );
         }
       }
-      const contentRef = new ChangeId(blake3(blob));
-      let result;
+      let encrypted: Encrypted;
       try {
-        result = await this.#keyhive.tryEncryptKeyed(
+        encrypted = await this.#encrypt(
           docId,
-          contentRef,
-          [],
-          blob
+          commitId,
+          parents,
+          blob,
+          loadBlob
         );
       } catch (e) {
         if (pcsHash) throw e;
@@ -158,52 +140,77 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
         return null;
       }
       this.#onEncrypted?.();
-      const encrypted = result.encryptedContent();
-      const selfKey = result.applicationSecret;
-
-      // Attach each parent's application secret, encrypted under this blob's own
-      // key: the external predecessor-secret chain. If a parent's key is not in
-      // the in-memory cache (cold after a restart, or encrypted by a sibling
-      // instance), recover it by decrypting the parent's stored blob rather than
-      // skipping the link. A skipped link permanently strands that parent for
-      // any reader that can only reach it through the chain (e.g. a public or
-      // late-joining reader). Re-derivation stores no keys at rest.
-      const entries: Uint8Array[] = [];
-      for (const parentHex of parents) {
-        const idBytes = hexToBytes(parentHex);
-        if (idBytes.length !== COMMIT_ID_BYTES) continue;
-        let parentKey = this.#blobKeys.get(parentHex);
-        if (!parentKey && loadBlob) {
-          parentKey = await this.#recoverParentKey(docId, parentHex, loadBlob);
-        }
-        if (!parentKey) continue;
-        const entry = new Uint8Array(PRED_ENTRY_BYTES);
-        entry.set(idBytes, 0);
-        entry.set(parentKey, COMMIT_ID_BYTES);
-        entries.push(entry);
-      }
-      // The commit id rides along as "associated data", but it is never
-      // authenticated or checked on decrypt. Its only effect is as one input
-      // to the deterministic nonce derivation (key, plaintext, associated
-      // data). The derived nonce is carried in the sealed blob, so
-      // symmetricDecrypt reads it from there and needs no associated data.
-      const predsCipher = symmetricEncrypt(
-        selfKey,
-        concatBytes(entries),
-        hexToBytes(commitId)
-      );
-      const out = encodeOuterEnvelope(encrypted.toBytes(), predsCipher);
-
-      this.#blobKeys.set(commitId, selfKey);
-      return out;
+      return encrypted.toBytes();
     });
+  }
+
+  // Encrypt `blob` after `parents`. Keyhive refuses a parent whose key it does
+  // not have, which happens when a sibling instance wrote it or this keyhive
+  // has not read it yet. Then each parent's stored blob is read, so keyhive
+  // learns its key, and a parent that still cannot be read is left out. In
+  // that case, a reader of this blob can reach it only through CGKA.
+  async #encrypt(
+    docId: KeyhiveDocumentId,
+    commitId: string,
+    parents: string[],
+    blob: Uint8Array,
+    loadBlob: LoadBlob | undefined
+  ): Promise<Encrypted> {
+    const write = async (preds: string[]) =>
+      (
+        await this.#keyhive.tryEncrypt(
+          docId,
+          changeId(commitId),
+          preds.map(changeId),
+          blob
+        )
+      ).encryptedContent();
+    try {
+      return await write(parents);
+    } catch (e) {
+      if (parents.length === 0 || !loadBlob) throw e;
+    }
+    const readable: string[] = [];
+    for (const parentHex of parents) {
+      if (await this.#readParent(docId, parentHex, loadBlob)) {
+        readable.push(parentHex);
+      } else {
+        log.debug(
+          `[KeyhiveBlobInterceptor] transformOutgoing: cannot read parent ${parentHex} of ${commitId}; leaving it out of the blob's ancestors`
+        );
+      }
+    }
+    return await write(readable);
+  }
+
+  // Read a parent's stored blob through CGKA, so keyhive learns its key.
+  async #readParent(
+    docId: KeyhiveDocumentId,
+    parentHex: string,
+    loadBlob: LoadBlob
+  ): Promise<boolean> {
+    let parentBlob: Uint8Array | null;
+    try {
+      parentBlob = await loadBlob(parentHex);
+    } catch {
+      return false;
+    }
+    const encrypted = parentBlob && parseBlob(parentBlob);
+    if (!encrypted || bytesToHex(encrypted.contentRef()) !== parentHex) {
+      return false;
+    }
+    return (
+      (await this.#viaCgka(() =>
+        this.#keyhive.tryDecrypt(docId, encrypted)
+      )) !== null
+    );
   }
 
   async transformIncoming(
     documentId: DocumentId,
     commitId: string,
     blob: Uint8Array,
-    loadBlob?: (commitIdHex: string) => Promise<Uint8Array | null>
+    loadBlob?: LoadBlob
   ): Promise<Uint8Array | null> {
     const { binaryDocumentId, unprotected } = parseDocId(documentId);
     if (unprotected) return blob;
@@ -211,172 +218,71 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
       const docId = new KeyhiveDocumentId(binaryDocumentId);
       if (!(await this.#keyhive.hasDocument(docId))) return null;
 
-      // Decrypt this blob and, on a cold load, walk its predecessor chain by
-      // loading just the parent blobs it points at. Collect this blob's
-      // plaintext plus any ancestor plaintexts the walk recovers. Their
-      // concatenation is a valid `loadIncremental` input.
-      const out: Uint8Array[] = [];
-      const seen = new Set<string>();
-      const ok = await this.#decryptAndWalk(
-        docId,
-        commitId,
-        blob,
-        loadBlob,
-        out,
-        seen
+      const encrypted = parseBlob(blob);
+      if (!encrypted) {
+        log.debug(
+          `[KeyhiveBlobInterceptor] unrecognized blob${
+            commitId ? ` for commit ${commitId}` : " during bulk document load"
+          }; leaving pending`
+        );
+        return null;
+      }
+      // The bulk path passes an empty commit id, so there is nothing to check.
+      const ownHex = bytesToHex(encrypted.contentRef());
+      if (commitId && commitId !== ownHex) {
+        log.debug(
+          `[KeyhiveBlobInterceptor] blob for commit ${commitId} is the block for ${ownHex}; leaving pending`
+        );
+        return null;
+      }
+
+      // Decrypt this blob and, on a cold load, the ancestors it lists that
+      // `loadBlob` has and that have not been delivered. Their concatenation
+      // is a valid `loadIncremental` input.
+      const load = async (ref: ChangeId) => {
+        const hex = bytesToHex(ref.toBytes());
+        if (this.#delivered.has(hex) || !loadBlob) return undefined;
+        return await loadBlob(hex);
+      };
+      const decryption = await this.#viaCgka(() =>
+        this.#keyhive.tryCausalDecrypt(docId, encrypted, load)
       );
-      if (!ok) return null;
-      return out.length === 1 ? out[0] : concatBytes(out);
+      if (!decryption) return null;
+      return this.#deliver(decryption, ownHex);
     });
   }
 
-  // Decrypt one blob, then follow its predecessor-secret chain. Recover each
-  // parent's key from the decrypted preds and, when `loadBlob` is available,
-  // load just those parent blobs and recurse. Pushes every recovered plaintext
-  // (this blob first, then ancestors) into `out`. Returns false only when this
-  // blob cannot be decrypted (the caller leaves it pending for a later pass).
-  async #decryptAndWalk(
-    docId: KeyhiveDocumentId,
-    commitId: string,
-    blob: Uint8Array,
-    loadBlob: ((commitIdHex: string) => Promise<Uint8Array | null>) | undefined,
-    out: Uint8Array[],
-    seen: Set<string>
-  ): Promise<boolean> {
-    const parsed = parseEnvelope(blob);
-    if (!parsed) {
+  // Record what `decryption` read and return the plaintexts: this blob's,
+  // which is read even if it was delivered before, and its ancestors' not
+  // yet delivered.
+  #deliver(decryption: CausalDecryption, ownHex: string): Uint8Array {
+    for (const failure of decryption.failed()) {
       log.debug(
-        `[KeyhiveBlobInterceptor] unrecognized blob envelope${
-          commitId ? ` for commit ${commitId}` : " during bulk document load"
-        }; leaving pending`
+        `[KeyhiveBlobInterceptor] could not read ancestor ${bytesToHex(
+          failure.contentRef.toBytes()
+        )}: ${failure.reason}`
       );
-      return false;
     }
-    const { envelope, encrypted } = parsed;
-
-    // Resolve this blob's application secret: from the chain map if a
-    // descendant already supplied it (keyed by commit id), otherwise via a
-    // single CGKA lookup (the entry point). The bulk path passes an empty commit
-    // id, so a cold entry point is reached only through the CGKA lookup. If a
-    // cached key fails to decrypt, we fall back to a CGKA lookup.
-    const cachedKey = commitId ? this.#blobKeys.get(commitId) : undefined;
-    let decrypted: Uint8Array | undefined;
-    if (cachedKey) {
-      try {
-        decrypted = encrypted.decryptWithKey(cachedKey);
-      } catch {
-        log.debug(
-          `[KeyhiveBlobInterceptor] cached key failed for commit ${commitId}; retrying via CGKA`
-        );
-      }
+    const out: Uint8Array[] = [];
+    for (const block of decryption.complete()) {
+      const hex = bytesToHex(block.contentRef.toBytes());
+      if (this.#delivered.has(hex) && hex !== ownHex) continue;
+      this.#delivered.add(hex);
+      out.push(block.content());
     }
-    let plaintext: Uint8Array;
-    let selfKey: Uint8Array;
-    if (decrypted !== undefined && cachedKey) {
-      plaintext = decrypted;
-      selfKey = cachedKey;
-    } else {
-      const viaCgka = await this.#decryptViaCgka(docId, encrypted);
-      if (!viaCgka) return false;
-      plaintext = viaCgka.plaintext;
-      selfKey = viaCgka.applicationSecret;
-    }
-    if (commitId) this.#blobKeys.set(commitId, selfKey);
-    out.push(plaintext);
-    if (commitId) this.#delivered.add(commitId);
-
-    // Recover predecessors' keys and walk into the parents we can load, so
-    // earlier blobs decrypt now instead of waiting for a separate pass. A
-    // corrupt or unexpected preds section must not fail the content decrypt
-    // that already succeeded.
-    let preds: Array<{ idHex: string; key: Uint8Array }>;
-    try {
-      preds = decodePreds(symmetricDecrypt(selfKey, envelope.predsCipher));
-    } catch {
-      return true;
-    }
-    for (const { idHex, key } of preds) {
-      if (!this.#blobKeys.has(idHex)) this.#blobKeys.set(idHex, key);
-      if (seen.has(idHex) || !loadBlob) continue;
-      seen.add(idHex);
-      // Already delivered on a prior pass: its subtree is in the doc, so don't
-      // reload or recurse. The key is recorded above for any direct decrypt.
-      if (this.#delivered.has(idHex)) continue;
-      let parentBlob: Uint8Array | null;
-      try {
-        parentBlob = await loadBlob(idHex);
-      } catch {
-        continue;
-      }
-      if (parentBlob) {
-        await this.#decryptAndWalk(
-          docId,
-          idHex,
-          parentBlob,
-          loadBlob,
-          out,
-          seen
-        );
-      }
-    }
-    return true;
+    return out.length === 1 ? out[0] : concatBytes(out);
   }
 
-  // Recover a parent blob's application secret at encrypt time by loading its
-  // stored envelope and decrypting it (CGKA dive). Caches the result and any of
-  // the parent's own predecessor keys it contains. Returns undefined if the blob
-  // is absent or cannot be decrypted (then the link is skipped as before).
-  async #recoverParentKey(
-    docId: KeyhiveDocumentId,
-    parentHex: string,
-    loadBlob: (commitIdHex: string) => Promise<Uint8Array | null>
-  ): Promise<Uint8Array | undefined> {
-    let parentBlob: Uint8Array | null;
+  // Run a keyhive call that needs this agent's CGKA key, importing
+  // sibling-written prekey secrets and retrying once on a miss. Returns null
+  // if it still throws (the caller leaves the blob pending).
+  async #viaCgka<T>(call: () => Promise<T>): Promise<T | null> {
     try {
-      parentBlob = await loadBlob(parentHex);
-    } catch {
-      return undefined;
-    }
-    if (!parentBlob) return undefined;
-    const parsed = parseEnvelope(parentBlob);
-    if (!parsed) return undefined;
-    const { envelope, encrypted } = parsed;
-    const viaCgka = await this.#decryptViaCgka(docId, encrypted);
-    if (!viaCgka) return undefined;
-    const key = viaCgka.applicationSecret;
-    this.#blobKeys.set(parentHex, key);
-    // Seed the parent's own predecessors so deeper links also fill in.
-    try {
-      const predsPlain = symmetricDecrypt(key, envelope.predsCipher);
-      for (const { idHex, key: k } of decodePreds(predsPlain)) {
-        if (!this.#blobKeys.has(idHex)) this.#blobKeys.set(idHex, k);
-      }
-    } catch {
-      // Ignore a corrupt preds section.
-    }
-    return key;
-  }
-
-  // Recover a blob's application secret through keyhive/CGKA (the chain entry
-  // point), importing sibling-written prekey secrets and retrying once on a miss.
-  async #decryptViaCgka(
-    docId: KeyhiveDocumentId,
-    encrypted: Encrypted
-  ): Promise<{ plaintext: Uint8Array; applicationSecret: Uint8Array } | null> {
-    try {
-      const res = await this.#keyhive.tryDecryptKeyed(docId, encrypted);
-      return {
-        plaintext: res.plaintext(),
-        applicationSecret: res.applicationSecret,
-      };
+      return await call();
     } catch (firstError) {
       if (await this.#importNewPrekeySecrets()) {
         try {
-          const res = await this.#keyhive.tryDecryptKeyed(docId, encrypted);
-          return {
-            plaintext: res.plaintext(),
-            applicationSecret: res.applicationSecret,
-          };
+          return await call();
         } catch (retryError) {
           log.debug(
             "[KeyhiveBlobInterceptor] CGKA decrypt failed after importing new prekey secrets; leaving pending:",
@@ -394,6 +300,10 @@ export class KeyhiveBlobInterceptor implements BlobInterceptor {
   }
 }
 
+function changeId(commitIdHex: string): ChangeId {
+  return new ChangeId(hexToBytes(commitIdHex));
+}
+
 function concatBytes(parts: Uint8Array[]): Uint8Array {
   let len = 0;
   for (const p of parts) len += p.length;
@@ -406,92 +316,13 @@ function concatBytes(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-/**
- * Frame the keyhive-encrypted blob and its encrypted predecessor-key table:
- * a version byte, the inner length as a little-endian uint32, then the two
- * payloads. Everything after the inner payload is the predecessor ciphertext.
- *
- * @internal Exported for tests.
- */
-export function encodeOuterEnvelope(
-  inner: Uint8Array,
-  predsCipher: Uint8Array
-): Uint8Array {
-  const out = new Uint8Array(5 + inner.length + predsCipher.length);
-  out[0] = ENVELOPE_VERSION;
-  new DataView(out.buffer, out.byteOffset, out.byteLength).setUint32(
-    1,
-    inner.length,
-    true
-  );
-  out.set(inner, 5);
-  out.set(predsCipher, 5 + inner.length);
-  return out;
-}
-
-/**
- * The two payloads an outer envelope contains: the keyhive-encrypted blob, and
- * the encrypted predecessor-key table that follows it.
- *
- * @internal Exported for tests.
- */
-export interface OuterEnvelope {
-  inner: Uint8Array;
-  predsCipher: Uint8Array;
-}
-
-/**
- * Inverse of {@link encodeOuterEnvelope}.
- *
- * @internal Exported for tests.
- */
-export function decodeOuterEnvelope(bytes: Uint8Array): OuterEnvelope | null {
-  if (bytes.length < 5 || bytes[0] !== ENVELOPE_VERSION) return null;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const innerLen = view.getUint32(1, true);
-  if (5 + innerLen > bytes.length) return null;
-  return {
-    inner: bytes.subarray(5, 5 + innerLen),
-    predsCipher: bytes.subarray(5 + innerLen),
-  };
-}
-
-// Decode the outer envelope and parse its inner keyhive content envelope.
-// Null for any blob this interceptor did not produce.
-function parseEnvelope(
-  blob: Uint8Array
-): { envelope: OuterEnvelope; encrypted: Encrypted } | null {
-  const envelope = decodeOuterEnvelope(blob);
-  if (!envelope) return null;
+// Null for any blob that is not a keyhive block.
+function parseBlob(blob: Uint8Array): Encrypted | null {
   try {
-    return { envelope, encrypted: Encrypted.fromBytes(envelope.inner) };
+    return Encrypted.fromBytes(blob);
   } catch {
     return null;
   }
-}
-
-/**
- * Parse the decrypted predecessor-key table: a flat run of 64-byte entries,
- * each a 32-byte commit id followed by that predecessor's 32-byte application
- * secret. A trailing partial entry is ignored rather than treated as an error.
- *
- * @internal Exported for tests.
- */
-export function decodePreds(
-  plain: Uint8Array
-): Array<{ idHex: string; key: Uint8Array }> {
-  const out: Array<{ idHex: string; key: Uint8Array }> = [];
-  for (
-    let off = 0;
-    off + PRED_ENTRY_BYTES <= plain.length;
-    off += PRED_ENTRY_BYTES
-  ) {
-    out.push({
-      idHex: bytesToHex(plain.subarray(off, off + COMMIT_ID_BYTES)),
-      key: plain.slice(off + COMMIT_ID_BYTES, off + PRED_ENTRY_BYTES),
-    });
-  }
-  return out;
 }
 
 // Parse the document id once, returning both the raw bytes (for building a

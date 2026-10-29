@@ -20,10 +20,6 @@ export {
   initializeAutomergeRepoKeyhive,
   KeyhiveStorage,
   docIdFromAutomergeUrl,
-  KEYHIVE_SYNC_SERVER_CONTACT_CARD_JSON,
-  KEYHIVE_SYNC_SERVER_PEER_ID,
-  SUBDUCTION_SYNC_SERVER_CONTACT_CARD_JSON,
-  SUBDUCTION_SYNC_SERVER_PEER_ID,
 } from "./keyhive/keyhive.js";
 export type {
   SyncServerIdentity,

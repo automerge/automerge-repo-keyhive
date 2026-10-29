@@ -14,12 +14,11 @@ pieces you may need for custom setups. It is written for use with the default [s
   persisted to the storage adapter you provide, so the same identity is loaded
   on subsequent runs.
 - **Contact card.** A signed, portable representation of an identity. Users
-  exchange contact cards (as JSON strings) so they can grant each other access
-  to documents.
+  exchange contact cards (as bytes) so they can grant each other access to
+  documents.
 - **Access levels.** Every document has members, and each member has one of
   four levels: `relay` (sync bytes but no read access), `read`, `edit`,
-  and `admin`. If access is granted to a special "public" member, everyone has
-  that access level.
+  and `admin`.
 - **Peer id.** ARK peer ids are the base64-encoded verifying key, optionally
   followed by `-<suffix>`. The suffix lets several peers (for example, several
   browser tabs) share one keyhive identity while remaining distinct peers on
@@ -37,7 +36,7 @@ asset configuration is needed for keyhive itself.
 ## WASM initialization
 
 The init functions initialize the keyhive WASM module automatically. If you
-use keyhive WASM types (for example, `ContactCard` or `Access`) before
+use keyhive WASM types (for example, `ContactCard` or `Power`) before
 initializing a hive, call `initKeyhiveWasm()` first. It is idempotent. But
 it's generally expected you will initialize a hive first instead.
 
@@ -60,7 +59,7 @@ const { hive, repo } = await initializeAutomergeRepoKeyhive({
   createRepo: (config) => new Repo(config),
   storage: new IndexedDBStorageAdapter("my-app-keyhive"),
   peerIdSuffix: "my-app",
-  syncServer: "subduction",
+  syncServer: { contactCard: serverContactCard, peerId: serverPeerId },
   repo: {
     storage: new IndexedDBStorageAdapter(),
     subductionWebsocketEndpoints: ["wss://your-sync-server.example.com"],
@@ -171,7 +170,7 @@ On `LegacyAutomergeRepoKeyhive`:
 Your own contact card, ready to share:
 
 ```ts
-const json = hive.active.contactCard.toJson();
+const bytes = hive.active.contactCard.toBytes();
 ```
 
 Receiving someone else's card registers them with your keyhive so you can
@@ -180,7 +179,7 @@ grant them access:
 ```ts
 import { ContactCard } from "@automerge/automerge-repo-keyhive";
 
-const card = ContactCard.fromJson(pastedJson);
+const card = ContactCard.fromBytes(receivedBytes);
 const individual = await hive.receiveContactCard(card);
 ```
 
@@ -198,7 +197,7 @@ empty list) for unprotected documents, and membership operations throw an
 import { isUnprotectedDoc } from "@automerge/automerge-repo-keyhive";
 
 if (!isUnprotectedDoc(docUrl)) {
-  const access = await hive.bestAccessForDoc(id, docUrl);
+  const access = await hive.accessForDoc(id, docUrl);
   // gate the UI on access
 }
 ```
@@ -206,19 +205,19 @@ if (!isUnprotectedDoc(docUrl)) {
 ### Access levels
 
 ```ts
-import { Access } from "@automerge/automerge-repo-keyhive";
+import { Power } from "@automerge/automerge-repo-keyhive";
 
 // Constants
-const access = Access.edit(); // also Access.relay(), Access.read(), Access.admin()
+const access = Power.edit(); // also Power.relay(), Power.read(), Power.admin()
 
 // Parsing (case-insensitive. Throws on unrecognized input)
-const parsed = Access.fromString("edit");
+const parsed = Power.fromString("edit");
 ```
 
-`Access` values are ordered (`relay < read < edit < admin`) and comparable:
+`Power` values are ordered (`relay < read < edit < admin`) and comparable:
 
 ```ts
-access.atLeast(Access.read()); // true for read, edit, and admin
+access.atLeast(Power.read()); // true for read, edit, and admin
 access.compareTo(other);       // -1 | 0 | 1
 access.equals(other);
 access.level;                  // 0..3, for sorting
@@ -233,19 +232,19 @@ keys.
 `access.toString()` returns the capitalized form: `"Relay"`, `"Read"`,
 `"Edit"`, or `"Admin"`.
 
-`Access.tryFromString` also exists and returns `undefined` instead of
+`Power.tryFromString` also exists and returns `undefined` instead of
 throwing.
 
 All membership mutations (`addMemberToDoc`, `revokeMemberFromDoc`,
-`setPublicAccess`, `addSyncServerRelayToDoc`) throw on failure: on unprotected
+`addSyncServerRelayToDoc`) throw on failure: on unprotected
 documents (`UnprotectedDocError`), on documents keyhive does not know yet, and on
 unresolvable members. Wrap them in try/catch where failure is expected.
 
 ### Add a member
 
 ```ts
-const card = ContactCard.fromJson(memberContactCardJson);
-await hive.addMemberToDoc(docUrl, card, Access.edit());
+const card = ContactCard.fromBytes(memberContactCardBytes);
+await hive.addMemberToDoc(docUrl, card, Power.edit());
 ```
 
 A new member can read the document's whole history, including what was written
@@ -265,7 +264,7 @@ await hive.revokeMemberFromDoc(docUrl, member.id);
 
 ```ts
 const members = await hive.listMembers(docUrl);
-// [{ id, access, isSelf, isPublic, isSyncServer }, ...]
+// [{ id, access, isSelf, isSyncServer }, ...]
 
 for (const member of members) {
   console.log(member.id, member.access.toString(), member.isSelf);
@@ -274,28 +273,9 @@ for (const member of members) {
 
 `id` is a string key (hex-encoded identifier bytes) suitable for
 list rendering and for `revokeMemberFromDoc`. `access` is an ordered
-`Access` value, so member rows can be compared with `atLeast` or sorted by
+`Power` value, so member rows can be compared with `atLeast` or sorted by
 `level`. The raw keyhive capabilities remain available via
 `docMemberCapabilities(docUrl)`.
-
-### Public access
-
-Public access is a grant to a special "public" member:
-
-```ts
-// Make a document publicly editable
-await hive.setPublicAccess(docUrl, Access.edit());
-
-// Check public access
-const access = await hive.getPublicAccess(docUrl); // Access | undefined
-
-// Revoke public access
-import { Identifier, uint8ArrayToHex } from "@automerge/automerge-repo-keyhive";
-await hive.revokeMemberFromDoc(
-  docUrl,
-  uint8ArrayToHex(Identifier.publicId().toBytes())
-);
-```
 
 ### Grant the sync server relay access
 
@@ -326,8 +306,7 @@ import {
 await hive.keyhive.addMember(
   groupId.toIdentifier(),
   MemberedId.document(docIdFromAutomergeUrl(docUrl)),
-  Access.edit(),
-  []
+  Power.edit()
 );
 ```
 
@@ -340,14 +319,11 @@ the group later grants it to them too.
 // A specific agent's direct access
 const access = await hive.accessForDoc(identifier, docUrl);
 
-// The higher of direct and public access
-const best = await hive.bestAccessForDoc(hive.active.individual.id, docUrl);
-
 // All members and their capabilities
 const memberships = await hive.docMemberCapabilities(docUrl);
 ```
 
-All three return `undefined` or an empty list for unprotected documents.
+Both return `undefined` or an empty list for unprotected documents.
 
 ### Keyhive statistics
 
@@ -364,27 +340,19 @@ and a mismatched pair fails silently (relay grants and keyhive sync target a
 peer that never connects). There is no value that is right by default, so
 ARK makes you choose rather than guessing and warning.
 
-Two identities ship with the library, selected by name:
-
-- `"subduction"`: `subduction.sync.inkandswitch.com`
-- `"keyhive"`: `keyhive.sync.automerge.org`
-
-To use your own server, pass a `SyncServerIdentity`:
+Pass the server's `SyncServerIdentity`, or `"none"` to run without one:
 
 ```ts
 const { hive, repo } = await initializeAutomergeRepoKeyhive({
   // ...
   syncServer: {
-    contactCardJson: myServerContactCardJson,
+    contactCard: myServerContactCard, // ContactCard.toBytes()
     peerId: myServerPeerId,
   },
 });
 ```
 
-The card and peer id must belong to the same server. The raw pairs are also
-exported as `SUBDUCTION_SYNC_SERVER_CONTACT_CARD_JSON` /
-`SUBDUCTION_SYNC_SERVER_PEER_ID` and `KEYHIVE_SYNC_SERVER_CONTACT_CARD_JSON` /
-`KEYHIVE_SYNC_SERVER_PEER_ID`.
+The card and peer id must belong to the same server.
 
 ## Wrapping additional network adapters
 
@@ -466,7 +434,7 @@ setKeyhiveLogLevel("debug"); // "silent" | "error" | "warn" | "info" | "debug"
 
 The package re-exports the full `@keyhive/keyhive/slim` API, so you rarely
 need a direct dependency on the keyhive package. The types you will most
-often use are `ContactCard`, `Access`, `Identifier`, `DocumentId`,
+often use are `ContactCard`, `Power`, `Identifier`, `DocumentId`,
 `Individual`, `Membership`, `Event`, `Signer`, and `Keyhive` itself.
 
 ## Storage layout

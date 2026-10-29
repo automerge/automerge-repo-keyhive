@@ -1,6 +1,6 @@
 import { Identifier, Keyhive } from "@keyhive/keyhive/slim";
 import { cborByteString } from "./cbor-builder.js";
-import { getEventsForAgent } from "../utilities.js";
+import { getEventsForAgent, hasIndividual } from "../utilities.js";
 
 const MAX_ENTRIES = 100000;
 
@@ -67,35 +67,13 @@ export class EventBytesCache {
   }
 }
 
-// Fetch public events from keyhive WASM API.
-async function fetchPublicEvents(
-  keyhive: Keyhive
-): Promise<Map<Uint8Array, Uint8Array>> {
-  const agent = await keyhive.getAgent(Identifier.publicId());
-  return agent
-    ? await getEventsForAgent(keyhive, agent)
-    : new Map<Uint8Array, Uint8Array>();
-}
-
-// Fetch events for a specific agent plus public events from keyhive WASM API.
-export async function fetchAgentAndPublicEvents(
+// Fetch events for a specific agent from keyhive WASM API.
+export async function fetchAgentEvents(
   keyhive: Keyhive,
   agentId: Identifier
 ): Promise<Map<Uint8Array, Uint8Array>> {
-  const wasmEvents = new Map<Uint8Array, Uint8Array>();
-
-  const agent = await keyhive.getAgent(agentId);
-  if (agent) {
-    const peerEvents = await getEventsForAgent(keyhive, agent);
-    for (const [hash, event] of peerEvents) {
-      wasmEvents.set(hash, event);
-    }
+  if (!(await hasIndividual(keyhive, agentId))) {
+    return new Map<Uint8Array, Uint8Array>();
   }
-
-  const publicEvents = await fetchPublicEvents(keyhive);
-  for (const [hash, event] of publicEvents) {
-    wasmEvents.set(hash, event);
-  }
-
-  return wasmEvents;
+  return await getEventsForAgent(keyhive, await keyhive.getPrincipal(agentId));
 }

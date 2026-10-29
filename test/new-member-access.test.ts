@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import {
-  Access,
   CiphertextStore,
   Identifier,
   Keyhive,
   MemberedId,
+  Power,
   Signer,
   type DocumentId as KeyhiveDocumentId,
 } from "@keyhive/keyhive/slim";
@@ -34,8 +34,7 @@ async function makePeer(): Promise<Peer> {
 
 /** Deliver every keyhive event `from` has for `to`, as a sync would. */
 async function sync(from: Peer, to: Peer): Promise<void> {
-  const agent = await from.keyhive.getAgent(to.id);
-  if (!agent) throw new Error("sender does not know the receiver");
+  const agent = await from.keyhive.getPrincipal(to.id);
   const events = await from.keyhive.eventsForAgent(agent);
   await to.keyhive.ingestEventsBytes([...events.values()]);
 }
@@ -49,7 +48,7 @@ function repoDocId(docId: KeyhiveDocumentId): DocumentId {
 /**
  * Alice writes to a new document, grants bob access with `grant`, and writes
  * again. Returns what bob decrypts of each write, each blob on its own, so
- * neither can reach the other through ARK's predecessor envelope.
+ * neither can reach the other through the ancestors a blob lists.
  */
 async function bobReadsAroundGrant(
   grant: (alice: Peer, bob: Peer, docId: KeyhiveDocumentId) => Promise<void>
@@ -96,8 +95,7 @@ describe("a member added to a document", () => {
       await alice.keyhive.addMember(
         bob.id,
         MemberedId.document(docId),
-        Access.read(),
-        []
+        Power.read()
       );
     });
 
@@ -113,14 +111,12 @@ describe("a member added to a document", () => {
       await alice.keyhive.addMember(
         group.toIdentifier(),
         MemberedId.document(docId),
-        Access.read(),
-        []
+        Power.read()
       );
       await alice.keyhive.addMember(
         bob.id,
         MemberedId.group(group),
-        Access.read(),
-        []
+        Power.read()
       );
     });
 
@@ -128,5 +124,49 @@ describe("a member added to a document", () => {
       before: "before bob was added",
       after: "after bob was added",
     });
+  });
+
+  it("writes after content it has not read", async () => {
+    const alice = await makePeer();
+    const bob = await makePeer();
+    await alice.keyhive.receiveContactCard(await bob.keyhive.contactCard());
+    const docId = await generateDoc(alice.keyhive);
+    const doc = repoDocId(docId);
+    await alice.keyhive.addMember(
+      bob.id,
+      MemberedId.document(docId),
+      Power.edit()
+    );
+    const parentId = "aa".repeat(32);
+    const parent = await alice.interceptor.transformOutgoing(
+      doc,
+      parentId,
+      [],
+      new TextEncoder().encode("alice's change")
+    );
+    await sync(alice, bob);
+
+    const loadParent = async (id: string) => (id === parentId ? parent : null);
+    const childId = "bb".repeat(32);
+    const child = await bob.interceptor.transformOutgoing(
+      doc,
+      childId,
+      [parentId],
+      new TextEncoder().encode("bob's change"),
+      loadParent
+    );
+    await sync(bob, alice);
+
+    const reader = new KeyhiveBlobInterceptor(
+      alice.keyhive,
+      new PromiseQueue()
+    );
+    const read = await reader.transformIncoming(
+      doc,
+      childId,
+      child!,
+      loadParent
+    );
+    expect(new TextDecoder().decode(read!)).toBe("bob's changealice's change");
   });
 });

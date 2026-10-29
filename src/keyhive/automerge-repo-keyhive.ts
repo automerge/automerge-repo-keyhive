@@ -17,7 +17,6 @@ import {
 } from "../utilities.js";
 import { KeyhiveBlobInterceptor } from "./blob-interceptor.js";
 import {
-  Access,
   ChangeId,
   ContactCard,
   DocumentId as KeyhiveDocumentId,
@@ -27,6 +26,7 @@ import {
   Keyhive,
   MemberedId,
   Membership,
+  Power,
   Stats,
 } from "@keyhive/keyhive/slim";
 import { MemorySigner } from "@automerge/automerge-subduction/slim";
@@ -177,14 +177,14 @@ export abstract class AutomergeRepoKeyhiveBase {
   async addMemberToDoc(
     docUrl: AutomergeUrl,
     contactCard: ContactCard,
-    access: Access
+    access: Power
   ): Promise<void> {
     if (isUnprotectedDoc(docUrl)) {
       throw new UnprotectedDocError("addMemberToDoc", docUrl);
     }
     await this.receiveContactCard(contactCard);
     await withDocContext("addMemberToDoc", docUrl, () =>
-      this.keyhive.addMember(contactCard.id, memberedDoc(docUrl), access, [])
+      this.keyhive.addMember(contactCard.id, memberedDoc(docUrl), access)
     );
   }
 
@@ -212,32 +212,6 @@ export abstract class AutomergeRepoKeyhiveBase {
   }
 
   /**
-   * Grant `access` on the document to everyone via the special public
-   * member. Throws if the document is unprotected or is not known to
-   * keyhive.
-   */
-  async setPublicAccess(docUrl: AutomergeUrl, access: Access): Promise<void> {
-    if (isUnprotectedDoc(docUrl)) {
-      throw new UnprotectedDocError("setPublicAccess", docUrl);
-    }
-    await withDocContext("setPublicAccess", docUrl, () =>
-      this.keyhive.addMember(
-        Identifier.publicId(),
-        memberedDoc(docUrl),
-        access,
-        []
-      )
-    );
-  }
-
-  async getPublicAccess(docUrl: AutomergeUrl): Promise<Access | undefined> {
-    if (isUnprotectedDoc(docUrl)) return undefined;
-    const publicId = Identifier.publicId();
-    const docId = docIdFromAutomergeUrl(docUrl);
-    return await this.keyhive.accessForDoc(publicId, docId);
-  }
-
-  /**
    * The document's keyhive id. Accepts a `DocumentId` as well as an
    * `AutomergeUrl` because tool bundles built against 0.3 still pass an
    * `DocumentId`.
@@ -254,25 +228,10 @@ export abstract class AutomergeRepoKeyhiveBase {
   async accessForDoc(
     id: Identifier,
     docUrl: AutomergeUrl | KeyhiveDocumentId
-  ): Promise<Access | undefined> {
+  ): Promise<Power | undefined> {
     const docId = this.toDocId(docUrl);
     if (isUnprotectedDocId(docId.toBytes())) return undefined;
     return await this.keyhive.accessForDoc(id, docId);
-  }
-
-  /**
-   * The most permissive of `id`'s direct access and the document's public
-   * access, or undefined if none (including for unprotected docs).
-   */
-  async bestAccessForDoc(
-    id: Identifier,
-    docUrl: AutomergeUrl
-  ): Promise<Access | undefined> {
-    if (isUnprotectedDoc(docUrl)) return undefined;
-    return await this.keyhive.bestAccessForDoc(
-      id,
-      docIdFromAutomergeUrl(docUrl)
-    );
   }
 
   /** All member capabilities for the document (empty for unprotected docs). */
@@ -290,7 +249,6 @@ export abstract class AutomergeRepoKeyhiveBase {
   async listMembers(docUrl: AutomergeUrl): Promise<DocMember[]> {
     const capabilities = await this.docMemberCapabilities(docUrl);
     const selfHex = uint8ArrayToHex(this.active.individual.id.toBytes());
-    const publicHex = uint8ArrayToHex(Identifier.publicId().toBytes());
     const serverHex = this.syncServerIdentifierHex();
     return capabilities.map((capability) => {
       const id = uint8ArrayToHex(capability.who.id.toBytes());
@@ -298,7 +256,6 @@ export abstract class AutomergeRepoKeyhiveBase {
         id,
         access: capability.can,
         isSelf: id === selfHex,
-        isPublic: id === publicHex,
         isSyncServer: serverHex !== null && id === serverHex,
       };
     });
@@ -353,11 +310,9 @@ export interface DocMember {
   /** Hex-encoded Identifier bytes. Accepted by revokeMemberFromDoc. */
   id: string;
   /** This member's access level to the doc. */
-  access: Access;
+  access: Power;
   /** Returns true if this member is this hive's own identity. */
   isSelf: boolean;
-  /** Returns true if this member is the special public member. */
-  isPublic: boolean;
   /** Returns true if this member is the sync server configured for this hive. */
   isSyncServer: boolean;
 }
@@ -433,11 +388,11 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
     const hasAccess = async (
       id: Identifier,
       docId: KeyhiveDocumentId,
-      minAccess: Access
+      minAccess: Power
     ): Promise<boolean> => {
       try {
-        const best = await keyhive.bestAccessForDoc(id, docId);
-        return best !== undefined && best.atLeast(minAccess);
+        const access = await keyhive.accessForDoc(id, docId);
+        return access !== undefined && access.atLeast(minAccess);
       } catch (e) {
         log.error(`[SubductionPolicy] hasAccess threw for docId=${docId}:`, e);
         return false;
@@ -455,7 +410,7 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
         if (isUnprotectedDocId(sidBytes)) return;
         const identifier = new Identifier(peerId.toBytes());
         const docId = new KeyhiveDocumentId(sidBytes);
-        if (!(await hasAccess(identifier, docId, Access.relay()))) {
+        if (!(await hasAccess(identifier, docId, Power.relay()))) {
           throw new Error(
             "insufficient access to fetch: requires at least Relay"
           );
@@ -467,7 +422,7 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
         if (isUnprotectedDocId(sidBytes)) return;
         const identifier = new Identifier(author.toBytes());
         const docId = new KeyhiveDocumentId(sidBytes);
-        if (!(await hasAccess(identifier, docId, Access.edit()))) {
+        if (!(await hasAccess(identifier, docId, Power.edit()))) {
           throw new Error("insufficient access to put: requires at least Edit");
         }
       },
@@ -482,7 +437,7 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
             continue;
           }
           const docId = new KeyhiveDocumentId(sidBytes);
-          if (await hasAccess(identifier, docId, Access.relay())) {
+          if (await hasAccess(identifier, docId, Power.relay())) {
             authorized.push(sid);
           }
         }
@@ -504,21 +459,21 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
         'addSyncServerRelayToDoc: no sync server configured (syncServer is "none")'
       );
     }
-    const serverContactCard = ContactCard.fromJson(
-      this.syncServer.contactCard.toJson()
+    const serverContactCard = ContactCard.fromBytes(
+      this.syncServer.contactCard.toBytes()
     );
     if (!serverContactCard) {
       throw new Error(
         "addSyncServerRelayToDoc: failed to parse sync server contact card"
       );
     }
-    await this.addMemberToDoc(docUrl, serverContactCard, Access.relay());
+    await this.addMemberToDoc(docUrl, serverContactCard, Power.relay());
   }
 
   async addSyncServerRelayToGroup(groupId: GroupId): Promise<void> {
     if (!this.syncServer) return;
-    const serverContactCard = ContactCard.fromJson(
-      this.syncServer.contactCard.toJson()
+    const serverContactCard = ContactCard.fromBytes(
+      this.syncServer.contactCard.toBytes()
     );
     if (!serverContactCard) {
       throw new Error(
@@ -529,8 +484,7 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
     await this.keyhive.addMember(
       serverContactCard.id,
       MemberedId.group(groupId),
-      Access.relay(),
-      []
+      Power.relay()
     );
   }
 
@@ -557,8 +511,9 @@ export class LegacyAutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
 }
 
 export async function generateDoc(kh: Keyhive): Promise<KeyhiveDocumentId> {
-  // For now, randomly generate a ChangeId
-  const changeIdArray = crypto.getRandomValues(new Uint8Array(10));
+  // For now, randomly generate a ChangeId. It is 32 bytes, the length of a
+  // commit id, which is the only length subduction's server decodes.
+  const changeIdArray = crypto.getRandomValues(new Uint8Array(32));
   const changeId = new ChangeId(changeIdArray);
   const groupId = await kh.generateGroup([]);
   const docId = await kh.generateDocument(
@@ -676,8 +631,7 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
       this.keyhive.addMember(
         keyhiveIdentifierFromPeerId(this.networkAdapter.remotePeerId),
         memberedDoc(docUrl),
-        Access.relay(),
-        []
+        Power.relay()
       )
     );
   }
@@ -686,8 +640,7 @@ export class AutomergeRepoKeyhive extends AutomergeRepoKeyhiveBase {
     await this.keyhive.addMember(
       keyhiveIdentifierFromPeerId(this.networkAdapter.remotePeerId),
       MemberedId.group(groupId),
-      Access.relay(),
-      []
+      Power.relay()
     );
   }
 

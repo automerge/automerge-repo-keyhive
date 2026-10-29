@@ -61,22 +61,19 @@ export function docIdFromAutomergeUrl(url: AutomergeUrl): KeyhiveDocumentId {
   return new KeyhiveDocumentId(binaryDocumentId);
 }
 
-/** A sync server's signed contact card JSON paired with its keyhive peer id. */
+/** A sync server's contact card paired with its keyhive peer id. */
 export interface SyncServerIdentity {
-  contactCardJson: string;
+  contactCard: Uint8Array;
   peerId: PeerId;
 }
 
 /**
- * Selects which sync server to register as the relay.
- *
- * Pass `"subduction"` or `"keyhive"` to use a known server, an explicit
- * {@link SyncServerIdentity} to target a custom server, or `"none"` to run
- * without a sync server. `"none"` is only supported on the network-adapter
- * path (peer-to-peer adapters, tests).
+ * Selects which sync server to register as the relay, either an explicit
+ * {@link SyncServerIdentity} or `"none"` to run without a sync server.
+ * `"none"` is only supported on the network-adapter path (peer-to-peer
+ * adapters, tests).
  */
-export type SyncServerSelection =
-  "subduction" | "keyhive" | "none" | SyncServerIdentity;
+export type SyncServerSelection = "none" | SyncServerIdentity;
 
 /**
  * Shared keyhive context.
@@ -96,40 +93,11 @@ interface KeyhiveContext {
   serverPeerIdHardcoded: PeerId | null;
 }
 
-// TODO: these sync-server identities are temporarily hardcoded.
-
-/** keyhive.sync.automerge.org keyhive contact card (issuer d7f41e6f…). */
-export const KEYHIVE_SYNC_SERVER_CONTACT_CARD_JSON =
-  '{"Rotate":{"payload":{"old":[73,163,230,244,111,233,153,119,133,211,134,237,111,36,52,131,22,50,54,144,150,45,227,235,128,36,33,217,190,198,55,75],"new":[109,115,204,144,178,114,182,238,113,124,4,139,249,76,220,44,128,104,194,68,187,184,82,241,94,145,104,198,159,122,186,43]},"issuer":[215,244,30,111,15,78,235,218,7,241,63,222,141,131,33,22,234,116,180,208,97,235,210,55,202,209,170,178,98,37,223,159],"signature":[178,64,85,76,51,199,196,151,129,14,191,53,127,191,34,223,97,238,95,109,118,179,152,17,205,188,204,177,116,166,147,231,192,201,48,137,19,214,180,45,108,104,34,8,14,63,115,139,215,142,4,179,233,89,150,218,174,168,107,23,8,109,228,6]}}';
-/** keyhive.sync.automerge.org subduction peer id. */
-export const KEYHIVE_SYNC_SERVER_PEER_ID =
-  "1/Qebw9O69oH8T/ejYMhFup0tNBh69I3ytGqsmIl358=" as PeerId;
-
-/** subduction.sync.inkandswitch.com keyhive contact card (issuer f709c58c…) . */
-export const SUBDUCTION_SYNC_SERVER_CONTACT_CARD_JSON =
-  '{"Rotate":{"payload":{"old":[33,137,111,238,179,125,3,30,133,139,50,112,178,153,171,132,174,170,136,174,242,17,131,192,37,125,253,108,91,65,84,110],"new":[34,214,236,200,87,89,211,226,207,54,34,177,181,49,195,126,244,174,192,163,6,174,225,45,147,0,82,73,79,78,196,60]},"issuer":[247,9,197,140,25,81,187,131,117,217,148,149,178,185,64,74,187,27,132,103,122,139,165,214,120,158,18,104,148,65,76,25],"signature":[92,213,174,209,83,196,175,199,100,26,241,68,150,220,89,224,87,196,169,73,234,232,74,212,191,3,116,4,138,189,221,44,177,140,139,161,19,139,164,49,224,197,190,25,144,134,90,157,255,86,184,5,184,94,70,127,22,40,43,34,200,182,65,8]}}';
-/** subduction.sync.inkandswitch.com subduction peer id. */
-export const SUBDUCTION_SYNC_SERVER_PEER_ID =
-  "9wnFjBlRu4N12ZSVsrlASrsbhGd6i6XWeJ4SaJRBTBk=" as PeerId;
-
-// Known sync-server identities, keyed by name.
-const SYNC_SERVERS: Record<"subduction" | "keyhive", SyncServerIdentity> = {
-  subduction: {
-    contactCardJson: SUBDUCTION_SYNC_SERVER_CONTACT_CARD_JSON,
-    peerId: SUBDUCTION_SYNC_SERVER_PEER_ID,
-  },
-  keyhive: {
-    contactCardJson: KEYHIVE_SYNC_SERVER_CONTACT_CARD_JSON,
-    peerId: KEYHIVE_SYNC_SERVER_PEER_ID,
-  },
-};
-
 /** Resolve a {@link SyncServerSelection} to its card and peer id (null for "none"). */
 function resolveSyncServer(
   selection: SyncServerSelection
 ): SyncServerIdentity | null {
-  if (selection === "none") return null;
-  return typeof selection === "string" ? SYNC_SERVERS[selection] : selection;
+  return selection === "none" ? null : selection;
 }
 
 /**
@@ -248,7 +216,7 @@ async function bootstrapKeyhive(
   const serverPeerIdHardcoded = serverIdentity?.peerId ?? null;
   const syncServer = serverIdentity
     ? await syncServerFromContactCard(
-        serverIdentity.contactCardJson,
+        serverIdentity.contactCard,
         serverIdentity.peerId,
         keyhive,
         keyhiveStorage
@@ -717,13 +685,9 @@ export async function receiveContactCard(
   contactCard: ContactCard,
   keyhiveStorage: KeyhiveStorage
 ): Promise<Individual | undefined> {
-  if (!(await keyhive.getAgent(contactCard.id))) {
-    if (contactCard.op) {
-      log.debug(`[AMRepoKeyhive] Saving Contact Card event: ${contactCard.op}`);
-      await keyhiveStorage.saveEventWithHash(contactCard.op);
-    } else {
-      log.error(`[AMRepoKeyhive] No op found for ${contactCard.toJson()}`);
-    }
+  if (!(await keyhive.hasIndividual(contactCard.individualId))) {
+    log.debug(`[AMRepoKeyhive] Saving Contact Card event: ${contactCard.op}`);
+    await keyhiveStorage.saveEventWithHash(contactCard.op);
     await keyhive.receiveContactCard(contactCard);
   }
   return keyhive.getIndividual(contactCard.individualId);

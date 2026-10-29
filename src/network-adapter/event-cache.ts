@@ -8,7 +8,6 @@ export interface EventCache {
     keyhive: Keyhive,
     metrics?: Metrics
   ): Promise<Uint8Array[]>;
-  getPublicHashes(keyhive: Keyhive, metrics?: Metrics): Promise<PeerHashes>;
   getHashesForPeer(
     keyhive: Keyhive,
     peerId: PeerId,

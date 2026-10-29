@@ -12,6 +12,7 @@ import { Metrics } from "./metrics.js";
 import type { PeerHashes, EventBytesResult } from "./sync-data.js";
 import {
   arraysEqual,
+  hasIndividual,
   keyhiveIdentifierFromPeerId,
   unwrapWasmError,
 } from "../utilities.js";
@@ -258,10 +259,9 @@ export class SyncProtocol {
           continue;
         }
 
-        // Check if we know the target agent
+        // Check if we know the target individual
         const targetKeyhiveId = keyhiveIdentifierFromPeerId(targetId);
-        const targetAgent = await this.keyhive.getAgent(targetKeyhiveId);
-        if (!targetAgent) {
+        if (!(await hasIndividual(this.keyhive, targetKeyhiveId))) {
           log.debug(`[AMRepoKeyhive] Requesting ContactCard from ${targetId}`);
           if (!maybeContactCard) {
             maybeContactCard = this.contactCard;
@@ -370,10 +370,9 @@ export class SyncProtocol {
         return;
       }
 
-      // Check if we know the sender agent
+      // Check if we know the sender individual
       const senderKeyhiveId = keyhiveIdentifierFromPeerId(message.senderId);
-      const senderAgent = await this.keyhive.getAgent(senderKeyhiveId);
-      if (!senderAgent) {
+      if (!(await hasIndividual(this.keyhive, senderKeyhiveId))) {
         log.debug(
           `[AMRepoKeyhive] No agent found for ${message.senderId}, sending keyhive-sync-request-contact-card`
         );
@@ -926,7 +925,7 @@ export class SyncProtocol {
     }
   }
 
-  // Returns intersection of hashes both peers can access, plus public hashes.
+  // Returns intersection of hashes both peers can access.
   private async getHashesForPeerPair(
     peerA: PeerId,
     peerB: PeerId,
@@ -939,14 +938,9 @@ export class SyncProtocol {
     const hashesForB =
       (await this.cache.getHashesForPeer(this.keyhive, peerB, metrics)) ??
       new Map<string, Uint8Array>();
-
-    const publicHashes = await this.cache.getPublicHashes(
-      this.keyhive,
-      metrics
-    );
     metrics?.recordHashLookupTime(Date.now() - hashLookupStart);
 
-    const result = new Map<string, Uint8Array>(publicHashes);
+    const result = new Map<string, Uint8Array>();
     for (const [hashString, hashBytes] of hashesForA.entries()) {
       if (hashesForB.has(hashString)) {
         result.set(hashString, hashBytes);

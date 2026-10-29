@@ -1,15 +1,13 @@
-import { Identifier, Keyhive } from "@keyhive/keyhive/slim";
+import { Keyhive } from "@keyhive/keyhive/slim";
 import { PeerId } from "@automerge/automerge-repo/slim";
 import { getPendingOpHashes } from "../keyhive/keyhive.js";
 import {
   getEventHashesForAgent,
+  hasIndividual,
   keyhiveIdentifierFromPeerId,
 } from "../utilities.js";
 import { Metrics } from "./metrics.js";
-import {
-  EventBytesCache,
-  fetchAgentAndPublicEvents,
-} from "./event-bytes-cache.js";
+import { EventBytesCache, fetchAgentEvents } from "./event-bytes-cache.js";
 import type { EventCache } from "./event-cache.js";
 import type { PeerHashes, EventBytesResult } from "./sync-data.js";
 
@@ -23,28 +21,19 @@ export class EventBytesOnlyEventCache implements EventCache {
     return await getPendingOpHashes(keyhive);
   }
 
-  async getPublicHashes(
-    keyhive: Keyhive,
-    _metrics?: Metrics
-  ): Promise<PeerHashes> {
-    const agent = await keyhive.getAgent(Identifier.publicId());
-    if (!agent) {
-      return new Map();
-    }
-    return await getEventHashesForAgent(keyhive, agent);
-  }
-
   async getHashesForPeer(
     keyhive: Keyhive,
     peerId: PeerId,
     _metrics?: Metrics
   ): Promise<PeerHashes | null> {
     const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
-    const agent = await keyhive.getAgent(keyhiveId);
-    if (!agent) {
+    if (!(await hasIndividual(keyhive, keyhiveId))) {
       return null;
     }
-    return await getEventHashesForAgent(keyhive, agent);
+    return await getEventHashesForAgent(
+      keyhive,
+      await keyhive.getPrincipal(keyhiveId)
+    );
   }
 
   async getEventBytesForPeer(
@@ -63,7 +52,7 @@ export class EventBytesOnlyEventCache implements EventCache {
     }
 
     const keyhiveId = keyhiveIdentifierFromPeerId(peerId);
-    const fetchedEvents = await fetchAgentAndPublicEvents(keyhive, keyhiveId);
+    const fetchedEvents = await fetchAgentEvents(keyhive, keyhiveId);
     this.eventBytesCache.storeAndCollect(
       fetchedEvents,
       missingHashes,

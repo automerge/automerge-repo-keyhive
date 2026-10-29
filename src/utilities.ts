@@ -5,7 +5,12 @@ import {
   parseAutomergeUrl,
   PeerId,
 } from "@automerge/automerge-repo/slim";
-import { Agent, Identifier, Keyhive } from "@keyhive/keyhive/slim";
+import {
+  Identifier,
+  IndividualId,
+  Keyhive,
+  Principal,
+} from "@keyhive/keyhive/slim";
 
 export function peerIdFromSigner(signer: Signer, suffix: string = ""): PeerId {
   return peerIdFromVerifyingKey(signer.verifyingKey, suffix);
@@ -95,9 +100,17 @@ export function hexToUint8Array(hex: string): Uint8Array {
   return bytes;
 }
 
+/** Whether `keyhive` has received `id`'s contact card. */
+export async function hasIndividual(
+  keyhive: Keyhive,
+  id: Identifier
+): Promise<boolean> {
+  return await keyhive.hasIndividual(new IndividualId(id.toBytes()));
+}
+
 export async function getEventsForAgent(
   keyhive: Keyhive,
-  agent: Agent
+  agent: Principal
 ): Promise<Map<Uint8Array, Uint8Array>> {
   // WASM binding types this as Map<Uint8Array, any>; values are always event bytes
   return (await keyhive.eventsForAgent(agent)) as Map<Uint8Array, Uint8Array>;
@@ -106,7 +119,7 @@ export async function getEventsForAgent(
 // Returns event hashes for an agent as Map<hashString, hashBytes>
 export async function getEventHashesForAgent(
   keyhive: Keyhive,
-  agent: Agent
+  agent: Principal
 ): Promise<Map<string, Uint8Array>> {
   const hashMap = new Map<string, Uint8Array>();
 
